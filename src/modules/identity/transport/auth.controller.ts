@@ -191,9 +191,24 @@ export class MeController {
     if (account === null) throw ProblemException.notFound();
 
     // Never the verifier, the salt, or the TOTP secret.
+    //
+    // Roles and scopes ARE returned, and are not a disclosure: they describe
+    // what this caller may do, which the caller learns anyway from the first
+    // request that succeeds or is refused. A staff portal needs them to decide
+    // what to put on screen, and the alternative — a client guessing from a
+    // role name it invented — is how a menu comes to offer actions the server
+    // will refuse.
+    //
+    // The scopes come from the token rather than being recomputed from the
+    // roles, so what is reported is exactly what will be enforced. A token
+    // issued before a role changed carries the old set, and saying otherwise
+    // would describe a session the holder does not have.
     return {
       id: account.id,
+      kind: account.kind,
       email: account.email,
+      roles: account.roles,
+      scopes: caller.scopes,
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,
     };
   }

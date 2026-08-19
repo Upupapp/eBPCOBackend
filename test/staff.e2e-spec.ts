@@ -153,6 +153,27 @@ describe('the staff surface is closed by default', () => {
   });
 });
 
+describe('what /me tells a portal', () => {
+  it('names the roles and the scopes the token actually carries', async () => {
+    // A portal that guesses from a role name it invented is how a menu comes
+    // to offer actions the server will refuse.
+    const response = await get('/me', await staffToken('cashier'));
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ kind: string; roles: string[]; scopes: string[] }>();
+    expect(body.kind).toBe('staff');
+    expect(body.roles).toEqual(['cashier']);
+    expect(body.scopes).toContain('staff:verify-payment');
+    expect(body.scopes).not.toContain('staff:approve');
+  });
+
+  it('never returns anything that could authenticate the account', async () => {
+    const response = await get('/me', await staffToken('evaluator'));
+
+    expect(JSON.stringify(response.json())).not.toMatch(/scrypt|passwordHash|totp/i);
+  });
+});
+
 describe('the queue', () => {
   it('returns the applications an officer may see', async () => {
     await file('BP-1', 'Submitted');
