@@ -1,0 +1,221 @@
+{
+  "_comment": "NORMATIVE. The single definition of how the nineteen lifecycle statuses project onto what each surface shows. The SERVER computes every column here and returns it; no client may recompute any of them. Both clients carry a test that asserts their own implementation matches this file exactly, so a drift is a failed build rather than a wrong answer shown to an applicant.",
+  "contractVersion": "0.1.0",
+  "source": "Derived from the eBPCO Web Admin's status.model.ts (LIFECYCLE_TO_MOBILE_LABEL, coarseStatus) via tools/extract_admin_vocabulary.py, plus the two columns decided in TAB 01.",
+  "columns": {
+    "applicantStatus": "One of the seven applicant-visible states. Wire field `applicantStatus`.",
+    "coarseStatus": "The three-value projection the admin's board columns render. Not transmitted; derived identically by both tiers.",
+    "requiresApplicantAction": "Whether the LGU is waiting on the applicant. Deliberately independent of applicantStatus: Revision Required and Assessed both project onto passive headlines ('Under Review', 'Payment Verification') that give the applicant no hint they are the one holding the application up. Wire field `requiresApplicantAction`.",
+    "terminal": "No further processing will happen. Suppresses any pledge countdown.",
+    "pledgeApplies": "Whether an RA 11032 countdown is meaningful — the LGU still owes an act. False for Draft (not yet filed) and every terminal state."
+  },
+  "projection": {
+    "Draft": {
+      "applicantStatus": "Draft",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": false
+    },
+    "Submitted": {
+      "applicantStatus": "Submitted",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Received": {
+      "applicantStatus": "Submitted",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Document Verification": {
+      "applicantStatus": "Under Review",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Under Evaluation": {
+      "applicantStatus": "Under Review",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Revision Required": {
+      "applicantStatus": "Under Review",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": true,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Assessed": {
+      "applicantStatus": "Payment Verification",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": true,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Payment Submitted": {
+      "applicantStatus": "Payment Verification",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Payment Under Verification": {
+      "applicantStatus": "Payment Verification",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Payment Verified": {
+      "applicantStatus": "Payment Verification",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "For Approval": {
+      "applicantStatus": "Payment Verification",
+      "coarseStatus": "Under Review",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Approved": {
+      "applicantStatus": "Approved",
+      "coarseStatus": "Approved",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Permit Generated": {
+      "applicantStatus": "Approved",
+      "coarseStatus": "Approved",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Ready for Release": {
+      "applicantStatus": "Ready for Release",
+      "coarseStatus": "Approved",
+      "requiresApplicantAction": true,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Released": {
+      "applicantStatus": "Ready for Release",
+      "coarseStatus": "Approved",
+      "requiresApplicantAction": false,
+      "terminal": false,
+      "pledgeApplies": true
+    },
+    "Completed": {
+      "applicantStatus": "Ready for Release",
+      "coarseStatus": "Approved",
+      "requiresApplicantAction": false,
+      "terminal": true,
+      "pledgeApplies": false
+    },
+    "Rejected": {
+      "applicantStatus": "Rejected",
+      "coarseStatus": "Rejected",
+      "requiresApplicantAction": false,
+      "terminal": true,
+      "pledgeApplies": false
+    },
+    "Cancelled": {
+      "applicantStatus": "Rejected",
+      "coarseStatus": "Rejected",
+      "requiresApplicantAction": false,
+      "terminal": true,
+      "pledgeApplies": false
+    },
+    "Expired": {
+      "applicantStatus": "Rejected",
+      "coarseStatus": "Rejected",
+      "requiresApplicantAction": false,
+      "terminal": true,
+      "pledgeApplies": false
+    }
+  },
+  "applicantStatuses": [
+    "Approved",
+    "Draft",
+    "Payment Verification",
+    "Ready for Release",
+    "Rejected",
+    "Submitted",
+    "Under Review"
+  ],
+  "validTransitions": {
+    "Draft": [
+      "Submitted",
+      "Cancelled"
+    ],
+    "Submitted": [
+      "Received",
+      "Cancelled"
+    ],
+    "Received": [
+      "Document Verification",
+      "Cancelled"
+    ],
+    "Document Verification": [
+      "Under Evaluation",
+      "Revision Required",
+      "Rejected"
+    ],
+    "Under Evaluation": [
+      "Assessed",
+      "Revision Required",
+      "Rejected"
+    ],
+    "Revision Required": [
+      "Under Evaluation",
+      "Cancelled",
+      "Expired"
+    ],
+    "Assessed": [
+      "Payment Submitted",
+      "Cancelled",
+      "Expired"
+    ],
+    "Payment Submitted": [
+      "Payment Under Verification"
+    ],
+    "Payment Under Verification": [
+      "Payment Verified",
+      "Payment Submitted"
+    ],
+    "Payment Verified": [
+      "For Approval"
+    ],
+    "For Approval": [
+      "Approved",
+      "Revision Required",
+      "Rejected"
+    ],
+    "Approved": [
+      "Permit Generated"
+    ],
+    "Permit Generated": [
+      "Ready for Release"
+    ],
+    "Ready for Release": [
+      "Released"
+    ],
+    "Released": [
+      "Completed"
+    ],
+    "Completed": [],
+    "Rejected": [],
+    "Cancelled": [],
+    "Expired": []
+  }
+}

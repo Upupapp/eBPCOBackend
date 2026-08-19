@@ -62,7 +62,15 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  */
 export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
   'receiving-officer': ['applications:read', 'documents:read'],
-  'records-officer': ['applications:read', 'documents:read', 'documents:write'],
+  // `applications:write` because withdrawing an application on the applicant's
+  // behalf, or expiring one after inaction, is maintenance of the record --
+  // which is what this role exists to do. Its absence made three staff
+  // transitions (Submitted/Received/Revision Required -> Cancelled, and
+  // Revision Required -> Expired) unreachable by any real officer: the rules
+  // required a scope no role granted. A table-driven test over the transitions
+  // caught it; no individual test would have, because each was written against
+  // a caller holding every scope.
+  'records-officer': ['applications:read', 'applications:write', 'documents:read', 'documents:write'],
   evaluator: ['applications:read', 'documents:read', 'staff:evaluate'],
   assessor: ['applications:read', 'payments:read', 'staff:assess'],
   cashier: ['applications:read', 'payments:read', 'staff:verify-payment'],
