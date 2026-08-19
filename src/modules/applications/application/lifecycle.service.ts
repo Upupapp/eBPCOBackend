@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { ApplicationSnapshot, Caller } from '../domain/application';
 import { DomainEvent, decide } from '../domain/lifecycle-engine';
 import { LifecycleStatus } from '../domain/lifecycle';
@@ -212,31 +213,25 @@ export class LifecycleService {
         continue;
       }
 
+      // The copy comes from the catalog, which is the closed list of things the
+      // LGU says to an applicant. A type with no catalog entry writes nothing
+      // rather than an improvised message — the LGU must be able to account for
+      // exactly what it told someone.
+      const catalogEntry = entryFor(event.type);
+      if (catalogEntry === undefined) continue;
+
       await tx.query(
-        `insert into notifications (account_id, type, application_id, title, body)
-         select $1, $2, $3, $4, $5
-          where exists (select 1 from notification_types where type = $2)`,
+        `insert into notifications (account_id, type, application_id, title, body, deep_link)
+         values ($1, $2, $3, $4, $5, $6)`,
         [
           snapshot.applicantAccountId,
           event.type,
           snapshot.id,
-          titleFor(event.type),
-          bodyFor(event.type),
+          catalogEntry.title,
+          catalogEntry.body,
+          deepLinkFor(catalogEntry, snapshot.id),
         ],
       );
     }
   }
-}
-
-/**
- * Placeholder copy. TAB 08 owns the wording, and it will be reviewed with the
- * LGU because a notification is the LGU speaking to an applicant. Keyed off the
- * catalog type so the mapping is total and a new type cannot ship unworded.
- */
-function titleFor(type: string): string {
-  return type.replace(/^application\./, '').replace(/-/g, ' ');
-}
-
-function bodyFor(type: string): string {
-  return `Your application has been updated: ${titleFor(type)}.`;
 }

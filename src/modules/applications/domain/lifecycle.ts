@@ -61,6 +61,15 @@ export interface TransitionRule {
 }
 
 /**
+ * Eight transitions carry no notification, and that is a recorded gap rather
+ * than an omission: evaluation-started, instruction-resolved,
+ * payment-under-verification, payment-rejected, for-approval, completed,
+ * expired and cancelled have no counterpart in the client's catalog. Mapping
+ * them onto an approximate type would tell the applicant something other than
+ * what happened -- "payment overdue" is not "your payment was rejected". They
+ * need new client types and a contract version bump; see
+ * docs/decisions/0012-notification-catalog-reconciliation.md.
+ *
  * Decision E-4 — may applicants cancel their own applications?
  *
  * Yes, until an Order of Payment exists. Before assessment nothing has changed
@@ -80,85 +89,82 @@ export interface TransitionRule {
 export const TRANSITIONS: readonly TransitionRule[] = [
   { from: 'Draft', to: 'Submitted', actors: ['applicant'], requires: 'applications:write',
     preconditions: ['identity-document-verified', 'required-documents-present'],
-    notifies: 'application.submitted' },
+    notifies: 'application-submitted' },
   { from: 'Draft', to: 'Cancelled', actors: ['applicant'], requires: 'applications:write',
     preconditions: [] },
 
   { from: 'Submitted', to: 'Received', actors: ['staff'], requires: 'applications:read',
-    preconditions: [], notifies: 'application.received' },
+    preconditions: [], notifies: 'received-by-obo' },
   { from: 'Submitted', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
-    preconditions: [], notifies: 'application.cancelled' },
+    preconditions: [] },
 
   { from: 'Received', to: 'Document Verification', actors: ['staff'], requires: 'documents:read',
-    preconditions: [], notifies: 'application.document-verification-started' },
+    preconditions: [], notifies: 'document-verification-started' },
   { from: 'Received', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
-    preconditions: [], notifies: 'application.cancelled' },
+    preconditions: [] },
 
   { from: 'Document Verification', to: 'Under Evaluation', actors: ['staff'], requires: 'staff:evaluate',
-    preconditions: ['identity-document-verified', 'required-documents-present'],
-    notifies: 'application.evaluation-started' },
+    preconditions: ['identity-document-verified', 'required-documents-present'] },
   { from: 'Document Verification', to: 'Revision Required', actors: ['staff'], requires: 'staff:evaluate',
-    preconditions: [], notifies: 'application.revision-required' },
+    preconditions: [], notifies: 'revision-required' },
   { from: 'Document Verification', to: 'Rejected', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'application.rejected' },
+    preconditions: [], notifies: 'rejected' },
 
   { from: 'Under Evaluation', to: 'Assessed', actors: ['staff'], requires: 'staff:assess',
     preconditions: ['evaluations-complete', 'order-of-payment-issued'],
-    notifies: 'application.assessed' },
+    notifies: 'order-of-payment-issued' },
   { from: 'Under Evaluation', to: 'Revision Required', actors: ['staff'], requires: 'staff:evaluate',
-    preconditions: [], notifies: 'application.revision-required' },
+    preconditions: [], notifies: 'revision-required' },
   { from: 'Under Evaluation', to: 'Rejected', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'application.rejected' },
+    preconditions: [], notifies: 'rejected' },
 
   { from: 'Revision Required', to: 'Under Evaluation', actors: ['applicant'], requires: 'applications:write',
-    preconditions: ['all-instructions-resolved'], notifies: 'application.instruction-resolved' },
+    preconditions: ['all-instructions-resolved'] },
   { from: 'Revision Required', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
-    preconditions: [], notifies: 'application.cancelled' },
+    preconditions: [] },
   { from: 'Revision Required', to: 'Expired', actors: ['staff'], requires: 'applications:write',
-    preconditions: [], notifies: 'application.expired' },
+    preconditions: [] },
 
   // Applicant-initiated cancellation stops here: past this point an Order of
   // Payment exists and cancelling touches money (decision E-4).
   { from: 'Assessed', to: 'Payment Submitted', actors: ['applicant'], requires: 'payments:write',
     preconditions: ['order-of-payment-issued', 'payment-proof-submitted'],
-    notifies: 'application.payment-submitted' },
+    notifies: 'payment-received' },
   { from: 'Assessed', to: 'Cancelled', actors: ['staff'], requires: 'staff:assess',
-    preconditions: [], notifies: 'application.cancelled' },
+    preconditions: [] },
   { from: 'Assessed', to: 'Expired', actors: ['staff'], requires: 'staff:assess',
-    preconditions: [], notifies: 'application.expired' },
+    preconditions: [] },
 
   { from: 'Payment Submitted', to: 'Payment Under Verification', actors: ['staff'],
-    requires: 'staff:verify-payment', preconditions: ['payment-proof-submitted'],
-    notifies: 'application.payment-under-verification' },
+    requires: 'staff:verify-payment', preconditions: ['payment-proof-submitted'] },
 
   { from: 'Payment Under Verification', to: 'Payment Verified', actors: ['staff'],
     requires: 'staff:verify-payment', preconditions: ['payment-verified'],
-    notifies: 'application.payment-verified' },
+    notifies: 'payment-verified' },
   { from: 'Payment Under Verification', to: 'Payment Submitted', actors: ['staff'],
-    requires: 'staff:verify-payment', preconditions: [],
-    notifies: 'application.payment-rejected' },
+    requires: 'staff:verify-payment', preconditions: [] },
 
   { from: 'Payment Verified', to: 'For Approval', actors: ['staff'], requires: 'staff:verify-payment',
-    preconditions: ['payment-verified'], notifies: 'application.for-approval' },
+    preconditions: ['payment-verified'] },
 
   { from: 'For Approval', to: 'Approved', actors: ['staff'], requires: 'staff:approve',
-    preconditions: ['payment-verified', 'evaluations-complete'], notifies: 'application.approved' },
+    preconditions: ['payment-verified', 'evaluations-complete'], notifies: 'approved' },
   { from: 'For Approval', to: 'Revision Required', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'application.revision-required' },
+    preconditions: [], notifies: 'revision-required' },
   { from: 'For Approval', to: 'Rejected', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'application.rejected' },
+    preconditions: [], notifies: 'rejected' },
 
   { from: 'Approved', to: 'Permit Generated', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'application.permit-generated' },
+    preconditions: [], notifies: 'permit-generated' },
 
   { from: 'Permit Generated', to: 'Ready for Release', actors: ['staff'], requires: 'staff:release',
-    preconditions: ['permit-generated'], notifies: 'application.ready-for-release' },
+    preconditions: ['permit-generated'], notifies: 'ready-for-release' },
 
   { from: 'Ready for Release', to: 'Released', actors: ['staff'], requires: 'staff:release',
-    preconditions: ['permit-generated'], notifies: 'application.released' },
+    preconditions: ['permit-generated'], notifies: 'released' },
 
   { from: 'Released', to: 'Completed', actors: ['staff'], requires: 'staff:release',
-    preconditions: [], notifies: 'application.completed' },
+    preconditions: [] },
 ];
 
 const BY_PAIR = new Map(TRANSITIONS.map((rule) => [`${rule.from}->${rule.to}`, rule]));

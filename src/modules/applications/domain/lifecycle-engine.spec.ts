@@ -3,6 +3,7 @@ import { join } from 'node:path';
 
 import { APPLICANT_SCOPES, ROLE_SCOPES } from '../../identity/domain/account';
 import { ApplicationSnapshot, Caller } from './application';
+import { CATALOG, isInCatalog } from '../../notifications/domain/catalog';
 import { decide } from './lifecycle-engine';
 import {
   LIFECYCLE_STATUSES,
@@ -319,7 +320,7 @@ describe('events', () => {
 
     if (!decision.ok) throw new Error('expected success');
     const notifications = decision.outcome.events.filter((e) => e.type !== 'application.transitioned');
-    expect(notifications.map((e) => e.type)).toEqual(['application.received']);
+    expect(notifications.map((e) => e.type)).toEqual(['received-by-obo']);
   });
 
   it('produces no events at all when the move is refused', () => {
@@ -346,21 +347,24 @@ describe('events', () => {
   });
 
   it('every notification it can emit is in the closed catalog', () => {
-    const catalog = new Set([
-      'application.submitted', 'application.received', 'application.document-verification-started',
-      'application.document-rejected', 'application.evaluation-started', 'application.evaluation-passed',
-      'application.revision-required', 'application.instruction-issued', 'application.instruction-resolved',
-      'application.assessed', 'application.payment-submitted', 'application.payment-under-verification',
-      'application.payment-verified', 'application.payment-rejected', 'application.for-approval',
-      'application.approved', 'application.rejected', 'application.permit-generated',
-      'application.ready-for-release', 'application.released', 'application.completed',
-      'application.expired', 'application.cancelled', 'inspection.scheduled',
-    ]);
-
+    // Imported from the catalog rather than restated here, so the two cannot
+    // drift — restating it is how the backend ended up with a second
+    // vocabulary in the first place.
     for (const rule of TRANSITIONS) {
-      if (rule.notifies !== undefined) expect(catalog.has(rule.notifies)).toBe(true);
+      if (rule.notifies !== undefined) {
+        expect(isInCatalog(rule.notifies)).toBe(true);
+      }
     }
   });
+
+  it('emits only types the SERVER is allowed to send', () => {
+    const clientOnly = new Set(CATALOG.filter((entry) => !entry.serverGenerated).map((entry) => entry.type));
+
+    for (const rule of TRANSITIONS) {
+      if (rule.notifies !== undefined) expect(clientOnly.has(rule.notifies)).toBe(false);
+    }
+  });
+
 });
 
 describe('the projection, against the contract', () => {

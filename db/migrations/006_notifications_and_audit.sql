@@ -1,40 +1,52 @@
 -- Notifications, push devices, and the audit trail.
 
 create table notification_types (
-  type      text primary key,
-  category  text not null check (category in
-              ('Application progress', 'Action required', 'Payments', 'Inspections', 'Releases')),
-  requires_action boolean not null default false
+  type            text primary key,
+  category        text not null check (category in
+                    ('applicationUpdates', 'payments', 'permitStatus',
+                     'documentReminders', 'appointments', 'account')),
+  requires_action boolean not null default false,
+  -- False for the two the client derives locally and the server never sends:
+  -- a draft is local until it is filed, and a credential expiry is computed
+  -- from records the applicant keeps on the device.
+  server_generated boolean not null default true
 );
 
--- The closed catalog. Free text is not permitted: the LGU must be able to
--- account for exactly what it told an applicant and when, and "whatever the
--- code wrote that day" is not an account.
-insert into notification_types (type, category, requires_action) values
-  ('application.submitted',                       'Application progress', false),
-  ('application.received',                        'Application progress', false),
-  ('application.document-verification-started',   'Application progress', false),
-  ('application.document-rejected',               'Action required',      true),
-  ('application.evaluation-started',              'Application progress', false),
-  ('application.evaluation-passed',               'Application progress', false),
-  ('application.revision-required',               'Action required',      true),
-  ('application.instruction-issued',              'Action required',      true),
-  ('application.instruction-resolved',            'Application progress', false),
-  ('application.assessed',                        'Payments',             true),
-  ('application.payment-submitted',               'Payments',             false),
-  ('application.payment-under-verification',      'Payments',             false),
-  ('application.payment-verified',                'Payments',             false),
-  ('application.payment-rejected',                'Action required',      true),
-  ('application.for-approval',                    'Application progress', false),
-  ('application.approved',                        'Application progress', false),
-  ('application.rejected',                        'Application progress', false),
-  ('application.permit-generated',                'Application progress', false),
-  ('application.ready-for-release',               'Releases',             true),
-  ('application.released',                        'Releases',             false),
-  ('application.completed',                       'Application progress', false),
-  ('application.expired',                         'Application progress', false),
-  ('application.cancelled',                       'Application progress', false),
-  ('inspection.scheduled',                        'Inspections',          true);
+-- The closed catalog, and it is the MOBILE CLIENT's, adopted wholesale.
+--
+-- The wire name is the kebab-case of the client's own enum constant, so the
+-- mapping is mechanical and total. The categories are the client's six, which
+-- are already the mute buckets in its Settings screen.
+--
+-- An earlier version of this migration seeded a parallel vocabulary invented
+-- here, which is exactly the drift TAB 01 exists to prevent. See
+-- docs/decisions/0012-notification-catalog-reconciliation.md.
+insert into notification_types (type, category, requires_action, server_generated) values
+  ('application-submitted', 'applicationUpdates', false, true),
+  ('received-by-obo', 'applicationUpdates', false, true),
+  ('document-verification-started', 'documentReminders', false, true),
+  ('letter-of-instruction-issued', 'documentReminders', true, true),
+  ('evaluation-stage-passed', 'applicationUpdates', false, true),
+  ('revision-required', 'documentReminders', true, true),
+  ('fsec-cleared', 'applicationUpdates', false, true),
+  ('order-of-payment-issued', 'payments', true, true),
+  ('payment-received', 'payments', false, true),
+  ('payment-verified', 'payments', false, true),
+  ('payment-overdue', 'payments', true, true),
+  ('approved', 'permitStatus', false, true),
+  ('permit-generated', 'permitStatus', false, true),
+  ('ready-for-release', 'permitStatus', true, true),
+  ('released', 'permitStatus', false, true),
+  ('rejected', 'permitStatus', true, true),
+  ('inspection-scheduled', 'appointments', true, true),
+  ('appointment-reminder', 'appointments', false, true),
+  ('pledge-approaching', 'applicationUpdates', false, true),
+  ('pledge-lapsed', 'applicationUpdates', true, true),
+  ('permit-commencement-warning', 'permitStatus', true, true),
+  ('professional-credential-expiring', 'documentReminders', false, false),
+  ('draft-idle', 'documentReminders', false, false),
+  ('occupancy-now-possible', 'permitStatus', false, true),
+  ('account-update', 'account', false, true);
 
 create table notifications (
   id              uuid        primary key default gen_random_uuid(),

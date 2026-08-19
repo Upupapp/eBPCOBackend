@@ -155,7 +155,7 @@ describe('what one move records', () => {
   it('queues exactly the notification the rule names', async () => {
     await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
 
-    expect(await notifications()).toEqual(['application.received']);
+    expect(await notifications()).toEqual(['received-by-obo']);
   });
 
   it('writes the timeline row through the database trigger, not twice', async () => {

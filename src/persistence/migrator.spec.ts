@@ -127,9 +127,17 @@ describe('the schema this produces', () => {
     expect(transitions.rows[0]?.count).toBeGreaterThan(20);
   });
 
-  it('seeds the closed 24-type notification catalog', async () => {
-    const result = await db.query<{ count: number }>('select count(*)::int as count from notification_types');
-    expect(result.rows[0]?.count).toBe(24);
+  it('seeds the client’s closed notification catalog', async () => {
+    // Twenty-five, and they are the mobile client's own enum constants in
+    // kebab-case. Two of them are client-generated and the server never sends
+    // them; they are seeded anyway so the feed can render one the client wrote.
+    const result = await db.query<{ count: number; server: number }>(
+      `select count(*)::int as count,
+              count(*) filter (where server_generated)::int as server
+         from notification_types`,
+    );
+    expect(result.rows[0]?.count).toBe(25);
+    expect(result.rows[0]?.server).toBe(23);
   });
 
   it('ships the Citizen’s Charter table EMPTY', async () => {
