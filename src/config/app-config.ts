@@ -52,6 +52,19 @@ const schema = z
     OBJECT_STORE_BUCKET: z.string().min(1, 'required — no default is provided for a backing service'),
     MALWARE_SCANNER_URL: z.string().min(1, 'required — uploads must not be servable unscanned'),
 
+    // Security-critical, and therefore treated exactly like a backing service:
+    // no default. A signing key with a fallback is a signing key that is the
+    // same in every deployment that forgot to set one, and anyone who has read
+    // the source can then mint a token for any account.
+    JWT_SIGNING_KEY: z
+      .string()
+      .min(32, 'required — at least 32 characters of secret material, from the secret manager'),
+
+    // Mixed into every password verifier and held outside the database, so a
+    // database-only leak does not yield crackable verifiers. Optional because
+    // development has no secret manager; required outside it, below.
+    PASSWORD_PEPPER: z.string().optional().transform((v) => v ?? ''),
+
     // Request handling. Bounded by construction: an unbounded body or an
     // unbounded request lifetime is a denial-of-service surface.
     REQUEST_TIMEOUT_MS: intFromEnv(1_000, 120_000, 20_000),
@@ -76,6 +89,15 @@ const schema = z
     // An invariant, not a preference. Serving the contract as live documentation
     // in production publishes the shape of every endpoint, including the ones a
     // caller is not authorised to reach, to anyone who asks.
+    if (config.EBPCO_ENVIRONMENT !== 'development' && config.PASSWORD_PEPPER.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PASSWORD_PEPPER'],
+        message:
+          'required outside development — without it, a leaked database yields directly crackable password verifiers',
+      });
+    }
+
     if (config.EBPCO_ENVIRONMENT === 'production' && config.DOCS_ENABLED) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

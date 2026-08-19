@@ -2,6 +2,7 @@ import { Controller, Get, Inject, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 
 import { AppConfig, CONFIG } from '../../config/app-config';
+import { Public } from '../identity/transport/guards/public.decorator';
 import { ReadinessService } from './readiness.service';
 
 /**
@@ -13,6 +14,11 @@ import { ReadinessService } from './readiness.service';
  * gains from -- no dependency hostnames, no versions of anything but this
  * service, no error text.
  */
+// The whole documented public allow-list, in one place and marked on the
+// routes themselves. The global guard denies by default, so this decorator is
+// the only thing making these reachable -- and its removal would be visible in
+// a diff rather than silent.
+@Public()
 @Controller()
 export class HealthController {
   constructor(

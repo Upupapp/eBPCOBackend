@@ -3,6 +3,7 @@ import { Module } from '@nestjs/common';
 import { AppConfig, CONFIG } from './config/app-config';
 import { StructuredLogger } from './common/logging/logger';
 import { HealthModule } from './modules/health/health.module';
+import { IdentityModule } from './modules/identity/identity.module';
 
 /**
  * The composition root.
@@ -18,7 +19,7 @@ export class AppModule {
   static forConfig(config: AppConfig, logger: StructuredLogger) {
     return {
       module: AppModule,
-      imports: [HealthModule],
+      imports: [HealthModule, IdentityModule],
       providers: [
         { provide: CONFIG, useValue: config },
         { provide: StructuredLogger, useValue: logger },

@@ -16,6 +16,8 @@ const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   OBJECT_STORE_ENDPOINT: 'https://objects.internal',
   OBJECT_STORE_BUCKET: 'ebpco-documents',
   MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
+  JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
+  PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
   BUILD_COMMIT: 'abc1234',
   BUILD_TIME: '2026-08-19T12:00:00+08:00',
   ...overrides,

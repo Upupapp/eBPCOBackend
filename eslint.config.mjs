@@ -22,6 +22,14 @@ export default tseslint.config(
       // console.log bypasses the redacting logger. Everything goes through the logger.
       'no-console': 'error',
       eqeqeq: ['error', 'always'],
+      // A leading underscore is the conventional mark for "deliberately
+      // unused" — most often destructuring a field out of an object in order
+      // to drop it, which is how a correlation id is stripped before comparing
+      // two error bodies.
+      '@typescript-eslint/no-unused-vars': [
+        'error',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
     },
   },
   {
