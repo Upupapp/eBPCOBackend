@@ -337,7 +337,7 @@ async function main(): Promise<void> {
   const samples: Record<string, unknown> = {};
 
   async function record(
-    name: string, method: 'GET' | 'POST', url: string, token: string,
+    name: string, method: 'GET' | 'POST' | 'DELETE', url: string, token: string,
     payload?: Record<string, unknown>, idempotencyKey?: string,
   ): Promise<void> {
     const response = await app.inject({
@@ -400,6 +400,7 @@ async function main(): Promise<void> {
   await record('problem.notFound', 'GET', `/staff/applications/${randomUUID()}`, officialToken);
   await record('problem.validation', 'GET', '/staff/applications?status=Nearly%20Done', officialToken);
 
+
   // The actions, and the refusals that matter most. An evaluator issuing an
   // Order of Payment and an assessor generating a permit are the two mistakes
   // separation of duty exists to stop, so both are recorded rather than
@@ -431,6 +432,10 @@ async function main(): Promise<void> {
       officeHours: 'Monday to Friday, 8:00am - 5:00pm',
       bringWithYou: ['One valid government ID.', 'The Official Receipt.'],
     }, randomUUID());
+  // Erasure, recorded because it is the response a data subject reads. Last,
+  // because it disables the applicant account every other sample depends on.
+  await record('me.erase', 'DELETE', '/me', applicantToken);
+  await record('problem.staffErasure', 'DELETE', '/me', evaluatorToken);
 
   const document = {
     _comment:

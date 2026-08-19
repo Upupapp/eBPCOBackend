@@ -366,25 +366,71 @@ describe('integrity', () => {
 describe('retention', () => {
   // Acceptance criterion: deletes exactly the eligible objects, records each
   // deletion, and is idempotent.
+  //
+  // The clock now runs from when the APPLICATION CLOSED, not from when the file
+  // was uploaded. These fixtures therefore have to close the application and
+  // backdate the closing transition — which is more setup, and is the point:
+  // the earlier version needed none of it because it would have deleted the
+  // documents off an application still under evaluation.
 
   const daysAgo = (days: number) => new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
+  /** Moves the application to a terminal status and backdates the closure. */
+  async function closed(days: number): Promise<void> {
+    await db.query(`update applications set lifecycle_status = 'Received' where id = $1`, [APPLICATION]);
+    await db.query(`update applications set lifecycle_status = 'Cancelled' where id = $1`, [APPLICATION]);
+    await db.query(
+      `update application_transitions set occurred_at = $1
+        where application_id = $2 and to_status = 'Cancelled'`,
+      [daysAgo(days), APPLICATION],
+    );
+  }
+
   it('deletes nothing when nothing is old enough', async () => {
     await upload(makePdf(), 'tct.pdf');
+    await closed(1);
 
-    expect(await service({ now: () => new Date() }).runRetention(3650)).toEqual({ deleted: 0 });
+    expect(await service({ now: () => new Date() }).runRetention(3650))
+      .toEqual({ deleted: 0, skippedOpen: 0 });
+  });
+
+  it('NEVER deletes a document on an application still in progress', async () => {
+    // The defect this replaces. Measured from upload date, the plans on an
+    // application still under evaluation vanish the moment they age past the
+    // window — the applicant is asked to resubmit documents the LGU itself
+    // threw away, and the evaluation record points at files that no longer
+    // exist. There is no retention period for a matter still in progress.
+    const result = await upload(makePdf(), 'tct.pdf');
+    if (!result.ok) return;
+    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+
+    const outcome = await service({ now: () => new Date() }).runRetention(3650);
+
+    expect(outcome.deleted).toBe(0);
+    expect(outcome.skippedOpen).toBe(1);
+  });
+
+  it('says how many it held back, rather than reporting a bare zero', async () => {
+    // "deleted 0" on a system full of old files reads like a broken job. An
+    // operator needs to know documents were held back and why.
+    const result = await upload(makePdf(), 'tct.pdf');
+    if (!result.ok) return;
+    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+
+    expect((await service({ now: () => new Date() }).runRetention(3650)).skippedOpen).toBe(1);
   });
 
   it('deletes the object and marks the row', async () => {
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
-    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+    await closed(4000);
 
     const key = (await db.query<{ storage_key: string }>(
       'select storage_key from documents where id = $1', [result.documentId],
     )).rows[0]!.storage_key;
 
-    expect(await service({ now: () => new Date() }).runRetention(3650)).toEqual({ deleted: 1 });
+    expect(await service({ now: () => new Date() }).runRetention(3650))
+      .toEqual({ deleted: 1, skippedOpen: 0 });
     expect(await store.get(key)).toBeNull();
 
     const row = await db.query<{ deleted_at: Date | null }>(
@@ -398,7 +444,7 @@ describe('retention', () => {
     // evidence.
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
-    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+    await closed(4000);
 
     await service({ now: () => new Date() }).runRetention(3650);
 
@@ -411,11 +457,11 @@ describe('retention', () => {
   it('is idempotent: a second run deletes nothing and writes no second event', async () => {
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
-    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+    await closed(4000);
 
     const svc = service({ now: () => new Date() });
     await svc.runRetention(3650);
-    expect(await svc.runRetention(3650)).toEqual({ deleted: 0 });
+    expect(await svc.runRetention(3650)).toEqual({ deleted: 0, skippedOpen: 0 });
 
     const audit = await db.query<{ count: number }>(
       "select count(*)::int as count from audit_events where action = 'document.deleted-on-retention'",
@@ -423,16 +469,36 @@ describe('retention', () => {
     expect(audit.rows[0]?.count).toBe(1);
   });
 
-  it('leaves documents inside the retention window alone', async () => {
+  it('leaves an application that closed recently alone', async () => {
+    // "Inside the retention window" is now a property of the APPLICATION, not
+    // of the file. Two applications, one closed long ago and one closed
+    // yesterday, with a document each.
     const old = await upload(makePdf(), 'old.pdf');
-    const recent = await upload(makePdf(), 'recent.pdf');
-    if (!old.ok || !recent.ok) return;
-    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), old.documentId]);
+    if (!old.ok) return;
+    await closed(4000);
 
-    expect(await service({ now: () => new Date() }).runRetention(3650)).toEqual({ deleted: 1 });
+    const recentApplication = randomUUID();
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                                 lifecycle_status, submitted_at, created_by)
+       values ($1,'BP-2026-000099',(select applicant_id from applications where id = $2),
+               'Fencing','New','Submitted',now(),$3)`,
+      [recentApplication, APPLICATION, OWNER_ACCOUNT],
+    );
+    const recentDocument = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status)
+       values ($1,$2,$3,'Plan','recent.pdf','application/pdf',1024,$4,'objects/recent.pdf','Pending')`,
+      [recentDocument, recentApplication, OWNER_ACCOUNT, 'c'.repeat(64)],
+    );
+    await db.query(`update applications set lifecycle_status = 'Received' where id = $1`, [recentApplication]);
+    await db.query(`update applications set lifecycle_status = 'Cancelled' where id = $1`, [recentApplication]);
+
+    expect((await service({ now: () => new Date() }).runRetention(3650)).deleted).toBe(1);
 
     const survivor = await db.query<{ deleted_at: Date | null }>(
-      'select deleted_at from documents where id = $1', [recent.documentId],
+      'select deleted_at from documents where id = $1', [recentDocument],
     );
     expect(survivor.rows[0]?.deleted_at).toBeNull();
   });
@@ -440,7 +506,7 @@ describe('retention', () => {
   it('makes a deleted document unreachable', async () => {
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
-    await db.query('update documents set uploaded_at = $1 where id = $2', [daysAgo(4000), result.documentId]);
+    await closed(4000);
     await service({ now: () => new Date() }).runRetention(3650);
 
     expect((await service().contentUrl(result.documentId, owner)).ok).toBe(false);

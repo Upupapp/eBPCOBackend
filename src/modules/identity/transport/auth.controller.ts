@@ -1,9 +1,10 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { ACCOUNT_REPOSITORY, AccountRepository } from '../application/account.repository';
 import { IdentityService } from '../application/identity.service';
+import { ErasureService } from '../../compliance/application/erasure.service';
 import { Public } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 
@@ -179,7 +180,10 @@ export class AuthController {
 
 @Controller('me')
 export class MeController {
-  constructor(@Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepository) {}
+  constructor(
+    @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepository,
+    private readonly erasure: ErasureService,
+  ) {}
 
   @Get()
   async me(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
@@ -226,5 +230,40 @@ export class MeController {
       lastName: profile?.lastName ?? null,
       mobileNumber: profile?.mobileNumber ?? null,
     };
+  }
+
+  /**
+   * The RA 10173 §16(e) right to erasure.
+   *
+   * 202 rather than 204: the request is accepted and the response says what was
+   * erased and what survives. A 204 would be the LGU quietly keeping a permit
+   * record while implying it kept nothing, and §16(e) is conditional on there
+   * being an overriding legal obligation — so naming the obligation is what
+   * makes the retention lawful rather than merely convenient.
+   *
+   * Not idempotency-keyed. Erasing an already-erased account returns the same
+   * receipt, so a replayed request cannot cause a second erasure and a key
+   * would guard nothing.
+   */
+  @Delete()
+  @HttpCode(HttpStatus.ACCEPTED)
+  async erase(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    const caller = request.caller;
+    if (caller === undefined) {
+      throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED);
+    }
+
+    const result = await this.erasure.erase(caller.sub);
+    if (result.ok) {
+      const { acceptedAt, erasedCategories, retainedCategories } = result.receipt;
+      // `counts` stays out of the response: it names tables, which is internal
+      // structure, and the contract's shape is what the client was built to.
+      return { acceptedAt, erasedCategories, retainedCategories };
+    }
+
+    if (result.reason === 'not-found') throw ProblemException.notFound();
+    throw new ProblemException(
+      ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail,
+    );
   }
 }

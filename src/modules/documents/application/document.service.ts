@@ -209,12 +209,53 @@ export class DocumentService {
    * second run finds nothing. Every deletion writes an audit event, because
    * "we deleted it as required" is a claim the LGU has to be able to evidence.
    */
-  async runRetention(retainForDays: number): Promise<{ deleted: number }> {
+  /**
+   * Deletes documents whose application closed longer ago than the LGU keeps
+   * them.
+   *
+   * Measured from **when the application closed**, not from when the file was
+   * uploaded. The version this replaces used upload date, which deletes the
+   * plans off an application still under evaluation the moment they age past
+   * the window — the applicant is asked to resubmit documents the LGU itself
+   * threw away, and the evaluation record points at files that no longer exist.
+   *
+   * An application that has not reached a terminal status is never touched,
+   * however old its documents are. There is no retention period for a matter
+   * still in progress.
+   *
+   * `retainForDays` is the LGU's number (M-15) and this service does not have
+   * a default for it: a retention period invented here would be a
+   * data-minimisation decision made by the wrong party.
+   */
+  async runRetention(retainForDays: number): Promise<{ deleted: number; skippedOpen: number }> {
     const cutoff = new Date(this.clock().getTime() - retainForDays * 24 * 60 * 60 * 1000);
 
+    // The closing transition is the event that starts the clock. Reading it
+    // from application_transitions rather than from updated_at, because
+    // updated_at moves for reasons that have nothing to do with closure.
     const eligible = await this.db.query<{ id: string; storage_key: string }>(
-      `select id, storage_key from documents
-        where deleted_at is null and uploaded_at < $1`,
+      `select d.id, d.storage_key
+         from documents d
+         join applications a on a.id = d.application_id
+         join lifecycle_statuses ls on ls.status = a.lifecycle_status
+        where d.deleted_at is null
+          and ls.terminal
+          and (
+            select max(t.occurred_at) from application_transitions t
+             where t.application_id = a.id and t.to_status = a.lifecycle_status
+          ) < $1`,
+      [cutoff],
+    );
+
+    // Counted and reported rather than silently excluded. An operator running
+    // retention needs to know that documents were held back, and why — "deleted
+    // 0" on a system full of old files reads like a broken job.
+    const open = await this.db.query<{ n: string }>(
+      `select count(*) as n
+         from documents d
+         join applications a on a.id = d.application_id
+         join lifecycle_statuses ls on ls.status = a.lifecycle_status
+        where d.deleted_at is null and not ls.terminal and d.uploaded_at < $1`,
       [cutoff],
     );
 
@@ -231,7 +272,7 @@ export class DocumentService {
       });
     }
 
-    return { deleted: eligible.rows.length };
+    return { deleted: eligible.rows.length, skippedOpen: Number(open.rows[0]?.n ?? 0) };
   }
 
   private async load(documentId: string): Promise<DocumentRow | null> {

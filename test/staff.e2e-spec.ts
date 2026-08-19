@@ -199,6 +199,51 @@ describe('what /me tells a portal', () => {
     expect(body).not.toHaveProperty('scopes');
   });
 
+  it('erases an applicant over HTTP, and says what survives', async () => {
+    // 202 with a body rather than 204. A 204 would be the LGU quietly keeping a
+    // permit record while implying it kept nothing.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:write'],
+    })).token;
+
+    const response = await app.inject({
+      method: 'DELETE', url: '/me', headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    const body = response.json<{
+      acceptedAt: string;
+      erasedCategories: string[];
+      retainedCategories: { category: string; basis: string; until: string | null }[];
+    }>();
+    expect(body.erasedCategories.length).toBeGreaterThan(0);
+    expect(body.retainedCategories.map((r) => r.basis).join(' ')).toContain('PD 1096');
+  });
+
+  it('never names an internal table in the erasure receipt', async () => {
+    // The row counts are evidence for the LGU, not for the applicant, and table
+    // names are internal structure.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:write'],
+    })).token;
+
+    const response = await app.inject({
+      method: 'DELETE', url: '/me', headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(JSON.stringify(response.json())).not.toMatch(/refresh_tokens|notification_deliveries|counts/);
+  });
+
+  it('refuses to erase a staff account, and says what to do instead', async () => {
+    const response = await app.inject({
+      method: 'DELETE', url: '/me',
+      headers: { authorization: `Bearer ${await staffToken('evaluator')}` },
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().detail).toMatch(/offboarding/i);
+  });
+
   it('never returns anything that could authenticate the account', async () => {
     const response = await get('/me', await staffToken('evaluator'));
 
