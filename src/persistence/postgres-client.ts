@@ -25,20 +25,37 @@ import { BIGINT_OID, NUMERIC_OID, exactInteger } from './numeric-parsing';
 types.setTypeParser(BIGINT_OID, exactInteger('bigint'));
 types.setTypeParser(NUMERIC_OID, exactInteger('numeric'));
 
+/**
+ * Pool limits, from configuration rather than compiled in.
+ *
+ * `max` is PER PROCESS. The failure mode of setting it too high is not this
+ * service slowing down: it is exhausting the database server's global
+ * connection limit and taking down every other client, including whatever an
+ * operator is using to diagnose it.
+ */
+export interface PoolLimits {
+  readonly max: number;
+  readonly connectionTimeoutMs: number;
+  readonly statementTimeoutMs: number;
+}
+
+const DEFAULT_LIMITS: PoolLimits = {
+  max: 10,
+  connectionTimeoutMs: 5_000,
+  statementTimeoutMs: 30_000,
+};
+
 export class PostgresClient implements SqlClient {
   constructor(private readonly pool: Pool) {}
 
-  static fromUrl(connectionString: string, max = 10): PostgresClient {
+  static fromUrl(connectionString: string, limits: PoolLimits = DEFAULT_LIMITS): PostgresClient {
     return new PostgresClient(
       new Pool({
         connectionString,
-        max,
-        // A connection that cannot be obtained quickly is a dependency outage,
-        // and a request should fail fast rather than queue behind one.
-        connectionTimeoutMillis: 5_000,
+        max: limits.max,
+        connectionTimeoutMillis: limits.connectionTimeoutMs,
         idleTimeoutMillis: 30_000,
-        // A query that has not returned in 30s is not going to.
-        statement_timeout: 30_000,
+        statement_timeout: limits.statementTimeoutMs,
       }),
     );
   }
@@ -63,16 +80,43 @@ export class PostgresClient implements SqlClient {
       await connection.query('commit');
       return result;
     } catch (error) {
-      await connection.query('rollback');
+      // The rollback is allowed to fail, and its failure must not replace the
+      // reason we are rolling back. A dropped connection makes `rollback` throw
+      // "Connection terminated" -- and the previous version rethrew THAT, so
+      // the actual cause of every transaction failure during a database blip
+      // was silently discarded and every log line said the same useless thing.
+      //
+      // Nothing is leaked by swallowing it: a connection that cannot roll back
+      // is destroyed on release rather than returned to the pool, and the
+      // server rolls back an abandoned transaction on disconnect.
+      try {
+        await connection.query('rollback');
+      } catch {
+        // Deliberately empty. The original error is what the caller needs.
+      }
       throw error;
     } finally {
       connection.release();
     }
   }
 
+  /**
+   * Idempotent, deliberately.
+   *
+   * `pg` throws "Called end on pool more than once" on a second call, and that
+   * is not an error worth surfacing: the pool is gone, which is what the caller
+   * wanted. Surfacing it is actively harmful, because the second close comes
+   * from the shutdown path -- a framework shutdown hook running after an
+   * explicit close would make `app.close()` reject, and the shutdown sequence
+   * would report a failed stop and exit non-zero on a perfectly clean one.
+   */
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     await this.pool.end();
   }
+
+  private closed = false;
 }
 
 /** One checked-out connection, so every statement in a transaction runs on it. */

@@ -2,6 +2,8 @@ import 'reflect-metadata';
 
 import { ConfigurationError, loadConfig } from './config/app-config';
 import { StructuredLogger } from './common/logging/logger';
+import { DrainState, exitCodeFor, shutdown } from './common/lifecycle/shutdown';
+import { DRAIN_STATE } from './persistence/persistence.module';
 import { createApp } from './bootstrap';
 
 /**
@@ -37,10 +39,26 @@ async function main(): Promise<void> {
     commit: config.BUILD_COMMIT,
   });
 
+  const drain = app.get<DrainState>(DRAIN_STATE);
+
+  // `once` per signal, and a guard across both: an orchestrator that sends
+  // SIGTERM and then SIGINT would otherwise start a second shutdown while the
+  // first is draining, and the second `close()` races the first.
+  let stopping = false;
   for (const signal of ['SIGTERM', 'SIGINT'] as const) {
     process.once(signal, () => {
-      logger.info('shutting down', { signal });
-      void app.close().then(() => process.exit(0));
+      if (stopping) return;
+      stopping = true;
+      void shutdown({
+        drain,
+        close: () => app.close(),
+        logger,
+        signal,
+        config: {
+          drainMs: config.SHUTDOWN_DRAIN_MS,
+          deadlineMs: config.SHUTDOWN_DEADLINE_MS,
+        },
+      }).then((outcome) => process.exit(exitCodeFor(outcome)));
     });
   }
 }

@@ -70,6 +70,38 @@ const schema = z
     REQUEST_TIMEOUT_MS: intFromEnv(1_000, 120_000, 20_000),
     BODY_LIMIT_BYTES: intFromEnv(1_024, 52_428_800, 1_048_576),
     RATE_LIMIT_MAX: intFromEnv(1, 100_000, 300),
+
+    // Connection pool. Fixed at 10 in code until now, which is a number that
+    // was right for nothing in particular: too many for a small managed
+    // Postgres shared by several replicas, too few for one instance under load.
+    // It has to be tuned against the deployment, and a value that requires a
+    // rebuild to change is a value nobody tunes.
+    //
+    // The ceiling is deliberately low. `max` is PER PROCESS, and the failure
+    // mode is not this service slowing down: it is exhausting the server's
+    // global connection limit and taking down every other client of the same
+    // database, including whatever an operator is using to diagnose it.
+    DB_POOL_MAX: intFromEnv(1, 100, 10),
+
+    // A connection that cannot be obtained quickly is a dependency outage, and
+    // a request should fail fast rather than queue behind one -- a queue in
+    // front of an unavailable database converts a fast failure into a timeout
+    // for every caller at once.
+    DB_CONNECTION_TIMEOUT_MS: intFromEnv(100, 60_000, 5_000),
+
+    // A query that has not returned in this long is not going to. Enforced by
+    // the server, so it applies even if this process stops waiting.
+    DB_STATEMENT_TIMEOUT_MS: intFromEnv(1_000, 300_000, 30_000),
+
+    // How long to keep serving after reporting not-ready, so the load balancer
+    // has time to stop sending. Below its own check interval this achieves
+    // nothing; the default assumes a 5s interval and two failed checks.
+    SHUTDOWN_DRAIN_MS: intFromEnv(0, 120_000, 12_000),
+
+    // How long to wait for in-flight work after that. Must stay under the
+    // orchestrator's own termination grace period, or the process is SIGKILLed
+    // mid-transaction and the deadline never fires.
+    SHUTDOWN_DEADLINE_MS: intFromEnv(1_000, 120_000, 20_000),
     RATE_LIMIT_WINDOW_MS: intFromEnv(1_000, 3_600_000, 60_000),
 
     // True only behind a proxy that is known to set X-Forwarded-For, because

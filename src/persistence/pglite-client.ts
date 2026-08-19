@@ -70,7 +70,23 @@ export class PgliteClient implements SqlClient {
     });
   }
 
+  /**
+   * Idempotent, deliberately.
+   *
+   * Closing twice throws "PGlite is closed", and the same is true of `pg`'s
+   * pool: `end()` called a second time throws "Called end on pool more than
+   * once". Either way a second close is not an error worth surfacing -- the
+   * connection is gone, which is what the caller wanted -- and surfacing it is
+   * actively harmful, because the second close comes from the shutdown path.
+   * A framework shutdown hook running after an explicit close would make
+   * `app.close()` reject, and the shutdown sequence would report a failed stop
+   * and exit non-zero on a perfectly clean one.
+   */
   async close(): Promise<void> {
+    if (this.closed) return;
+    this.closed = true;
     await this.db.close();
   }
+
+  private closed = false;
 }
