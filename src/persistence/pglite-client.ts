@@ -1,5 +1,6 @@
 import { PGlite } from '@electric-sql/pglite';
 
+import { BIGINT_OID, NUMERIC_OID, exactInteger } from './numeric-parsing';
 import { SqlClient } from './sql-client';
 
 /**
@@ -19,7 +20,24 @@ export class PgliteClient implements SqlClient {
   private constructor(private readonly db: PGlite) {}
 
   static async create(): Promise<PgliteClient> {
-    return new PgliteClient(await PGlite.create());
+    return new PgliteClient(
+      await PGlite.create({
+        // The same parsers the `pg` driver is given in postgres-client.ts.
+        //
+        // Without them the two adapters disagree: PGlite returns NUMERIC and
+        // BIGINT as strings while `pg` returns numbers, so a fee read in a test
+        // is "682000" and the same fee read in production is 682000 — and
+        // `a + b` on the former concatenates. That divergence was found by a
+        // test asserting a zero fee line, and it is exactly the
+        // "works in tests, fails in production" class the shared contract suite
+        // exists to catch. The adapters must be interchangeable or the tests
+        // are testing a different system.
+        parsers: {
+          [BIGINT_OID]: exactInteger('bigint'),
+          [NUMERIC_OID]: exactInteger('numeric'),
+        },
+      }),
+    );
   }
 
   async query<Row = Record<string, unknown>>(

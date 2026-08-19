@@ -20,24 +20,7 @@ import { SqlClient } from './sql-client';
  */
 import { types } from 'pg';
 
-const BIGINT_OID = 20;
-const NUMERIC_OID = 1700;
-
-function exactInteger(label: string) {
-  return (value: string): number => {
-    if (!/^-?\d+$/.test(value)) {
-      throw new Error(
-        `${label} ${value} is not a whole number. Every ${label} column in this schema is centavos ` +
-          'and is constrained to scale 0, so this row was written by something that bypassed the constraint.',
-      );
-    }
-    const parsed = Number(value);
-    if (!Number.isSafeInteger(parsed)) {
-      throw new Error(`${label} ${value} exceeds the safe integer range; it cannot be a centavo amount`);
-    }
-    return parsed;
-  };
-}
+import { BIGINT_OID, NUMERIC_OID, exactInteger } from './numeric-parsing';
 
 types.setTypeParser(BIGINT_OID, exactInteger('bigint'));
 types.setTypeParser(NUMERIC_OID, exactInteger('numeric'));
