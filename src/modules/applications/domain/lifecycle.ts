@@ -154,8 +154,12 @@ export const TRANSITIONS: readonly TransitionRule[] = [
   { from: 'For Approval', to: 'Rejected', actors: ['staff'], requires: 'staff:approve',
     preconditions: [], notifies: 'rejected' },
 
+  // The precondition is not ceremony. Without it this move announced to the
+  // applicant that their permit had been generated when no permit existed --
+  // and an applicant may travel to a counter on the strength of that
+  // notification. Generate the permit first, then move the status.
   { from: 'Approved', to: 'Permit Generated', actors: ['staff'], requires: 'staff:approve',
-    preconditions: [], notifies: 'permit-generated' },
+    preconditions: ['permit-generated'], notifies: 'permit-generated' },
 
   { from: 'Permit Generated', to: 'Ready for Release', actors: ['staff'], requires: 'staff:release',
     preconditions: ['permit-generated'], notifies: 'ready-for-release' },

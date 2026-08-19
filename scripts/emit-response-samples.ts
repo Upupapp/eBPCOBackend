@@ -59,10 +59,17 @@ const EDGES: ReadonlyArray<readonly [LifecycleStatus, LifecycleStatus]> = [
 interface Seeded {
   official: string;
   records: string;
+  evaluator: string;
+  assessor: string;
+  cashier: string;
+  releasing: string;
   applicantAccount: string;
   detailed: string;
   fresh: string;
   completed: string;
+  assessable: string;
+  approved: string;
+  payment: string;
 }
 
 async function file(db: SqlClient, options: {
@@ -102,20 +109,32 @@ async function file(db: SqlClient, options: {
  */
 async function seed(db: SqlClient): Promise<Seeded> {
   const applicantAccount = randomUUID();
+  // One account per role, because the samples have to exercise separation of
+  // duty and a single all-powerful officer would make every refusal
+  // unreachable.
   const official = randomUUID();
   const records = randomUUID();
+  const evaluator = randomUUID();
+  const assessor = randomUUID();
+  const cashier = randomUUID();
+  const releasing = randomUUID();
 
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
-     values ($1,'applicant','maria.santos@example.ph','maria.santos@example.ph','scrypt$1$1$1$a$b'),
-            ($2,'staff','building.official@cabuyao.gov.ph','building.official@cabuyao.gov.ph','scrypt$1$1$1$a$b'),
-            ($3,'staff','records@cabuyao.gov.ph','records@cabuyao.gov.ph','scrypt$1$1$1$a$b')`,
-    [applicantAccount, official, records],
+     values ($1,'applicant','maria.santos@example.ph','maria.santos@example.ph','scrypt$1$1$1$a$b')`,
+    [applicantAccount],
   );
-  await db.query(
-    `insert into account_roles (account_id, role) values ($1,'building-official'), ($2,'records-officer')`,
-    [official, records],
-  );
+  for (const [id, role] of [
+    [official, 'building-official'], [records, 'records-officer'], [evaluator, 'evaluator'],
+    [assessor, 'assessor'], [cashier, 'cashier'], [releasing, 'releasing-officer'],
+  ] as const) {
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+      [id, `${role}@cabuyao.gov.ph`],
+    );
+    await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  }
 
   const applicant = randomUUID();
   await db.query(
@@ -162,10 +181,14 @@ async function seed(db: SqlClient): Promise<Seeded> {
              'documents/2026/08/psa.pdf','Approved',true,now())`,
     [randomUUID(), detailed, applicantAccount],
   );
+  // Initial and Zoning decided, so the recorded POST is the NEXT stage in turn
+  // rather than an out-of-order refusal. The order matters: Fire Safety
+  // examines a plan the earlier stages have already checked.
   await db.query(
     `insert into evaluations (id, application_id, stage, result, evaluator_id, remarks, evaluated_at)
-     values ($1,$2,'Zoning','Passed',$3,'Setbacks conform to the zoning ordinance.',now())`,
-    [randomUUID(), detailed, official],
+     values ($1,$2,'Initial','Passed',$3,null,now()),
+            ($4,$2,'Zoning','Passed',$3,'Setbacks conform to the zoning ordinance.',now())`,
+    [randomUUID(), detailed, evaluator, randomUUID()],
   );
 
   // An unresolved instruction, so the openInstructions shape is exercised
@@ -183,6 +206,20 @@ async function seed(db: SqlClient): Promise<Seeded> {
     [randomUUID(), letter],
   );
 
+  await db.query(
+    `insert into fee_schedules (version, effective_from, published_by)
+     values ('2026.1','2026-01-01','City Ordinance 2026-004')`,
+  );
+  for (const [line, amount] of [
+    ['filing', 50_000], ['processing', 120_000], ['structural', 512_000],
+  ] as const) {
+    await db.query(
+      `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
+       values ('2026.1','Fencing',$1,$2,'City Ordinance 2026-004 s.3')`,
+      [line, amount],
+    );
+  }
+
   const fresh = await file(db, {
     applicant, business: null, charter, applicantAccount,
     reference: 'BP-2026-000042', target: 'Submitted', submittedAt: '2026-08-18T02:00:00Z',
@@ -194,10 +231,6 @@ async function seed(db: SqlClient): Promise<Seeded> {
     applicant, business, charter, applicantAccount,
     reference: 'BP-2026-000043', target: 'Ready for Release', submittedAt: '2026-07-02T01:00:00Z',
   });
-  await db.query(
-    `insert into fee_schedules (version, effective_from, published_by)
-     values ('2026.1','2026-01-01','City Ordinance 2026-004')`,
-  );
   const order = randomUUID();
   await db.query(
     `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
@@ -231,7 +264,48 @@ async function seed(db: SqlClient): Promise<Seeded> {
     [completed],
   );
 
-  return { official, records, applicantAccount, detailed, fresh, completed };
+  // An application ready to be assessed: every evaluation stage decided, so
+  // the Order of Payment sample is a real issue rather than a refusal.
+  const assessable = await file(db, {
+    applicant, business, charter, applicantAccount,
+    reference: 'BP-2026-000044', target: 'Under Evaluation', submittedAt: '2026-08-12T01:00:00Z',
+  });
+  for (const stage of ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']) {
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, evaluated_at)
+       values ($1,$2,'Passed',$3,now())`,
+      [assessable, stage, evaluator],
+    );
+  }
+
+  // An approved application, so the permit sample is a real generation.
+  const approved = await file(db, {
+    applicant, business, charter, applicantAccount,
+    reference: 'BP-2026-000045', target: 'Approved', submittedAt: '2026-07-15T01:00:00Z',
+  });
+
+  // A payment awaiting verification, submitted by the APPLICANT so the cashier
+  // may verify it — an officer cannot verify what they themselves recorded.
+  const pendingOrder = randomUUID();
+  await db.query(
+    `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                    architectural_centavos, structural_centavos, electrical_centavos,
+                                    others_centavos, total_centavos, fee_schedule_version, assessed_by)
+     values ($1,$2,'OP-2026-000019',50000,120000,0,512000,0,0,682000,'2026.1',$3)`,
+    [pendingOrder, approved, assessor],
+  );
+  const payment = randomUUID();
+  await db.query(
+    `insert into payments (id, order_of_payment_id, application_id, reference_number, amount_centavos,
+                           method, status, submitted_at, submitted_by)
+     values ($1,$2,$3,'BT-7741209',682000,'Bank Transfer','Pending Verification','2026-07-18T02:00:00Z',$4)`,
+    [payment, pendingOrder, approved, applicantAccount],
+  );
+
+  return {
+    official, records, evaluator, assessor, cashier, releasing,
+    applicantAccount, detailed, fresh, completed, assessable, approved, payment,
+  };
 }
 
 async function main(): Promise<void> {
@@ -255,6 +329,10 @@ async function main(): Promise<void> {
 
   const officialToken = await tokenFor('building-official', seeded.official);
   const recordsToken = await tokenFor('records-officer', seeded.records);
+  const evaluatorToken = await tokenFor('evaluator', seeded.evaluator);
+  const assessorToken = await tokenFor('assessor', seeded.assessor);
+  const cashierToken = await tokenFor('cashier', seeded.cashier);
+  const releasingToken = await tokenFor('releasing-officer', seeded.releasing);
 
   const samples: Record<string, unknown> = {};
 
@@ -321,6 +399,38 @@ async function main(): Promise<void> {
     `/staff/applications/${seeded.fresh}/transitions`, recordsToken, { to: 'Document Verification' });
   await record('problem.notFound', 'GET', `/staff/applications/${randomUUID()}`, officialToken);
   await record('problem.validation', 'GET', '/staff/applications?status=Nearly%20Done', officialToken);
+
+  // The actions, and the refusals that matter most. An evaluator issuing an
+  // Order of Payment and an assessor generating a permit are the two mistakes
+  // separation of duty exists to stop, so both are recorded rather than
+  // assumed.
+  await record('staff.evaluations.create', 'POST',
+    `/staff/applications/${seeded.detailed}/evaluations`, evaluatorToken,
+    { stage: 'Fire Safety', result: 'Passed' }, randomUUID());
+  await record('problem.outOfOrderEvaluation', 'POST',
+    `/staff/applications/${seeded.detailed}/evaluations`, evaluatorToken,
+    { stage: 'Final Approval', result: 'Passed' }, randomUUID());
+  await record('problem.separationOfDuty', 'POST',
+    `/staff/applications/${seeded.detailed}/order-of-payment`, evaluatorToken, {}, randomUUID());
+  await record('staff.orderOfPayment.create', 'POST',
+    `/staff/applications/${seeded.assessable}/order-of-payment`, assessorToken, {}, randomUUID());
+  await record('staff.payments.queue', 'GET', '/staff/payments', cashierToken);
+  await record('staff.payments.verify', 'POST',
+    `/staff/payments/${seeded.payment}/verify`, cashierToken,
+    { officialReceiptNumber: 'OR-2026-114772' }, randomUUID());
+  await record('staff.permit.create', 'POST',
+    `/staff/applications/${seeded.approved}/permit`, officialToken,
+    {
+      scope: 'Perimeter fence, 42 linear metres, hollow block on reinforced concrete footing',
+      conditions: ['Maintain a 1.5m setback from the property line.'],
+    }, randomUUID());
+  await record('staff.releasePreparation', 'POST',
+    `/staff/applications/${seeded.approved}/release-preparation`, releasingToken,
+    {
+      claimLocation: 'Office of the Building Official, 2/F Cabuyao City Hall',
+      officeHours: 'Monday to Friday, 8:00am - 5:00pm',
+      bringWithYou: ['One valid government ID.', 'The Official Receipt.'],
+    }, randomUUID());
 
   const document = {
     _comment:

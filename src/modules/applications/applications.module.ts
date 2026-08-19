@@ -4,8 +4,12 @@ import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { CalendarRepository, CachingCalendarRepository, SqlCalendarRepository }
   from '../compliance/application/calendar.repository';
+import { PaymentsModule } from '../payments/payments.module';
+import { PermitsModule } from '../permits/permits.module';
+import { EvaluationService } from './application/evaluation.service';
 import { LifecycleService } from './application/lifecycle.service';
 import { StaffQueueService } from './application/staff-queue.service';
+import { StaffActionsController } from './transport/staff-actions.controller';
 import { StaffApplicationsController } from './transport/staff-applications.controller';
 
 export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
@@ -21,6 +25,7 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
  * met a statutory deadline.
  */
 @Module({
+  imports: [PaymentsModule, PermitsModule],
   providers: [
     {
       provide: CALENDAR_REPOSITORY,
@@ -39,8 +44,13 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new LifecycleService(db),
     },
+    {
+      provide: EvaluationService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new EvaluationService(db),
+    },
   ],
-  controllers: [StaffApplicationsController],
-  exports: [StaffQueueService, LifecycleService, CALENDAR_REPOSITORY],
+  controllers: [StaffApplicationsController, StaffActionsController],
+  exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })
 export class ApplicationsModule {}
