@@ -24,10 +24,19 @@ ALLOWED = {
     ".env.example",
     "scripts/scan-secrets.py",
     "src/common/logging/logger.ts",
-    "src/common/logging/logger.spec.ts",
-    "src/config/app-config.spec.ts",
-    "test/http.e2e-spec.ts",
 }
+
+# The "assigned secret literal" heuristic — `password: '...'` — fires on any test
+# that exercises a credential path, which is every test worth having in an
+# identity module. Relaxing it for test files only, and ONLY for that one
+# pattern: a real AWS key, a private key block, a JWT or a connection string
+# with an inline password is still a finding wherever it appears, because none
+# of those has a legitimate reason to be written down in a test either.
+HEURISTIC_ONLY_IN_TESTS = {"assigned secret literal"}
+
+
+def is_test_file(relative: str) -> bool:
+    return relative.startswith("test/") or relative.endswith(".spec.ts")
 
 PATTERNS: list[tuple[str, re.Pattern[str]]] = [
     ("private key block", re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----")),
@@ -76,6 +85,8 @@ def main() -> None:
         scanned += 1
         for line_number, line in enumerate(text.splitlines(), start=1):
             for label, pattern in PATTERNS:
+                if label in HEURISTIC_ONLY_IN_TESTS and is_test_file(relative):
+                    continue
                 if pattern.search(line):
                     findings.append(f"{relative}:{line_number}  {label}")
 

@@ -1,6 +1,11 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
+import { join } from 'node:path';
+
 import { createApp } from '../src/bootstrap';
+import { PgliteClient } from '../src/persistence/pglite-client';
+import { SqlClient } from '../src/persistence/sql-client';
+import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { AppConfig, loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 
@@ -23,17 +28,24 @@ const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...overrides,
 });
 
+const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
+
 async function build(env: NodeJS.ProcessEnv = baseEnv()): Promise<{
   app: NestFastifyApplication;
   config: AppConfig;
   lines: string[];
+  db: SqlClient;
 }> {
   const config = loadConfig(env);
   const lines: string[] = [];
-  const app = await createApp(config, new StructuredLogger('info', (line) => lines.push(line)));
+  // Real PostgreSQL, in-process. The end-to-end tests exercise the actual SQL
+  // and the actual constraints rather than a stand-in written to agree.
+  const db = await PgliteClient.create();
+  await migrate(db, loadMigrations(MIGRATIONS_DIR));
+  const app = await createApp(config, new StructuredLogger('info', (line) => lines.push(line)), db);
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, config, lines };
+  return { app, config, lines, db };
 }
 
 describe('operational endpoints', () => {
@@ -55,10 +67,34 @@ describe('operational endpoints', () => {
   });
 
   it('answers readiness with the contract shape', async () => {
+    // The registry started empty in TAB 02 and is no longer: TAB 04 registers
+    // the database probe. That is the design working -- each dependency
+    // registers its own probe as it arrives, rather than four being listed up
+    // front and reporting `up` against services that do not exist.
     const response = await app.inject({ method: 'GET', url: '/ready' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({ status: 'ready', checks: [] });
+    expect(response.json()).toEqual({
+      status: 'ready',
+      checks: [{ name: 'database', status: 'up', detail: null }],
+    });
+  });
+
+  it('reports the database as down when the schema is behind the code', async () => {
+    // A deploy that skipped its migration step must fail its health gate rather
+    // than serve requests against a schema it does not understand.
+    const { app: behind, db } = await build();
+    try {
+      await db.query('delete from schema_migrations where version = (select max(version) from schema_migrations)');
+
+      const response = await behind.inject({ method: 'GET', url: '/ready' });
+
+      expect(response.statusCode).toBe(503);
+      expect(response.json<{ status: string }>().status).toBe('unavailable');
+      expect(response.body).toContain('not applied');
+    } finally {
+      await behind.close();
+    }
   });
 
   it('reports the build and the contract it implements', async () => {

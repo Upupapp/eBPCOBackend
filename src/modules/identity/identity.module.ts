@@ -9,8 +9,10 @@ import { SESSION_REPOSITORY, SessionRepository } from './application/session.rep
 import { TokenService } from './application/token.service';
 import { PasswordHasher } from './domain/password-hasher';
 import { PasswordPolicy } from './domain/password-policy';
-import { InMemoryAccountRepository } from './infrastructure/in-memory-account.repository';
-import { InMemorySessionRepository } from './infrastructure/in-memory-session.repository';
+import { PostgresAccountRepository } from './infrastructure/postgres-account.repository';
+import { PostgresSessionRepository } from './infrastructure/postgres-session.repository';
+import { SQL_CLIENT } from '../../persistence/persistence.module';
+import { SqlClient } from '../../persistence/sql-client';
 import { LocalBreachedPasswordScreen } from './infrastructure/breached-password-screen';
 import { AuthController, MeController } from './transport/auth.controller';
 import { AuthenticationGuard } from './transport/guards/authentication.guard';
@@ -27,8 +29,19 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
 @Module({
   controllers: [AuthController, MeController],
   providers: [
-    { provide: ACCOUNT_REPOSITORY, useClass: InMemoryAccountRepository },
-    { provide: SESSION_REPOSITORY, useClass: InMemorySessionRepository },
+    // Bound here and nowhere else. The in-memory implementations still exist,
+    // and the shared contract suite holds both to identical behaviour, so
+    // "works in tests, fails in production" surfaces as a failing test.
+    {
+      provide: ACCOUNT_REPOSITORY,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new PostgresAccountRepository(db),
+    },
+    {
+      provide: SESSION_REPOSITORY,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new PostgresSessionRepository(db),
+    },
 
     {
       provide: PasswordHasher,

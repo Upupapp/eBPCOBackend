@@ -1,6 +1,11 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
+import { join } from 'node:path';
+
 import { createApp } from '../src/bootstrap';
+import { PgliteClient } from '../src/persistence/pglite-client';
+import { SqlClient } from '../src/persistence/sql-client';
+import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 
@@ -18,11 +23,17 @@ const env = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 
 const GOOD_PASSWORD = 'the quiet barangay hall on tuesday';
 
+const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
+
 async function build(
   overrides: NodeJS.ProcessEnv = {},
-): Promise<{ app: NestFastifyApplication; lines: string[]; routes: string[] }> {
+): Promise<{ app: NestFastifyApplication; lines: string[]; routes: string[]; db: SqlClient }> {
   const lines: string[] = [];
-  const app = await createApp(loadConfig(env(overrides)), new StructuredLogger('info', (l) => lines.push(l)));
+  // Real PostgreSQL, in-process, migrated. Every identity flow below therefore
+  // runs against the constraints in db/migrations rather than around them.
+  const db = await PgliteClient.create();
+  await migrate(db, loadMigrations(MIGRATIONS_DIR));
+  const app = await createApp(loadConfig(env(overrides)), new StructuredLogger('info', (l) => lines.push(l)), db);
 
   // The real route table, collected as Fastify registers each route. Parsing
   // printRoutes() output instead is how an earlier version of this test
@@ -39,7 +50,7 @@ async function build(
 
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
-  return { app, lines, routes };
+  return { app, lines, routes, db };
 }
 
 const register = (app: NestFastifyApplication, email: string, password = GOOD_PASSWORD) =>

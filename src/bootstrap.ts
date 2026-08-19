@@ -3,6 +3,7 @@ import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify
 
 import { AppModule } from './app.module';
 import { AppConfig } from './config/app-config';
+import { SqlClient } from './persistence/sql-client';
 import { applySecurity } from './common/http/security';
 import { StructuredLogger } from './common/logging/logger';
 import { ProblemDetailsFilter } from './common/problem/problem-details.filter';
@@ -17,6 +18,13 @@ import { ProblemDetailsFilter } from './common/problem/problem-details.filter';
 export async function createApp(
   config: AppConfig,
   logger: StructuredLogger,
+  /**
+   * Supplied only by tests, which pass PGlite -- real PostgreSQL in-process --
+   * so an end-to-end test exercises the actual SQL, the actual constraints and
+   * the actual triggers rather than an in-memory stand-in that was written to
+   * agree with it.
+   */
+  sqlClientOverride?: SqlClient,
 ): Promise<NestFastifyApplication> {
   const adapter = new FastifyAdapter({
     // An unbounded body is a denial-of-service surface. The cap is
@@ -34,7 +42,7 @@ export async function createApp(
   });
 
   const app = await NestFactory.create<NestFastifyApplication>(
-    AppModule.forConfig(config, logger),
+    AppModule.forConfig(config, logger, sqlClientOverride),
     adapter,
     { logger: false, bufferLogs: true },
   );

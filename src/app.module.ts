@@ -4,6 +4,8 @@ import { AppConfig, CONFIG } from './config/app-config';
 import { StructuredLogger } from './common/logging/logger';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
+import { PersistenceModule, SQL_CLIENT_OVERRIDE } from './persistence/persistence.module';
+import { SqlClient } from './persistence/sql-client';
 
 /**
  * The composition root.
@@ -16,15 +18,16 @@ import { IdentityModule } from './modules/identity/identity.module';
  */
 @Module({})
 export class AppModule {
-  static forConfig(config: AppConfig, logger: StructuredLogger) {
+  static forConfig(config: AppConfig, logger: StructuredLogger, sqlClientOverride?: SqlClient) {
     return {
       module: AppModule,
-      imports: [HealthModule, IdentityModule],
+      imports: [HealthModule, PersistenceModule, IdentityModule],
       providers: [
         { provide: CONFIG, useValue: config },
         { provide: StructuredLogger, useValue: logger },
+        { provide: SQL_CLIENT_OVERRIDE, useValue: sqlClientOverride ?? null },
       ],
-      exports: [CONFIG, StructuredLogger],
+      exports: [CONFIG, StructuredLogger, SQL_CLIENT_OVERRIDE],
       global: true,
     };
   }
