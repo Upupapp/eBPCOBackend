@@ -74,10 +74,16 @@ describe('operational endpoints', () => {
     const response = await app.inject({ method: 'GET', url: '/ready' });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual({
-      status: 'ready',
-      checks: [{ name: 'database', status: 'up', detail: null }],
-    });
+    // Three probes now: the database (TAB 04), the object store and the
+    // malware scanner (TAB 06). Each registered by the module that owns it, as
+    // it arrived. The list grows on its own.
+    const report = response.json<{ status: string; checks: Array<{ name: string; status: string }> }>();
+
+    expect(report.status).toBe('ready');
+    expect(report.checks.map((check) => check.name).sort()).toEqual([
+      'database', 'malwareScanner', 'objectStore',
+    ]);
+    expect(report.checks.every((check) => check.status === 'up')).toBe(true);
   });
 
   it('reports the database as down when the schema is behind the code', async () => {
