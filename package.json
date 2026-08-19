@@ -15,7 +15,9 @@
     "lint": "eslint src test --max-warnings 0",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js",
     "test:cov": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js --coverage",
-    "verify": "npm run typecheck && npm run lint && npm run test"
+    "verify": "npm run typecheck && npm run lint && npm run test",
+    "emit:catalog": "ts-node --transpile-only scripts/emit-notification-catalog.ts",
+    "emit:samples": "ts-node --transpile-only scripts/emit-response-samples.ts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

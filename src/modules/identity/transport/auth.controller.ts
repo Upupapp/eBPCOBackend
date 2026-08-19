@@ -192,24 +192,39 @@ export class MeController {
 
     // Never the verifier, the salt, or the TOTP secret.
     //
-    // Roles and scopes ARE returned, and are not a disclosure: they describe
-    // what this caller may do, which the caller learns anyway from the first
-    // request that succeeds or is refused. A staff portal needs them to decide
-    // what to put on screen, and the alternative — a client guessing from a
-    // role name it invented — is how a menu comes to offer actions the server
-    // will refuse.
+    // Roles and scopes ARE returned for staff, and are not a disclosure: the
+    // caller learns both from the first request that succeeds or is refused.
+    // A staff portal needs them to decide what to put on screen, and the
+    // alternative -- a client guessing from a role name it invented -- is how a
+    // menu comes to offer actions the server will refuse.
     //
     // The scopes come from the token rather than being recomputed from the
     // roles, so what is reported is exactly what will be enforced. A token
     // issued before a role changed carries the old set, and saying otherwise
     // would describe a session the holder does not have.
-    return {
+    const common = {
       id: account.id,
       kind: account.kind,
       email: account.email,
-      roles: account.roles,
-      scopes: caller.scopes,
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,
+    };
+
+    if (account.kind === 'staff') {
+      return { ...common, roles: account.roles, scopes: caller.scopes };
+    }
+
+    // An applicant's name and mobile number, which the mobile client reads to
+    // greet them and to show what it will send an OTP to. Omitting them was a
+    // real defect: the client fell back to empty strings, so every applicant
+    // saw a blank name and an empty contact number, and nothing failed loudly
+    // enough for anyone to notice. Found by putting a recorded response next to
+    // the code that consumes it.
+    const profile = await this.accounts.profileOf(account.id);
+    return {
+      ...common,
+      firstName: profile?.firstName ?? null,
+      lastName: profile?.lastName ?? null,
+      mobileNumber: profile?.mobileNumber ?? null,
     };
   }
 }

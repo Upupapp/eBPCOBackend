@@ -109,7 +109,7 @@ describe('moving an application', () => {
     const result = await service.transition({ applicationId: APPLICATION, caller: applicant, to: 'Received' });
 
     expect(result.ok).toBe(false);
-    if (result.ok) return;
+    if (result.ok || 'reused' in result) return;
     expect(result.refusal.kind).toBe('not-permitted');
   });
 
@@ -244,7 +244,7 @@ describe('optimistic concurrency', () => {
     });
 
     expect(late.ok).toBe(false);
-    if (late.ok) return;
+    if (late.ok || 'reused' in late) return;
     expect(late.refusal.kind).toBe('stale-version');
   });
 

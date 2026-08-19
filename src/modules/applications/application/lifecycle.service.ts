@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { lookup, remember, requestDigest } from '../../../persistence/idempotency';
 import { AuditService } from '../../compliance/application/audit.service';
 import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { ApplicationSnapshot, Caller } from '../domain/application';
@@ -20,8 +21,16 @@ import { Refusal } from '../domain/lifecycle-errors';
  */
 
 export type TransitionResult =
-  | { readonly ok: true; readonly status: LifecycleStatus; readonly version: number }
-  | { readonly ok: false; readonly refusal: Refusal };
+  | {
+      readonly ok: true;
+      readonly status: LifecycleStatus;
+      readonly version: number;
+      /** True when this call did nothing because the same key already had. */
+      readonly replayed?: boolean;
+    }
+  | { readonly ok: false; readonly refusal: Refusal }
+  /** The same idempotency key was used for a different request. */
+  | { readonly ok: false; readonly reused: true };
 
 interface SnapshotRow {
   id: string;
@@ -123,10 +132,31 @@ export class LifecycleService {
     to: LifecycleStatus;
     expectedVersion?: number;
     remarks?: string;
+    /**
+     * Optional here and required by the transport. The domain accepts a move
+     * without one so a test or a background job can make it; a human clicking
+     * a button always has one, and the transport is where that is enforced.
+     */
+    idempotencyKey?: string;
   }): Promise<TransitionResult> {
-    const { applicationId, caller, to, expectedVersion, remarks } = options;
+    const { applicationId, caller, to, expectedVersion, remarks, idempotencyKey } = options;
+    const digest = requestDigest({ applicationId, to, remarks: remarks ?? null });
 
     return this.db.transaction(async (tx) => {
+      if (idempotencyKey !== undefined) {
+        const seen = await lookup<{ status: LifecycleStatus; version: number }>(tx, {
+          accountId: caller.accountId, key: idempotencyKey,
+          operation: 'application.transition', digest,
+        });
+        if (seen.kind === 'mismatch') return { ok: false, reused: true };
+        if (seen.kind === 'replay') {
+          // The officer's first attempt did happen; only its answer was lost.
+          // Telling them so is the whole point -- the alternative is a 412 that
+          // blames a colleague for their own click.
+          return { ok: true, ...seen.previous.body, replayed: true };
+        }
+      }
+
       // Locked for the duration. Without this, two officers reading the same
       // version both decide "allowed" and the second overwrites the first --
       // the version column would catch it, but only after both had already
@@ -180,7 +210,18 @@ export class LifecycleService {
 
       await this.recordEvents(tx, decision.outcome.events, caller, snapshot);
 
-      return { ok: true, status: to, version: decision.outcome.nextVersion };
+      const result = { status: to, version: decision.outcome.nextVersion };
+      if (idempotencyKey !== undefined) {
+        // Inside the same transaction as the move. Recorded outside one, a
+        // rolled-back transition leaves a key that replays a result nothing
+        // produced.
+        await remember(tx, {
+          accountId: caller.accountId, key: idempotencyKey,
+          operation: 'application.transition', digest, status: 200, body: result,
+        });
+      }
+
+      return { ok: true, ...result };
     });
   }
 

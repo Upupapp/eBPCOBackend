@@ -1,4 +1,4 @@
-import { AccountRepository, normaliseEmail } from '../application/account.repository';
+import { AccountRepository, ApplicantProfile, normaliseEmail } from '../application/account.repository';
 import { Account, StaffRole } from '../domain/account';
 import { SqlClient } from '../../../persistence/sql-client';
 
@@ -81,6 +81,34 @@ export class PostgresAccountRepository implements AccountRepository {
       passwordHash,
       id,
     ]);
+  }
+
+  /**
+   * The applicant row behind an account, joined to the mobile number the
+   * account itself carries.
+   *
+   * Returns null for a staff account rather than throwing: "is this an
+   * applicant" is a question the caller already answered by reading `kind`,
+   * and a repository that throws on the other branch makes every caller wrap
+   * it.
+   */
+  async profileOf(accountId: string): Promise<ApplicantProfile | null> {
+    const result = await this.db.query<{
+      first_name: string; last_name: string; mobile_number: string | null;
+    }>(
+      `select ap.first_name, ap.last_name, acc.mobile_number
+         from applicants ap
+         join accounts acc on acc.id = ap.account_id
+        where ap.account_id = $1`,
+      [accountId],
+    );
+    const row = result.rows[0];
+    if (row === undefined) return null;
+    return {
+      firstName: row.first_name,
+      lastName: row.last_name,
+      mobileNumber: row.mobile_number,
+    };
   }
 
   private toAccount(row: AccountRow | undefined): Account | null {

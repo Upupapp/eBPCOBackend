@@ -167,6 +167,38 @@ describe('what /me tells a portal', () => {
     expect(body.scopes).not.toContain('staff:approve');
   });
 
+  it('gives an applicant their own name and number, which the mobile client reads', async () => {
+    // A real defect this caught: /me returned neither, the Flutter client fell
+    // back to empty strings, and every applicant saw a blank name and an empty
+    // contact number. Nothing failed loudly enough for anyone to notice.
+    const token = await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+      scopes: ['profile:read'],
+    });
+
+    const body = (await get('/me', token.token)).json<{
+      kind: string; firstName: string; lastName: string; mobileNumber: string | null;
+    }>();
+
+    expect(body.kind).toBe('applicant');
+    expect(body.firstName).toBe('Maria');
+    expect(body.lastName).toBe('Santos');
+  });
+
+  it('does not give an applicant a roles or scopes field to read', async () => {
+    // An applicant has no role: their authority comes entirely from owning the
+    // record they are acting on. A null `roles` would invite a client to branch
+    // on it.
+    const token = await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    });
+
+    const body = (await get('/me', token.token)).json<Record<string, unknown>>();
+
+    expect(body).not.toHaveProperty('roles');
+    expect(body).not.toHaveProperty('scopes');
+  });
+
   it('never returns anything that could authenticate the account', async () => {
     const response = await get('/me', await staffToken('evaluator'));
 
@@ -228,6 +260,56 @@ describe('opening one application', () => {
     expect(body).toHaveProperty('timeline');
   });
 
+  it('spells its fields the way the rest of the API does', async () => {
+    // Postgres answers in snake_case and every other response here is
+    // camelCase. Letting raw rows through made this the one endpoint a client
+    // had to spell differently — and the admin's mapper had already grown
+    // `row['uploaded_at'] ?? row['uploadedAt']` hedges, written by someone who
+    // could not tell which they would get.
+    const id = await file('BP-1', 'Under Evaluation');
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared)
+       values ($1,$2,$3,'Identity','id.pdf','application/pdf',1024,
+               '${'a'.repeat(64)}','documents/id.pdf','Approved',true)`,
+      [randomUUID(), id, APPLICANT_ACCOUNT],
+    );
+
+    const body = (await get(`/staff/applications/${id}`, await staffToken('evaluator')))
+      .json<{ documents: Record<string, unknown>[] }>();
+
+    expect(Object.keys(body.documents[0]!)).toContain('fileName');
+    expect(JSON.stringify(body)).not.toMatch(/"[a-z]+_[a-z]/);
+  });
+
+  it('never sends a business column the client has no use for', async () => {
+    // `select b.*` sends whatever the next migration adds — owner ids, audit
+    // columns, a field added for something else entirely — and nobody reviews
+    // a disclosure that happened by default.
+    const businessId = randomUUID();
+    await db.query(
+      `insert into businesses (id, owner_applicant_id, name, category, street, barangay, city,
+                               province, registration_number, date_registered, status)
+       values ($1,$2,'Aling Nena','Retail','1 Main','Poblacion','Cabuyao','Laguna','DTI-1','2024-01-15','Active')`,
+      [businessId, applicantId],
+    );
+    const id = randomUUID();
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
+                                 application_action, lifecycle_status, submitted_at, created_by)
+       values ($1,'BP-9',$2,$3,'Fencing','New','Submitted',now(),$4)`,
+      [id, applicantId, businessId, APPLICANT_ACCOUNT],
+    );
+
+    const body = (await get(`/staff/applications/${id}`, await staffToken('records-officer')))
+      .json<{ business: Record<string, unknown> }>();
+
+    expect(Object.keys(body.business).sort()).toEqual([
+      'barangay', 'category', 'city', 'dateRegistered', 'id', 'name',
+      'province', 'registrationNumber', 'status', 'street',
+    ]);
+  });
+
   it('answers 404, not 403, for one the officer may not read', async () => {
     // Telling a cashier that this reference exists but is not theirs to open
     // confirms a neighbour has applied for a permit.
@@ -246,8 +328,12 @@ describe('opening one application', () => {
 });
 
 describe('moving an application', () => {
-  const post = (url: string, token: string, payload: Record<string, unknown>) =>
-    app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${token}` }, payload });
+  const post = (url: string, token: string, payload: Record<string, unknown>, key = randomUUID()) =>
+    app.inject({
+      method: 'POST', url,
+      headers: { authorization: `Bearer ${token}`, 'idempotency-key': key },
+      payload,
+    });
 
   it('records a legal move and returns the new version', async () => {
     const id = await file('BP-1', 'Submitted');
@@ -300,6 +386,81 @@ describe('moving an application', () => {
 
     expect(response.statusCode).toBe(422);
     expect(response.json().detail).toMatch(/payment/i);
+  });
+
+  it('refuses a move with no Idempotency-Key rather than doing it anyway', async () => {
+    const id = await file('BP-1', 'Submitted');
+
+    const response = await app.inject({
+      method: 'POST', url: `/staff/applications/${id}/transitions`,
+      headers: { authorization: `Bearer ${await staffToken('records-officer')}` },
+      payload: { to: 'Received' },
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('replays a lost response instead of blaming a colleague', async () => {
+    // The failure this exists for: an officer clicks Receive, the server
+    // commits, the response is lost. Without a key the retry carries the
+    // version still on screen, the server finds it stale, and answers "someone
+    // else changed this application while it was open" — untrue, unhelpful, and
+    // in a permit office a question about who did what.
+    const id = await file('BP-1', 'Submitted');
+    const token = await staffToken('records-officer');
+    const key = randomUUID();
+
+    const first = await post(`/staff/applications/${id}/transitions`, token, { to: 'Received', expectedVersion: 1 }, key);
+    const retry = await post(`/staff/applications/${id}/transitions`, token, { to: 'Received', expectedVersion: 1 }, key);
+
+    expect(first.statusCode).toBe(200);
+    expect(retry.statusCode).toBe(200);
+    expect(retry.json()).toEqual(first.json());
+  });
+
+  it('moves the application exactly once, however many times the key is replayed', async () => {
+    const id = await file('BP-1', 'Submitted');
+    const token = await staffToken('records-officer');
+    const key = randomUUID();
+
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      await post(`/staff/applications/${id}/transitions`, token, { to: 'Received' }, key);
+    }
+
+    const transitions = await db.query<{ n: string }>(
+      `select count(*) as n from application_transitions
+        where application_id = $1 and to_status = 'Received'`, [id],
+    );
+    expect(Number(transitions.rows[0]!.n)).toBe(1);
+  });
+
+  it('refuses the same key used for a DIFFERENT request', async () => {
+    // Honouring it would answer for the wrong request — the caller would be
+    // told a move succeeded that was never attempted.
+    const id = await file('BP-1', 'Submitted');
+    const token = await staffToken('records-officer');
+    const key = randomUUID();
+
+    await post(`/staff/applications/${id}/transitions`, token, { to: 'Received' }, key);
+    const different = await post(`/staff/applications/${id}/transitions`, token, { to: 'Cancelled' }, key);
+
+    expect(different.statusCode).toBe(409);
+    expect(different.json().detail).toMatch(/already used for a different request/i);
+  });
+
+  it('does not record a key for a move that was refused', async () => {
+    // A key recorded outside the transaction would replay a result nothing
+    // produced: the officer retries a corrected request with the same key and
+    // is told the original failure succeeded.
+    const id = await file('BP-1', 'Submitted');
+    const token = await staffToken('records-officer');
+    const key = randomUUID();
+
+    const refused = await post(`/staff/applications/${id}/transitions`, token, { to: 'Approved' }, key);
+    expect(refused.statusCode).toBe(409);
+
+    const keys = await db.query<{ n: string }>('select count(*) as n from idempotency_keys');
+    expect(Number(keys.rows[0]!.n)).toBe(0);
   });
 
   it('refuses to move one the officer may not even read', async () => {

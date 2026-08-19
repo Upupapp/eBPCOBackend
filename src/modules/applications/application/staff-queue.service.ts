@@ -299,12 +299,19 @@ export class StaffQueueService {
              join applicants ap on ap.id = a.applicant_id
              join accounts acc on acc.id = ap.account_id
             where a.id = $1`, [applicationId]),
+        // Named columns, never `b.*`. A select-star sends whatever the next
+        // migration adds -- owner ids, audit columns, a field added for an
+        // unrelated feature -- to every officer's browser, and nobody reviews a
+        // disclosure that happened by default.
         this.db.query(
-          `select b.* from applications a join businesses b on b.id = a.business_id where a.id = $1`,
+          `select b.id, b.name, b.category, b.street, b.barangay, b.city, b.province,
+                  b.registration_number, to_char(b.date_registered, 'YYYY-MM-DD') as date_registered,
+                  b.status
+             from applications a join businesses b on b.id = a.business_id where a.id = $1`,
           [applicationId]),
         this.db.query(
           `select id, label, file_name, content_type, byte_size, status, scan_cleared,
-                  expires_on, uploaded_at
+                  to_char(expires_on, 'YYYY-MM-DD') as expires_on, uploaded_at
              from documents where application_id = $1 and deleted_at is null
             order by uploaded_at`, [applicationId]),
         this.db.query(
@@ -315,11 +322,19 @@ export class StaffQueueService {
                   verified_at, official_receipt_number
              from payments where application_id = $1 order by submitted_at`, [applicationId]),
         this.db.query(
-          `select * from orders_of_payment
+          `select id, number, total_centavos, filing_centavos, processing_centavos,
+                  architectural_centavos, structural_centavos, electrical_centavos,
+                  others_centavos, fee_schedule_version, assessed_at,
+                  to_char(due_date, 'YYYY-MM-DD') as due_date
+             from orders_of_payment
             where application_id = $1 and superseded_at is null
             order by assessed_at desc limit 1`, [applicationId]),
-        this.db.query(`select * from generated_permits where application_id = $1`, [applicationId]),
-        this.db.query(`select * from permit_releases where application_id = $1`, [applicationId]),
+        this.db.query(
+          `select permit_number, to_char(issued_date, 'YYYY-MM-DD') as issued_date, scope, conditions
+             from generated_permits where application_id = $1`, [applicationId]),
+        this.db.query(
+          `select status, method, claimant_name, released_at, claim_location, office_hours, bring_with_you
+             from permit_releases where application_id = $1`, [applicationId]),
         this.db.query(
           `select ii.id, ii.subject, ii.remark, l.issued_at
              from instruction_items ii
@@ -328,28 +343,34 @@ export class StaffQueueService {
             order by l.issued_at`, [applicationId]),
         // The timeline the database trigger writes on every committed
         // transition. Read from there rather than from the audit chain because
-        // this is the record's own history, not the security log.
+        // this is the record's own history, not the security log -- which also
+        // records refused attempts, a different question and in some hands a
+        // disclosure.
         this.db.query(
           `select t.from_status, t.to_status, t.occurred_at, t.office, t.remarks
              from application_transitions t
             where t.application_id = $1 order by t.occurred_at`, [applicationId]),
       ]);
 
-    const one = (r: { rows: unknown[] }): Record<string, unknown> | null =>
-      (r.rows[0] as Record<string, unknown> | undefined) ?? null;
+    const one = (r: { rows: unknown[] }): Readonly<Record<string, unknown>> | null => {
+      const first = r.rows[0] as Record<string, unknown> | undefined;
+      return first === undefined ? null : camelKeys(first);
+    };
+    const many = (r: { rows: unknown[] }): ReadonlyArray<Record<string, unknown>> =>
+      (r.rows as Record<string, unknown>[]).map(camelKeys);
 
     return {
       summary: this.toQueueRow(row, calendar),
       applicantEmail: account.rows[0]?.email ?? '',
       business: one(business),
-      documents: documents.rows,
-      evaluations: evaluations.rows,
-      payments: payments.rows,
+      documents: many(documents),
+      evaluations: many(evaluations),
+      payments: many(payments),
       orderOfPayment: one(oop),
       permit: one(permit),
       release: one(release),
-      openInstructions: instructions.rows,
-      timeline: timeline.rows,
+      openInstructions: many(instructions),
+      timeline: many(timeline),
     };
   }
 
@@ -475,6 +496,23 @@ export class StaffQueueService {
     };
   }
 
+}
+
+/**
+ * Database column names as the rest of this API spells them.
+ *
+ * Postgres answers in snake_case and every other response here is camelCase.
+ * Letting the raw rows through made the officer's detail view the one endpoint
+ * a client had to spell differently -- and the admin's mapper had already grown
+ * `row['uploaded_at'] ?? row['uploadedAt']` hedges, written by someone who could
+ * not tell which they would get. Converting here means there is one answer.
+ */
+function camelKeys(row: Record<string, unknown>): Record<string, unknown> {
+  const converted: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(row)) {
+    converted[key.replace(/_([a-z0-9])/g, (_, character: string) => character.toUpperCase())] = value;
+  }
+  return converted;
 }
 
 /**

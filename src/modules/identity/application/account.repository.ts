@@ -14,6 +14,21 @@ export interface AccountRepository {
   findByEmail(email: string): Promise<Account | null>;
   save(account: Account): Promise<void>;
   updatePasswordHash(id: string, passwordHash: string): Promise<void>;
+  /**
+   * The applicant's own details, if this account is one.
+   *
+   * Separate from `findById` rather than folded into `Account`, because these
+   * fields exist only for applicants and an `Account` carrying two
+   * always-null columns for every officer invites a caller to read them
+   * without checking `kind`.
+   */
+  profileOf(accountId: string): Promise<ApplicantProfile | null>;
+}
+
+export interface ApplicantProfile {
+  readonly firstName: string;
+  readonly lastName: string;
+  readonly mobileNumber: string | null;
 }
 
 /**

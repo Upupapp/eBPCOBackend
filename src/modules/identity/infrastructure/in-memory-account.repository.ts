@@ -1,4 +1,4 @@
-import { AccountRepository, normaliseEmail } from '../application/account.repository';
+import { AccountRepository, ApplicantProfile, normaliseEmail } from '../application/account.repository';
 import { Account } from '../domain/account';
 
 /** TAB 04 replaces this with PostgreSQL. The port is what the domain depends on. */
@@ -19,6 +19,17 @@ export class InMemoryAccountRepository implements AccountRepository {
     this.byId.set(account.id, account);
     this.idByEmail.set(normaliseEmail(account.email), account.id);
     return Promise.resolve();
+  }
+
+  private readonly profiles = new Map<string, ApplicantProfile>();
+
+  /** Set by tests that need `/me` to answer with a name. */
+  setProfile(accountId: string, profile: ApplicantProfile): void {
+    this.profiles.set(accountId, profile);
+  }
+
+  profileOf(accountId: string): Promise<ApplicantProfile | null> {
+    return Promise.resolve(this.profiles.get(accountId) ?? null);
   }
 
   updatePasswordHash(id: string, passwordHash: string): Promise<void> {

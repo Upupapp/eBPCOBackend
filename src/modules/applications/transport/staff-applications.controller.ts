@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req } from '@nestjs/common';
+import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -146,9 +146,18 @@ export class StaffApplicationsController {
     @Req() request: AuthenticatedRequest,
     @Param('applicationId') applicationId: string,
     @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string,
   ): Promise<Record<string, unknown>> {
     const caller = callerOf(request);
     const input = parse(transitionShape, body);
+
+    // Required here, optional in the domain. `expectedVersion` answers "has
+    // anyone else changed this since I looked"; this answers "did MY request
+    // already happen", and they are different questions. Without it, an officer
+    // whose successful request lost its response retries and is told someone
+    // else changed the application -- untrue, and in a permit office a question
+    // about who did what.
+    const key = parse(z.string().uuid('must be a UUID'), idempotencyKey ?? null);
 
     // Readable and actionable are different questions. The row filter decides
     // whether this officer may see the application at all; the lifecycle engine
@@ -161,11 +170,18 @@ export class StaffApplicationsController {
       applicationId,
       caller,
       to: input.to,
+      idempotencyKey: key,
       ...(input.expectedVersion === undefined ? {} : { expectedVersion: input.expectedVersion }),
       ...(input.remarks === undefined ? {} : { remarks: input.remarks }),
     });
 
     if (result.ok) return { status: result.status, version: result.version };
+    if ('reused' in result) {
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+        'This Idempotency-Key was already used for a different request. Use a new key.',
+      );
+    }
     throw refusalToProblem(result.refusal);
   }
 }
