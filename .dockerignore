@@ -1,0 +1,13 @@
+node_modules
+dist
+coverage
+.git
+.github
+*.md
+!README.md
+.env
+.env.*
+*.tsbuildinfo
+test
+**/*.spec.ts
+.DS_Store
