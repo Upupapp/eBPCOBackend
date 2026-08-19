@@ -1,0 +1,222 @@
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req } from '@nestjs/common';
+import { z } from 'zod';
+
+import { ProblemException, ProblemType } from '../../../common/problem/problem';
+import { RequireScopes } from '../../identity/transport/guards/public.decorator';
+import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
+import { LIFECYCLE_STATUSES } from '../domain/lifecycle';
+import { PRECONDITION_MESSAGE, PROBLEM_TYPE, Refusal } from '../domain/lifecycle-errors';
+import { Caller } from '../domain/application';
+import { LifecycleService } from '../application/lifecycle.service';
+import { StaffQueueService } from '../application/staff-queue.service';
+
+/**
+ * The officer's surface.
+ *
+ * Separate from the applicant's routes rather than the same routes behaving
+ * differently by caller kind. One path that returns an officer's view or an
+ * applicant's view depending on a token claim is one mistake away from serving
+ * the wrong one, and the mistake is invisible in a URL. `/staff/...` is a
+ * different path, so a misrouted request 404s instead of over-disclosing.
+ *
+ * Every route is scope-gated. The guard is deny-by-default, so a route added
+ * here without a scope is authenticated-only rather than open — still tighter
+ * than it should be, which is why each one names its scope explicitly.
+ */
+
+const statusEnum = z.enum(LIFECYCLE_STATUSES);
+
+const queryShape = z.object({
+  status: z.union([statusEnum, z.array(statusEnum)]).optional(),
+  permitType: z.string().min(1).max(80).optional(),
+  q: z.string().max(200).optional(),
+  from: z.string().datetime().optional(),
+  to: z.string().datetime().optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  cursor: z.string().max(400).optional(),
+});
+
+const transitionShape = z.object({
+  to: statusEnum,
+  /**
+   * The version the officer was looking at. Optional in the schema and
+   * strongly encouraged in practice: without it two officers acting on one
+   * application produce a last-write-wins, and the loser never learns their
+   * decision was discarded.
+   */
+  expectedVersion: z.number().int().min(1).optional(),
+  remarks: z.string().min(1).max(2000).optional(),
+});
+
+function parse<T>(schema: z.ZodType<T>, value: unknown): T {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw ProblemException.validation(
+      result.error.issues.map((issue) => ({
+        pointer: `/${issue.path.join('/')}`,
+        message: issue.message,
+      })),
+    );
+  }
+  return result.data;
+}
+
+/**
+ * The caller, as the domain understands it.
+ *
+ * Throws rather than returning a nullable, because a request that reached a
+ * guarded handler without claims is a wiring fault, not a client error, and
+ * returning an empty caller would silently apply the "no visible statuses"
+ * path and look like an empty queue.
+ */
+function callerOf(request: AuthenticatedRequest): Caller {
+  const claims = request.caller;
+  if (claims === undefined) {
+    throw new ProblemException(
+      ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED,
+    );
+  }
+  return { accountId: claims.sub, kind: claims.kind, scopes: claims.scopes };
+}
+
+@Controller('staff/applications')
+export class StaffApplicationsController {
+  constructor(
+    private readonly queue: StaffQueueService,
+    private readonly lifecycle: LifecycleService,
+  ) {}
+
+  @Get()
+  @RequireScopes('applications:read')
+  async list(@Req() request: AuthenticatedRequest, @Query() query: unknown): Promise<Record<string, unknown>> {
+    const input = parse(queryShape, query ?? {});
+    const statuses = input.status === undefined
+      ? undefined
+      : (Array.isArray(input.status) ? input.status : [input.status]);
+
+    const page = await this.queue.page(callerOf(request), {
+      ...(statuses === undefined ? {} : { statuses }),
+      ...(input.permitType === undefined ? {} : { permitType: input.permitType }),
+      ...(input.q === undefined ? {} : { search: input.q }),
+      ...(input.from === undefined ? {} : { submittedFrom: new Date(input.from) }),
+      ...(input.to === undefined ? {} : { submittedTo: new Date(input.to) }),
+      ...(input.limit === undefined ? {} : { limit: input.limit }),
+      ...(input.cursor === undefined ? {} : { cursor: input.cursor }),
+    });
+
+    return { items: page.rows, nextCursor: page.nextCursor };
+  }
+
+  /**
+   * Declared before `:applicationId`, because Nest matches in declaration order
+   * and "metrics" is a valid-looking path segment. Registered the other way
+   * round, a dashboard request becomes a lookup for an application called
+   * "metrics" and 404s.
+   */
+  @Get('metrics')
+  @RequireScopes('applications:read')
+  async metrics(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    const metrics = await this.queue.metrics(callerOf(request));
+    return { ...metrics };
+  }
+
+  @Get(':applicationId')
+  @RequireScopes('applications:read')
+  async detail(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<Record<string, unknown>> {
+    const detail = await this.queue.detail(callerOf(request), applicationId);
+    if (detail === null) throw ProblemException.notFound('No such application.');
+    return { ...detail };
+  }
+
+  /**
+   * A status change, decided by the lifecycle engine.
+   *
+   * POST to a sub-resource rather than PATCH of a `status` field. A permit
+   * moving from Assessed to Payment Verified is an event with preconditions,
+   * an actor and consequences, not a field assignment — and a PATCH invites a
+   * client to think it may set any value it can spell.
+   */
+  @Post(':applicationId/transitions')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:read')
+  async transition(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = callerOf(request);
+    const input = parse(transitionShape, body);
+
+    // Readable and actionable are different questions. The row filter decides
+    // whether this officer may see the application at all; the lifecycle engine
+    // decides whether they may move it, and answers with the specific reason.
+    if (await this.queue.detail(caller, applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+
+    const result = await this.lifecycle.transition({
+      applicationId,
+      caller,
+      to: input.to,
+      ...(input.expectedVersion === undefined ? {} : { expectedVersion: input.expectedVersion }),
+      ...(input.remarks === undefined ? {} : { remarks: input.remarks }),
+    });
+
+    if (result.ok) return { status: result.status, version: result.version };
+    throw refusalToProblem(result.refusal);
+  }
+}
+
+/**
+ * A refusal, translated without losing which kind it was.
+ *
+ * The distinction matters to the officer standing at the counter: "you may not
+ * do this", "this application is not ready for that yet", and "someone else
+ * changed it while you were reading" require three different next actions, and
+ * collapsing them into one 400 makes all three look like a bug in the app.
+ *
+ * The problem type and the plain-language text come from the domain's own
+ * tables rather than from strings written here. A second wording of "you have
+ * not paid yet" is a second thing to keep in step with the first, and the one
+ * that drifts is always the one the applicant reads.
+ */
+function refusalToProblem(refusal: Refusal): ProblemException {
+  switch (refusal.kind) {
+    case 'not-permitted':
+      return new ProblemException(
+        PROBLEM_TYPE['not-permitted'], 'Not permitted', HttpStatus.FORBIDDEN,
+        refusal.reason === 'wrong-actor'
+          ? 'This move is not one this kind of account may make.'
+          : 'This account does not hold the permission this action requires.',
+      );
+
+    case 'illegal-transition':
+      return new ProblemException(
+        PROBLEM_TYPE['illegal-transition'],
+        'The resource is not in a state that permits this',
+        HttpStatus.CONFLICT,
+        refusal.legalMoves.length === 0
+          ? `${refusal.from} is a final status; nothing follows it.`
+          : `An application at ${refusal.from} cannot move to ${refusal.to}. It can move to: ${refusal.legalMoves.join(', ')}.`,
+      );
+
+    case 'precondition-unmet':
+      // Every unmet precondition, not the first. An officer told to fix one
+      // thing, who fixes it and is then told about the next, learns to distrust
+      // the message.
+      return new ProblemException(
+        PROBLEM_TYPE['precondition-unmet'], 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+        refusal.unmet.map((precondition) => PRECONDITION_MESSAGE[precondition]).join(' '),
+      );
+
+    case 'stale-version':
+      return new ProblemException(
+        PROBLEM_TYPE['stale-version'], 'The resource has changed', HttpStatus.PRECONDITION_FAILED,
+        'Someone else changed this application while it was open. Reload it and look again before acting: '
+        + 'the decision you were about to make may no longer be the right one.',
+      );
+  }
+}

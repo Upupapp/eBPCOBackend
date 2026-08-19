@@ -5,6 +5,7 @@ import { StructuredLogger } from './common/logging/logger';
 import { HealthModule } from './modules/health/health.module';
 import { IdentityModule } from './modules/identity/identity.module';
 import { DocumentsModule } from './modules/documents/documents.module';
+import { ApplicationsModule } from './modules/applications/applications.module';
 import { PersistenceModule, SQL_CLIENT_OVERRIDE } from './persistence/persistence.module';
 import { SqlClient } from './persistence/sql-client';
 
@@ -22,7 +23,7 @@ export class AppModule {
   static forConfig(config: AppConfig, logger: StructuredLogger, sqlClientOverride?: SqlClient) {
     return {
       module: AppModule,
-      imports: [HealthModule, PersistenceModule, IdentityModule, DocumentsModule],
+      imports: [HealthModule, PersistenceModule, IdentityModule, DocumentsModule, ApplicationsModule],
       providers: [
         { provide: CONFIG, useValue: config },
         { provide: StructuredLogger, useValue: logger },

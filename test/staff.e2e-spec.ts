@@ -1,0 +1,293 @@
+import type { NestFastifyApplication } from '@nestjs/platform-fastify';
+
+import { join } from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+import { createApp } from '../src/bootstrap';
+import { PgliteClient } from '../src/persistence/pglite-client';
+import { SqlClient } from '../src/persistence/sql-client';
+import { loadMigrations, migrate } from '../src/persistence/migrator';
+import { loadConfig } from '../src/config/app-config';
+import { StructuredLogger } from '../src/common/logging/logger';
+import { TokenService } from '../src/modules/identity/application/token.service';
+import { ROLE_SCOPES, Scope, StaffRole } from '../src/modules/identity/domain/account';
+import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
+
+/**
+ * The staff surface over real HTTP.
+ *
+ * Every request here goes through the global authentication guard, the real
+ * route table and the real database. The unit tests prove the query is right;
+ * these prove it is reachable only by the right caller — which is a different
+ * claim, and the one an in-memory admin never had to make.
+ */
+
+const env: NodeJS.ProcessEnv = {
+  EBPCO_ENVIRONMENT: 'staging',
+  DATABASE_URL: 'postgres://ebpco@db.internal:5432/ebpco',
+  OBJECT_STORE_ENDPOINT: 'https://objects.internal',
+  OBJECT_STORE_BUCKET: 'ebpco-documents',
+  MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
+  JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
+  PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
+  RATE_LIMIT_MAX: '10000',
+};
+
+const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
+
+let app: NestFastifyApplication;
+let db: SqlClient;
+let tokens: TokenService;
+let applicantId: string;
+const APPLICANT_ACCOUNT = randomUUID();
+
+async function tokenFor(kind: 'applicant' | 'staff', scopes: readonly Scope[], sub = randomUUID()): Promise<string> {
+  // `sid` is not optional: an access token that cannot be traced back to a
+  // sign-in cannot be revoked with it, and the verifier rejects one without.
+  const issued = await tokens.issueAccessToken({ sub, sid: randomUUID(), kind, scopes: [...scopes] });
+  return issued.token;
+}
+
+/**
+ * A real staff account, then a token for it.
+ *
+ * Not a token over an invented subject: `application_transitions` has a
+ * foreign key to `accounts`, so an officer who does not exist cannot be
+ * recorded as having moved anything. The constraint is right — an audit row
+ * naming nobody is worse than no audit row — and a fixture that skips it tests
+ * a database this service does not run against.
+ */
+async function staffToken(role: StaffRole): Promise<string> {
+  const id = randomUUID();
+  await db.query(
+    `insert into accounts (id, kind, email, email_normalised, password_hash)
+     values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+    [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
+  );
+  await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  return tokenFor('staff', ROLE_SCOPES[role], id);
+}
+
+const EDGES: ReadonlyArray<readonly [LifecycleStatus, LifecycleStatus]> = [
+  ['Submitted', 'Received'], ['Received', 'Document Verification'],
+  ['Document Verification', 'Under Evaluation'], ['Under Evaluation', 'Assessed'],
+  ['Assessed', 'Payment Submitted'], ['Payment Submitted', 'Payment Under Verification'],
+  ['Payment Under Verification', 'Payment Verified'], ['Payment Verified', 'For Approval'],
+  ['For Approval', 'Approved'], ['Approved', 'Permit Generated'],
+  ['Permit Generated', 'Ready for Release'],
+];
+
+async function file(reference: string, target: LifecycleStatus): Promise<string> {
+  const id = randomUUID();
+  await db.query(
+    `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                               lifecycle_status, submitted_at, created_by)
+     values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
+    [id, reference, applicantId, APPLICANT_ACCOUNT],
+  );
+  let current: LifecycleStatus = 'Submitted';
+  while (current !== target) {
+    const next = EDGES.find(([from]) => from === current)?.[1];
+    if (next === undefined) throw new Error(`no route from ${current} to ${target}`);
+    await db.query('update applications set lifecycle_status = $1 where id = $2', [next, id]);
+    current = next;
+  }
+  return id;
+}
+
+beforeEach(async () => {
+  db = await PgliteClient.create();
+  await migrate(db, loadMigrations(MIGRATIONS_DIR));
+  const config = loadConfig(env);
+  app = await createApp(config, new StructuredLogger('error', () => {}), db);
+  await app.init();
+  await app.getHttpAdapter().getInstance().ready();
+  tokens = app.get(TokenService);
+
+  await db.query(
+    `insert into accounts (id, kind, email, email_normalised, password_hash)
+     values ($1,'applicant','a@x.ph','a@x.ph','scrypt$1$1$1$a$b')`,
+    [APPLICANT_ACCOUNT],
+  );
+  applicantId = randomUUID();
+  await db.query(
+    `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Maria','Santos')`,
+    [applicantId, APPLICANT_ACCOUNT],
+  );
+});
+
+afterEach(async () => {
+  await app.close();
+});
+
+interface QueueBody { items: { referenceNumber: string }[]; nextCursor: string | null }
+
+const get = (url: string, token?: string) =>
+  app.inject({ method: 'GET', url, ...(token === undefined ? {} : { headers: { authorization: `Bearer ${token}` } }) });
+
+describe('the staff surface is closed by default', () => {
+  it('refuses an unauthenticated request', async () => {
+    const response = await get('/staff/applications');
+
+    expect(response.statusCode).toBe(401);
+    expect(response.headers['content-type']).toContain('application/problem+json');
+  });
+
+  it('refuses a caller holding no application scope', async () => {
+    const response = await get('/staff/applications', await tokenFor('staff', ['staff:administer'] as const));
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('gives an applicant nothing, even holding the read scope', async () => {
+    // An applicant's token legitimately carries `applications:read` — it is
+    // how they read their own. The guard therefore lets them through, and the
+    // row filter is what must stop them. This is the test that proves the
+    // second gate exists rather than being covered by the first.
+    await file('BP-1', 'Submitted');
+
+    const response = await get('/staff/applications', await tokenFor('applicant', ['applications:read'] as const, APPLICANT_ACCOUNT));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().items).toHaveLength(0);
+  });
+});
+
+describe('the queue', () => {
+  it('returns the applications an officer may see', async () => {
+    await file('BP-1', 'Submitted');
+    await file('BP-2', 'Ready for Release');
+
+    const response = await get('/staff/applications', await staffToken('building-official'));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<QueueBody>().items.map((r) => r.referenceNumber).sort())
+      .toEqual(['BP-1', 'BP-2']);
+  });
+
+  it('narrows to the requested status', async () => {
+    await file('BP-1', 'Submitted');
+    await file('BP-2', 'Ready for Release');
+
+    const response = await get('/staff/applications?status=Submitted', await staffToken('building-official'));
+
+    expect(response.json().items).toHaveLength(1);
+  });
+
+  it('rejects a status that is not one', async () => {
+    const response = await get('/staff/applications?status=Nearly%20Done', await staffToken('building-official'));
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().errors[0].pointer).toBe('/status');
+  });
+
+  it('serves the dashboard from its own path, not as an application id', async () => {
+    // Route order. Registered after `:applicationId`, this request becomes a
+    // lookup for an application called "metrics" and 404s.
+    await file('BP-1', 'Submitted');
+
+    const response = await get('/staff/applications/metrics', await staffToken('building-official'));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().total).toBe(1);
+  });
+});
+
+describe('opening one application', () => {
+  it('returns it whole, in one request', async () => {
+    const id = await file('BP-1', 'Under Evaluation');
+
+    const response = await get(`/staff/applications/${id}`, await staffToken('evaluator'));
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json();
+    expect(body.summary.referenceNumber).toBe('BP-1');
+    expect(body.applicantEmail).toBe('a@x.ph');
+    expect(body).toHaveProperty('documents');
+    expect(body).toHaveProperty('timeline');
+  });
+
+  it('answers 404, not 403, for one the officer may not read', async () => {
+    // Telling a cashier that this reference exists but is not theirs to open
+    // confirms a neighbour has applied for a permit.
+    const id = await file('BP-1', 'Submitted');
+
+    const response = await get(`/staff/applications/${id}`, await staffToken('cashier'));
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('answers 404 for an id that is not a UUID, without touching the database', async () => {
+    const response = await get('/staff/applications/1%20or%201=1', await staffToken('building-official'));
+
+    expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('moving an application', () => {
+  const post = (url: string, token: string, payload: Record<string, unknown>) =>
+    app.inject({ method: 'POST', url, headers: { authorization: `Bearer ${token}` }, payload });
+
+  it('records a legal move and returns the new version', async () => {
+    const id = await file('BP-1', 'Submitted');
+
+    const response = await post(`/staff/applications/${id}/transitions`, await staffToken('records-officer'), {
+      to: 'Received',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().status).toBe('Received');
+    expect(response.json().version).toBeGreaterThan(1);
+  });
+
+  it('refuses an illegal move with 409 and says what IS legal', async () => {
+    // An officer told only "no" tries again. Told what the application can do
+    // next, they do that instead.
+    const id = await file('BP-1', 'Submitted');
+
+    const response = await post(`/staff/applications/${id}/transitions`, await staffToken('records-officer'), {
+      to: 'Approved',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().detail).toContain('Received');
+  });
+
+  it('refuses a stale write with 412 rather than overwriting', async () => {
+    // Two officers with the same application open. The second must be told
+    // their view is out of date, not silently win.
+    const id = await file('BP-1', 'Submitted');
+    const token = await staffToken('records-officer');
+    await post(`/staff/applications/${id}/transitions`, token, { to: 'Received' });
+
+    const late = await post(`/staff/applications/${id}/transitions`, token, {
+      to: 'Received', expectedVersion: 1,
+    });
+
+    expect(late.statusCode).toBe(412);
+    expect(late.json().detail).toContain('Reload');
+  });
+
+  it('refuses an unmet precondition with 422 and names what is missing', async () => {
+    // Not 403. "You have not paid yet" and "you may not do this" send an
+    // officer to two different places.
+    const id = await file('BP-1', 'Payment Under Verification');
+
+    const response = await post(`/staff/applications/${id}/transitions`, await staffToken('cashier'), {
+      to: 'Payment Verified',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/payment/i);
+  });
+
+  it('refuses to move one the officer may not even read', async () => {
+    const id = await file('BP-1', 'Submitted');
+
+    const response = await post(`/staff/applications/${id}/transitions`, await staffToken('releasing-officer'), {
+      to: 'Received',
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+});
