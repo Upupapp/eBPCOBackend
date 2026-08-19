@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../../applications/domain/application';
 import { centavos, parseCentavos } from '../domain/money';
 import { SettlementCheck, checkSettles } from '../domain/order-of-payment';
@@ -34,10 +35,15 @@ export type VerifyResult =
   | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified'; readonly detail: string };
 
 export class PaymentService {
+  private readonly audit: AuditService;
+
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+    audit?: AuditService,
+  ) {
+    this.audit = audit ?? new AuditService(db, clock);
+  }
 
   /**
    * Records proof of payment, exactly once per idempotency key.
@@ -190,12 +196,17 @@ export class PaymentService {
     );
     if (updated.rowCount === 0) return { ok: false, reason: 'not-found', detail: 'no unverified payment with that id' };
 
-    await this.db.query(
-      `insert into audit_events (actor_account_id, action, subject_type, subject_id, outcome,
-                                 after_state, entry_hash)
-       values ($1, 'payment.rejected', 'payment', $2, 'allowed', $3, 'pending-chain')`,
-      [officer.accountId, paymentId, JSON.stringify({ reason })],
-    );
+    await this.audit.append({
+      action: 'payment.rejected',
+      subjectType: 'payment',
+      subjectId: paymentId,
+      outcome: 'allowed',
+      actorAccountId: officer.accountId,
+      actorRole: officer.kind,
+      // Verbatim, and it travels to the applicant: the money may genuinely have
+      // left their account and "rejected" with no reason is unactionable.
+      afterState: { reason },
+    });
 
     return { ok: true, paymentId };
   }

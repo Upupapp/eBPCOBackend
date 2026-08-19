@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
 import { SqlClient } from '../../../persistence/sql-client';
+import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../../applications/domain/application';
 import { Centavos, centavos, parseCentavos } from '../domain/money';
 import {
@@ -27,10 +28,15 @@ export type IssueResult =
   | { readonly ok: false; readonly reason: 'no-schedule' | 'already-assessed' | 'invalid'; readonly detail: string };
 
 export class AssessmentService {
+  private readonly audit: AuditService;
+
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+    audit?: AuditService,
+  ) {
+    this.audit = audit ?? new AuditService(db, clock);
+  }
 
   async schedules(): Promise<FeeSchedule[]> {
     const versions = await this.db.query<{ version: string; effective_from: Date; effective_to: Date | null }>(
@@ -199,12 +205,15 @@ export class AssessmentService {
     // number of lines is fixed but the citation for each is free text.
     for (const item of items) {
       if (item.amount === 0) continue;
-      await this.db.query(
-        `insert into audit_events (actor_account_id, action, subject_type, subject_id, outcome,
-                                   after_state, entry_hash)
-         values ($1, 'assessment.line-issued', 'order-of-payment', $2, 'allowed', $3, 'pending-chain')`,
-        [officer.accountId, inserted.rows[0]?.id ?? '', JSON.stringify({ line: item.line, basis: item.basis })],
-      );
+      await this.audit.append({
+        action: 'assessment.line-issued',
+        subjectType: 'order-of-payment',
+        subjectId: inserted.rows[0]?.id ?? '',
+        outcome: 'allowed',
+        actorAccountId: officer.accountId,
+        actorRole: officer.kind,
+        afterState: { line: item.line, basis: item.basis },
+      });
     }
 
     return { ok: true, orderId: inserted.rows[0]?.id ?? '', number, total };

@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { AuditService } from '../../compliance/application/audit.service';
 import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { ApplicationSnapshot, Caller } from '../domain/application';
 import { DomainEvent, decide } from '../domain/lifecycle-engine';
@@ -85,10 +86,15 @@ const SNAPSHOT_SQL = `
 `;
 
 export class LifecycleService {
+  private readonly audit: AuditService;
+
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+    audit?: AuditService,
+  ) {
+    this.audit = audit ?? new AuditService(db, clock);
+  }
 
   async snapshot(applicationId: string, client: SqlClient = this.db): Promise<ApplicationSnapshot | null> {
     if (!/^[0-9a-fA-F-]{36}$/.test(applicationId)) return null;
@@ -195,20 +201,19 @@ export class LifecycleService {
   ): Promise<void> {
     for (const event of events) {
       if (event.type === 'application.transitioned') {
-        await tx.query(
-          `insert into audit_events (actor_account_id, actor_role, action, subject_type, subject_id,
-                                     outcome, before_state, after_state, entry_hash)
-           values ($1, $2, $3, 'application', $4, 'allowed', $5, $6, $7)`,
-          [
-            caller.accountId,
-            caller.kind,
-            'application.transitioned',
-            snapshot.id,
-            JSON.stringify({ status: event.payload.from }),
-            JSON.stringify({ status: event.payload.to, remarks: event.payload.remarks ?? null }),
-            // TAB 09 replaces this with a real hash chain over the previous row.
-            'pending-chain',
-          ],
+        // Chained, so removing this row later breaks every row after it.
+        await this.audit.append(
+          {
+            action: 'application.transitioned',
+            subjectType: 'application',
+            subjectId: snapshot.id,
+            outcome: 'allowed',
+            actorAccountId: caller.accountId,
+            actorRole: caller.kind,
+            beforeState: { status: event.payload.from },
+            afterState: { status: event.payload.to, remarks: event.payload.remarks ?? null },
+          },
+          tx,
         );
         continue;
       }

@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../../applications/domain/application';
 import { inspect, InspectionFailure } from '../domain/content-inspection';
 import { MalwareScanner, ScanResult } from '../domain/malware-scanner';
@@ -53,6 +54,7 @@ export class DocumentService {
     private readonly scanner: MalwareScanner,
     private readonly onSecurityEvent: (event: SecurityEvent) => void = () => undefined,
     private readonly clock: () => Date = () => new Date(),
+    private readonly audit: AuditService = new AuditService(db, clock),
   ) {}
 
   async upload(options: {
@@ -219,11 +221,14 @@ export class DocumentService {
     for (const document of eligible.rows) {
       await this.store.delete(document.storage_key);
       await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
-      await this.db.query(
-        `insert into audit_events (action, subject_type, subject_id, outcome, entry_hash)
-         values ('document.deleted-on-retention', 'document', $1, 'allowed', 'pending-chain')`,
-        [document.id],
-      );
+      // "We deleted it as required" is a claim the LGU has to be able to
+      // evidence, so the deletion is itself a chained audit entry.
+      await this.audit.append({
+        action: 'document.deleted-on-retention',
+        subjectType: 'document',
+        subjectId: document.id,
+        outcome: 'allowed',
+      });
     }
 
     return { deleted: eligible.rows.length };

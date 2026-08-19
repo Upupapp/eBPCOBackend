@@ -208,9 +208,13 @@ describe('what one move records', () => {
       applicationId: APPLICATION, caller: officer, to: 'Revision Required', remarks,
     });
 
+    // Ordered by `sequence`, not `occurred_at`: the clock is pinned in these
+    // tests, so every event shares a timestamp and ordering by it is
+    // non-deterministic. That is precisely why TAB 09 gave the audit trail a
+    // sequence — two events in the same millisecond still have a defined order.
     const audit = await db.query<{ after_state: { remarks: string } }>(
       `select after_state from audit_events
-        where action = 'application.transitioned' order by occurred_at desc limit 1`,
+        where action = 'application.transitioned' order by sequence desc limit 1`,
     );
     expect(audit.rows[0]?.after_state.remarks).toBe(remarks);
   });
