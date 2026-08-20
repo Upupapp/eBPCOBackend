@@ -26,7 +26,18 @@ async function main(): Promise<void> {
   }
 
   const logger = new StructuredLogger(config.LOG_LEVEL ?? 'info');
-  const app = await createApp(config, logger);
+
+  let app;
+  try {
+    app = await createApp(config, logger);
+  } catch (error) {
+    // A wiring mistake, not a configuration one. Reported rather than left to
+    // an exit code with no explanation.
+    logger.error('the application could not be built', {
+      error: error instanceof Error ? error : { message: String(error) },
+    });
+    process.exit(70); // EX_SOFTWARE
+  }
 
   // 0.0.0.0 because the process runs in a container and must accept traffic
   // from outside its own network namespace.

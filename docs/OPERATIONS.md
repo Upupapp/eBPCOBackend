@@ -41,6 +41,9 @@ find out what is missing.
 | `SHUTDOWN_DEADLINE_MS` | `20000` | **Must stay below the orchestrator's termination grace period**, or the process is SIGKILLed mid-transaction and the deadline never fires. Kubernetes' default `terminationGracePeriodSeconds` is 30, and `12 + 20 = 32` exceeds it — raise the grace period or lower these. |
 | `BODY_LIMIT_BYTES` | `1048576` | An unbounded body is a denial-of-service surface. |
 | `RATE_LIMIT_MAX` | `300` | — |
+| `SCHEDULER_ENABLED` | `false` | Off by default. See §4a. |
+| `SCHEDULER_TICK_SECONDS` | `15` | Must stay well below the shortest job interval, or a job due every minute waits for the next tick. |
+| `DOCUMENT_RETENTION_DAYS` | *(unset)* | The LGU's number (M-15). Unset means retention runs and deletes nothing. |
 | `TRUST_PROXY` | `false` | **Set it only behind a proxy you control.** Trusting `X-Forwarded-For` from the open internet lets any caller spoof their address, which defeats rate limiting and poisons the audit trail. |
 
 ---
@@ -119,6 +122,37 @@ held unscanned) into a total one.
 
 ---
 
+## 4a. Scheduled work
+
+Every replica runs a scheduler; they coordinate through the database. A job is
+claimed by one UPDATE whose WHERE only matches an unheld lock, so exactly one
+replica runs it — no leader election, no coordinator to be down.
+
+**Off by default.** Set `SCHEDULER_ENABLED=true` on deployments that should run
+jobs. A one-off process or a test should not start deleting documents as a side
+effect of booting.
+
+| Job | Interval | What it does |
+|---|---|---|
+| `document-retention` | hourly | Deletes documents whose application closed longer ago than `DOCUMENT_RETENTION_DAYS`. **Unset means it deletes nothing and says so** — the period is the LGU's (M-15), and one invented here would be a data-minimisation decision made by the wrong party. |
+| `audit-chain-verification` | daily | Reads every audit row and checks every link. Fails loudly on a break; does **not** take the instance out of rotation, because the evidence is historical and refusing traffic would not protect it. What it needs is a person. |
+| `notification-dispatch` | every minute | Plans delivery and **queues** attempts. **Nothing is sent** — push, email and SMS all need a provider that has not been chosen. The detail line says `NOT SENT` on every run so this cannot be mistaken for working. |
+| `operational-data-purge` | daily | Idempotency keys past 48h, expired or consumed refresh tokens, used password-reset tickets. |
+
+**Every job must be safe to run twice.** The lease expires so a SIGKILLed
+replica does not hold a job for ever, and an expiry cannot tell a dead replica
+from a slow one — so a job that overruns its lease will be joined by another.
+
+**The schedule lives in the database.** Changing how often retention runs, or
+switching a job off, is an UPDATE to `scheduled_jobs` rather than a deploy.
+
+**"Did it run?"** — `select name, last_finished_at, last_outcome,
+consecutive_failures from scheduled_jobs`. That is half the reason it is a
+table rather than an advisory lock. `consecutive_failures` is the number to
+alert on: one failure is noise, nine is an outage nobody has noticed.
+
+---
+
 ## 5. NOT verified, and not verifiable from a developer machine
 
 This is the section to read before a pilot.
@@ -144,6 +178,11 @@ This is the section to read before a pilot.
   replicas (ADR referenced in `documents.module.ts`).
 - **No backup or restore procedure has been written or rehearsed.** An untested
   restore is not a backup.
+- **Nothing alerts on `consecutive_failures`.** The number is recorded and
+  nothing watches it, so a job that has been failing for a week looks exactly
+  like one that has been working.
+- **No notification is ever sent.** The dispatch job plans and queues; no
+  provider exists. An applicant is told nothing by any channel.
 - **No log aggregation, metrics or alerting.** The service emits structured JSON
   with correlation ids; nothing collects it.
 - **Hosting is undecided** (E-1/E-2, M-27). Everything above assumes a

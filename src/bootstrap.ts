@@ -44,7 +44,16 @@ export async function createApp(
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.forConfig(config, logger, sqlClientOverride),
     adapter,
-    { logger: false, bufferLogs: true },
+    {
+      logger: false,
+      bufferLogs: true,
+      // Nest's default is to print the resolution error through its own logger
+      // and call process.exit(1). With `logger: false` that prints NOTHING —
+      // the process vanishes with an exit code and no explanation, which is
+      // what a wiring mistake looked like until this line existed. Throwing
+      // instead lets main.ts report it and lets a test see it.
+      abortOnError: false,
+    },
   );
 
   await applySecurity(app.getHttpAdapter().getInstance(), config, logger);

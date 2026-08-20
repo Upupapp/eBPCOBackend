@@ -12,7 +12,7 @@ import { PasswordPolicy } from './domain/password-policy';
 import { PostgresAccountRepository } from './infrastructure/postgres-account.repository';
 import { PostgresSessionRepository } from './infrastructure/postgres-session.repository';
 import { SQL_CLIENT } from '../../persistence/persistence.module';
-import { ErasureService } from '../compliance/application/erasure.service';
+import { ComplianceModule } from '../compliance/compliance.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { LocalBreachedPasswordScreen } from './infrastructure/breached-password-screen';
 import { AuthController, MeController } from './transport/auth.controller';
@@ -28,13 +28,10 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
  */
 @Global()
 @Module({
+  imports: [ComplianceModule],
   controllers: [AuthController, MeController],
   providers: [
-    {
-      provide: ErasureService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new ErasureService(db),
-    },
+
     // Bound here and nowhere else. The in-memory implementations still exist,
     // and the shared contract suite holds both to identical behaviour, so
     // "works in tests, fails in production" surfaces as a failing test.

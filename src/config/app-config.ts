@@ -93,6 +93,27 @@ const schema = z
     // the server, so it applies even if this process stops waiting.
     DB_STATEMENT_TIMEOUT_MS: intFromEnv(1_000, 300_000, 30_000),
 
+    // Periodic work. Off by default so a test or a one-off process does not
+    // start deleting documents as a side effect of booting; every deployment
+    // that should run jobs sets it explicitly.
+    SCHEDULER_ENABLED: boolFromEnv(false),
+
+    // Must be well below the shortest job interval, or a job due every minute
+    // waits for the next tick instead.
+    SCHEDULER_TICK_SECONDS: intFromEnv(1, 3_600, 15),
+
+    // How long documents are kept after their application CLOSES. No default:
+    // a retention period invented by this service would be a data-minimisation
+    // decision made by the wrong party (M-15). Unset means retention runs and
+    // deletes nothing, saying so.
+    DOCUMENT_RETENTION_DAYS: z
+      .string()
+      .regex(/^\d+$/, 'must be a whole number of days')
+      .transform(Number)
+      .pipe(z.number().int().min(1).max(36_500))
+      .optional()
+      .transform((value) => value ?? null),
+
     // How long to keep serving after reporting not-ready, so the load balancer
     // has time to stop sending. Below its own check interval this achieves
     // nothing; the default assumes a 5s interval and two failed checks.

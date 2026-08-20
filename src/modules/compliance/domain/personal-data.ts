@@ -429,6 +429,15 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     year: none(), holiday_date: none(), name: none(), kind: none(), proclamation: none(),
   },
   document_number_sequences: { series: none(), year: none(), last_issued: none() },
+  scheduled_jobs: {
+    name: none(), interval_seconds: none(), enabled: none(),
+    last_started_at: none(), last_finished_at: none(), last_outcome: none(),
+    // Truncated at the source, and never the failing row itself — a job error
+    // can carry whatever the query touched.
+    last_detail: none(), consecutive_failures: none(),
+    // A replica identifier, not a person.
+    locked_by: none(), locked_until: none(),
+  },
   schema_migrations: { version: none(), name: none(), checksum: none(), applied_at: none() },
 };
 
