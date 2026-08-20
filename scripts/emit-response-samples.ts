@@ -23,7 +23,7 @@ import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
-import { ROLE_SCOPES, StaffRole } from '../src/modules/identity/domain/account';
+import { APPLICANT_SCOPES, ROLE_SCOPES, StaffRole } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
 
 const target = process.argv[2]
@@ -363,7 +363,10 @@ async function main(): Promise<void> {
   // which is exactly what had already happened.
   const applicantToken = (await tokens.issueAccessToken({
     sub: seeded.applicantAccount, sid: randomUUID(), kind: 'applicant',
-    scopes: ['profile:read', 'applications:read'],
+    // The full applicant scope set: a token missing `notifications:read`
+    // records a 403 for a route that works, which is a sample that documents
+    // the fixture rather than the server.
+    scopes: [...APPLICANT_SCOPES],
   })).token;
   await record('me.applicant', 'GET', '/me', applicantToken);
   await record('staff.applications.list', 'GET', '/staff/applications?limit=3', officialToken);
@@ -432,6 +435,17 @@ async function main(): Promise<void> {
       officeHours: 'Monday to Friday, 8:00am - 5:00pm',
       bringWithYou: ['One valid government ID.', 'The Official Receipt.'],
     }, randomUUID());
+  // The applicant's own surface. Recorded because these are the responses the
+  // mobile client parses, and its enum parsers THROW on an unknown value —
+  // drift here is a crash on a handset rather than a warning in a log.
+  await record('applicant.applications.list', 'GET', '/applications', applicantToken);
+  await record('applicant.applications.detail', 'GET',
+    `/applications/${seeded.detailed}`, applicantToken);
+  await record('applicant.applications.timeline', 'GET',
+    `/applications/${seeded.detailed}/timeline`, applicantToken);
+  await record('applicant.notifications', 'GET', '/notifications', applicantToken);
+  await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
+
   // Erasure, recorded because it is the response a data subject reads. Last,
   // because it disables the applicant account every other sample depends on.
   await record('me.erase', 'DELETE', '/me', applicantToken);

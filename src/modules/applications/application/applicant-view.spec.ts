@@ -9,6 +9,8 @@ const record = (overrides: Partial<ApplicationRecord> = {}): ApplicationRecord =
   lifecycleStatus: 'Under Evaluation',
   businessId: null,
   businessName: null,
+  paymentSubmittedAt: null,
+  paymentVerifiedAt: null,
   location: 'Lot 7 Block 3, Barangay Bagumbayan',
   classification: null,
   pledgedWorkingDays: null,
@@ -156,5 +158,101 @@ describe('the projection is computed here, not by the client', () => {
 
     expect(view.applicantStatus).toBe('Payment Verification');
     expect(view.requiresApplicantAction).toBe(true);
+  });
+});
+
+describe('the payment status is chosen from the facts', () => {
+  // The four-value vocabulary has no term for "assessed but unpaid". That state
+  // is an Order of Payment present alongside `Not Yet Available`, which the
+  // mobile client groups as "Due Now" together with `Overdue` — the applicant's
+  // obligation is identical and only later. This is the client's reasoning and
+  // it is right; what follows is the server holding up its end.
+
+  const order = {
+    number: 'OP-2026-000018',
+    assessedAt: new Date('2026-07-08T02:00:00Z'),
+    dueDate: '2026-07-23',
+    feeScheduleVersion: '2026.1',
+    filingCentavos: 50_000,
+    processingCentavos: 120_000,
+    architecturalCentavos: 0,
+    structuralCentavos: 512_000,
+    electricalCentavos: 0,
+    othersCentavos: 0,
+    totalCentavos: 682_000,
+  };
+
+  const statusOf = (overrides: Partial<ApplicationRecord>): string =>
+    (toApplicantView(record(overrides)) as { payment: { status: string } }).payment.status;
+
+  it('is Not Yet Available with no order, and carries no figure', () => {
+    expect(statusOf({ orderOfPayment: null })).toBe('Not Yet Available');
+  });
+
+  it('stays Not Yet Available once assessed but unpaid, before the due date', () => {
+    // Deliberate: the vocabulary has no better word, and the presence of
+    // `orderOfPayment` is what distinguishes it. The clock is pinned because
+    // without it this test drifts into Overdue the day the fixture's due date
+    // passes — which is how a suite starts failing on a Tuesday for no reason
+    // anyone changed.
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-15T00:00:00Z'));
+    try {
+      expect(statusOf({ orderOfPayment: order })).toBe('Not Yet Available');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('is Pending Verification once proof has been submitted', () => {
+    expect(statusOf({ orderOfPayment: order, paymentSubmittedAt: new Date('2026-07-10T00:00:00Z') }))
+      .toBe('Pending Verification');
+  });
+
+  it('is Paid once verified', () => {
+    // The defect this replaces. The status was returned unconditionally as
+    // `Not Yet Available`, so an applicant who had paid and been receipted was
+    // told the payment was not available — on the same screen showing their
+    // Official Receipt.
+    expect(statusOf({
+      orderOfPayment: order,
+      paymentSubmittedAt: new Date('2026-07-10T00:00:00Z'),
+      paymentVerifiedAt: new Date('2026-07-11T00:00:00Z'),
+    })).toBe('Paid');
+  });
+
+  it('is not Overdue on the due date itself', () => {
+    // End of the due DAY, not the start of it. An applicant paying on the last
+    // day has not missed the deadline, and telling them they have is the sort
+    // of wrong that produces a complaint at a counter.
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-23T15:00:00Z'));
+    try {
+      expect(statusOf({ orderOfPayment: order })).toBe('Not Yet Available');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('is Overdue after the due date has passed', () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-07-25T00:00:00Z'));
+    try {
+      expect(statusOf({ orderOfPayment: order })).toBe('Overdue');
+    } finally {
+      jest.useRealTimers();
+    }
+  });
+
+  it('is never Overdue once paid, however late', () => {
+    // The obligation is discharged. Telling someone who has paid that they are
+    // overdue is worse than saying nothing.
+    jest.useFakeTimers().setSystemTime(new Date('2027-01-01T00:00:00Z'));
+    try {
+      expect(statusOf({
+        orderOfPayment: order,
+        paymentSubmittedAt: new Date('2026-07-10T00:00:00Z'),
+        paymentVerifiedAt: new Date('2026-07-11T00:00:00Z'),
+      })).toBe('Paid');
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });

@@ -43,6 +43,17 @@ export interface ApplicationRecord {
   readonly openInstructionCount: number;
   /** Present only when an officer has issued one. */
   readonly orderOfPayment: OrderOfPaymentRecord | null;
+  /**
+   * The state of the payment TRANSACTION, not of the obligation.
+   *
+   * The distinction is the client's, and it is right: the four-value vocabulary
+   * has no term for "assessed but unpaid", so that state is an Order of Payment
+   * present alongside `Not Yet Available` — which the mobile client groups as
+   * "Due Now" together with `Overdue`, since the applicant's obligation is
+   * identical and only later.
+   */
+  readonly paymentSubmittedAt: Date | null;
+  readonly paymentVerifiedAt: Date | null;
   /** Officer-scope. Never reaches an applicant payload. */
   readonly officer: string | null;
   readonly applicantName: string;
@@ -98,18 +109,45 @@ export function toApplicantView(record: ApplicationRecord): Record<string, unkno
     };
   }
 
-  view.payment = paymentView(record.orderOfPayment);
+  view.payment = paymentView(record);
   return view;
 }
 
-function paymentView(order: OrderOfPaymentRecord | null): Record<string, unknown> {
+/**
+ * The four values the vocabulary has, chosen from the facts.
+ *
+ * An earlier version returned `Not Yet Available` unconditionally. That is
+ * correct while nothing has been paid — see the note on `paymentSubmittedAt` —
+ * and it was wrong the moment a payment was verified: an applicant who had paid
+ * and been receipted would still have been told the payment was not available,
+ * on the same screen showing their Official Receipt.
+ */
+function paymentStatusOf(record: ApplicationRecord, now: Date): string {
+  if (record.paymentVerifiedAt !== null) return 'Paid';
+  if (record.paymentSubmittedAt !== null) return 'Pending Verification';
+
+  const dueDate = record.orderOfPayment?.dueDate ?? null;
+  // End of the due DAY, not the start of it. An applicant paying on the last
+  // day has not missed the deadline, and telling them they have is both wrong
+  // and the sort of wrong that produces a complaint at a counter.
+  if (dueDate !== null && now > new Date(`${dueDate}T23:59:59.999Z`)) return 'Overdue';
+
+  // Assessed but unpaid, or not yet assessed. The vocabulary does not
+  // distinguish them; the presence of `orderOfPayment` does.
+  return 'Not Yet Available';
+}
+
+function paymentView(record: ApplicationRecord, now: Date = new Date()): Record<string, unknown> {
+  const status = paymentStatusOf(record, now);
+  const order = record.orderOfPayment;
+
   if (order === null) {
     // The whole of it. No `orderOfPayment` key, no `totalCentavos`, no zero.
-    return { status: 'Not Yet Available' };
+    return { status };
   }
 
   return {
-    status: 'Not Yet Available',
+    status,
     orderOfPayment: {
       number: order.number,
       assessedAt: order.assessedAt.toISOString(),

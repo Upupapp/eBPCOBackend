@@ -8,8 +8,10 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PermitsModule } from '../permits/permits.module';
 import { EvaluationService } from './application/evaluation.service';
 import { LifecycleService } from './application/lifecycle.service';
+import { ApplicantQueryService } from './application/applicant-query.service';
 import { StaffQueueService } from './application/staff-queue.service';
 import { StaffActionsController } from './transport/staff-actions.controller';
+import { ApplicantApplicationsController } from './transport/applicant-applications.controller';
 import { StaffApplicationsController } from './transport/staff-applications.controller';
 
 export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
@@ -34,6 +36,12 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
         new CachingCalendarRepository(new SqlCalendarRepository(db)),
     },
     {
+      provide: ApplicantQueryService,
+      inject: [SQL_CLIENT, CALENDAR_REPOSITORY],
+      useFactory: (db: SqlClient, calendars: CalendarRepository) =>
+        new ApplicantQueryService(db, calendars),
+    },
+    {
       provide: StaffQueueService,
       inject: [SQL_CLIENT, CALENDAR_REPOSITORY],
       useFactory: (db: SqlClient, calendars: CalendarRepository) =>
@@ -50,7 +58,7 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
       useFactory: (db: SqlClient) => new EvaluationService(db),
     },
   ],
-  controllers: [StaffApplicationsController, StaffActionsController],
+  controllers: [ApplicantApplicationsController, StaffApplicationsController, StaffActionsController],
   exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })
 export class ApplicationsModule {}
