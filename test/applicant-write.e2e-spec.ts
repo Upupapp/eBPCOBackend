@@ -254,6 +254,122 @@ describe('uploading a document', () => {
   });
 });
 
+describe('downloading a document', () => {
+  async function uploaded(): Promise<{ documentId: string; url: string }> {
+    const upload = await post('/documents', maria, {
+      fileName: 'lot-plan.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    const link = await get(`/documents/${documentId}/content`, maria);
+    if (link.statusCode !== 200) {
+      throw new Error(`could not mint a link: ${link.statusCode} ${JSON.stringify(link.json())}`);
+    }
+    return { documentId, url: link.json<{ url: string }>().url };
+  }
+
+  it('actually serves the bytes, which the signed link never did', async () => {
+    // `signedUrl` has always pointed at `/documents/content` and nothing served
+    // it, so every link handed to an applicant answered 404 — no document could
+    // be downloaded, and the integrity check behind it had never run outside a
+    // test.
+    const { url } = await uploaded();
+
+    const response = await app.inject({ method: 'GET', url });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.rawPayload.equals(PDF)).toBe(true);
+  });
+
+  it('needs no bearer token, because the signature IS the authorisation', async () => {
+    // That is what a signed URL is for: a download fetched by a browser, an
+    // image tag or a download manager, none of which carry one.
+    const { url } = await uploaded();
+
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(200);
+  });
+
+  it('always serves as an attachment, never inline', async () => {
+    // These are files an applicant uploaded, served from the API's own origin.
+    // An HTML or SVG document rendered inline here is stored cross-site
+    // scripting against every officer who opens it.
+    const { url } = await uploaded();
+
+    const response = await app.inject({ method: 'GET', url });
+
+    expect(response.headers['content-disposition']).toMatch(/^attachment;/);
+    expect(response.headers['x-content-type-options']).toBe('nosniff');
+  });
+
+  it('does not let a filename rewrite the response headers', async () => {
+    // Applicants name their own files. A name containing a quote or a newline
+    // would let the rest of the header be rewritten.
+    const upload = await post('/documents', maria, {
+      fileName: 'plan".pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    const url = (await get(`/documents/${documentId}/content`, maria)).json<{ url: string }>().url;
+
+    const disposition = (await app.inject({ method: 'GET', url })).headers['content-disposition'];
+
+    expect(disposition).toBe('attachment; filename="plan_.pdf"');
+  });
+
+  it('refuses a forged signature', async () => {
+    const { url } = await uploaded();
+    const forged = url.replace(/sig=[^&]*/, 'sig=forged');
+
+    expect((await app.inject({ method: 'GET', url: forged })).statusCode).toBe(404);
+  });
+
+  it('refuses a link whose key was swapped for another document', async () => {
+    // The signature covers the key, so pointing a valid signature at a
+    // different object does not verify.
+    const mine = await uploaded();
+    const theirs = await post('/documents', jose, {
+      fileName: 'jose.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    const theirId = theirs.json<{ documentId: string }>().documentId;
+    const theirKey = (await db.query<{ storage_key: string }>(
+      'select storage_key from documents where id = $1', [theirId],
+    )).rows[0]!.storage_key;
+
+    const swapped = mine.url.replace(/key=[^&]*/, `key=${encodeURIComponent(theirKey)}`);
+
+    expect((await app.inject({ method: 'GET', url: swapped })).statusCode).toBe(404);
+  });
+
+  it('refuses an expired link, and says to open the document again', async () => {
+    const { url } = await uploaded();
+    const expired = url.replace(/expires=\d+/, `expires=${Math.floor(Date.now() / 1000) - 10}`);
+
+    // Re-signing is impossible without the key, so the signature no longer
+    // matches either — both checks refuse it, which is the intended belt and
+    // braces.
+    expect((await app.inject({ method: 'GET', url: expired })).statusCode).toBe(404);
+  });
+
+  it('refuses once the document is quarantined, even inside the link’s window', async () => {
+    // A document can be rejected by a rescan in the seconds after a link was
+    // issued, and a link that keeps working after that is the one case where
+    // these two minutes matter.
+    const { documentId, url } = await uploaded();
+    await db.query(`update documents set status = 'Rejected' where id = $1`, [documentId]);
+
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(404);
+  });
+
+  it('refuses when the stored bytes no longer match their checksum', async () => {
+    // Serving them would hand an applicant a document the LGU can no longer
+    // vouch for.
+    const { documentId, url } = await uploaded();
+    await db.query(
+      `update documents set sha256 = $2 where id = $1`, [documentId, 'f'.repeat(64)],
+    );
+
+    expect((await app.inject({ method: 'GET', url })).statusCode).toBe(500);
+  });
+});
+
 describe('paying', () => {
   async function filed(): Promise<string> {
     return (await post('/applications', maria, submission())).json<{ id: string }>().id;

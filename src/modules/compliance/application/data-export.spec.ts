@@ -46,6 +46,8 @@ class FakeStore implements ObjectStore {
   signedUrl = (key: string, expiresInSeconds: number): Promise<string> =>
     Promise.resolve(`https://objects.test/${key}?expires=${expiresInSeconds}`);
 
+  verifySignedUrl = (): 'ok' | 'expired' | 'invalid' => 'ok';
+
   isPubliclyReadable = (): Promise<boolean> => Promise.resolve(false);
 }
 

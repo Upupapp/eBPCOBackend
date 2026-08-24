@@ -80,6 +80,17 @@ const PUBLIC_ROUTES = new Set([
   'POST /auth/register',
   'POST /auth/password/forgot',
   'POST /auth/password/reset',
+
+  // Redeems a signed document link. Public BECAUSE the signature is the
+  // authorisation — that is what a signed URL is for: a download fetched by a
+  // browser, an image tag or a download manager, none of which carry a bearer
+  // token. Everything a caller would normally be checked for was checked when
+  // the link was minted, at an authenticated endpoint, which is why the link
+  // lives for two minutes.
+  //
+  // It is on this list because this test refused it, correctly, the moment the
+  // route existed. Adding a line here should always be a deliberate act.
+  'GET /documents/content',
 ]);
 
 describe('deny by default', () => {

@@ -14,6 +14,14 @@ export interface ObjectStore {
    */
   signedUrl(key: string, expiresInSeconds: number): Promise<string>;
   /**
+   * Checks a signed URL's parameters.
+   *
+   * On the port because the API redeems these itself rather than handing out
+   * bucket links — see FilesystemObjectStore. A store whose URLs are redeemed
+   * elsewhere would answer 'ok' here and let the route's own checks stand.
+   */
+  verifySignedUrl(key: string, expiresAt: number, nonce: string, signature: string): 'ok' | 'expired' | 'invalid';
+  /**
    * Whether the bucket is reachable without credentials. Checked on every
    * deploy: a public bucket of applicants' identity documents is the worst
    * single failure this system can have, and it is a configuration mistake

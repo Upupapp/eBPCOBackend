@@ -42,6 +42,7 @@ interface DocumentRow {
   sha256: string;
   status: DocumentStatus;
   scan_cleared: boolean;
+  uploaded_by: string;
   applicant_account_id: string | null;
 }
 
@@ -157,7 +158,7 @@ export class DocumentService {
     // which is itself a disclosure — and the disclosure is "this person has an
     // application with this LGU".
     if (document === null) return { ok: false, reason: 'not-found' };
-    if (caller.kind === 'applicant' && document.applicant_account_id !== caller.accountId) {
+    if (caller.kind === 'applicant' && !ownedBy(document, caller.accountId)) {
       this.onSecurityEvent({
         type: 'unauthorised-document-access',
         documentId,
@@ -275,11 +276,65 @@ export class DocumentService {
     return { deleted: eligible.rows.length, skippedOpen: Number(open.rows[0]?.n ?? 0) };
   }
 
+  /**
+   * Serves the bytes behind a signed URL.
+   *
+   * The signature IS the authorisation here — that is what a signed URL is for,
+   * and why the route redeeming it is public. So everything else the caller
+   * would normally be checked for has to have been checked when the URL was
+   * MINTED, in `contentUrl`, and the window between the two is why the URL
+   * expires in two minutes.
+   *
+   * The scan and quarantine checks are repeated anyway. A document can be
+   * rejected by a rescan in the seconds after a link was issued, and a link
+   * that keeps working after the file was quarantined is the one case where
+   * these two minutes matter.
+   */
+  async redeem(key: string, expiresAt: number, nonce: string, signature: string): Promise<
+    | { readonly ok: true; readonly bytes: Buffer; readonly fileName: string; readonly contentType: string }
+    | { readonly ok: false; readonly reason: 'invalid' | 'expired' | 'not-found' | 'integrity' }
+  > {
+    const verdict = this.store.verifySignedUrl(key, expiresAt, nonce, signature);
+    if (verdict !== 'ok') return { ok: false, reason: verdict };
+
+    const document = await this.loadByStorageKey(key);
+    // A forged-but-valid signature over an unknown key answers the same as a
+    // bad signature would.
+    if (document === null) return { ok: false, reason: 'not-found' };
+    if (document.status === 'Rejected' || !document.scan_cleared) {
+      return { ok: false, reason: 'not-found' };
+    }
+
+    const content = await this.readContent(document.id);
+    if (!content.ok) return { ok: false, reason: content.reason };
+
+    return {
+      ok: true,
+      bytes: content.bytes,
+      fileName: document.file_name,
+      contentType: document.content_type,
+    };
+  }
+
+  private async loadByStorageKey(key: string): Promise<(DocumentRow & { file_name: string; content_type: string }) | null> {
+    const result = await this.db.query<DocumentRow & { file_name: string; content_type: string }>(
+      `select d.id, d.application_id, d.storage_key, d.sha256, d.status, d.scan_cleared,
+              d.uploaded_by, d.file_name, d.content_type, acc.id as applicant_account_id
+         from documents d
+         left join applications a on a.id = d.application_id
+         left join applicants ap on ap.id = a.applicant_id
+         left join accounts acc on acc.id = ap.account_id
+        where d.storage_key = $1 and d.deleted_at is null`,
+      [key],
+    );
+    return result.rows[0] ?? null;
+  }
+
   private async load(documentId: string): Promise<DocumentRow | null> {
     if (!/^[0-9a-fA-F-]{36}$/.test(documentId)) return null;
     const result = await this.db.query<DocumentRow>(
       `select d.id, d.application_id, d.storage_key, d.sha256, d.status, d.scan_cleared,
-              acc.id as applicant_account_id
+              d.uploaded_by, acc.id as applicant_account_id
          from documents d
          left join applications a on a.id = d.application_id
          left join applicants ap on ap.id = a.applicant_id
@@ -289,4 +344,22 @@ export class DocumentService {
     );
     return result.rows[0] ?? null;
   }
+}
+
+/**
+ * Whether an applicant may read this document.
+ *
+ * Two ways, and only checking the second was a real defect: the mobile wizard
+ * uploads documents BEFORE the application exists — that is the whole flow, and
+ * why `POST /documents` accepts a null application id — so a document has no
+ * application to be owned through until the moment it is filed. Reading
+ * ownership solely from the application meant an applicant could not open,
+ * check or re-read anything they had just uploaded.
+ *
+ * Attaching is already restricted to documents you uploaded and that are not
+ * yet attached, so `uploaded_by` cannot be used to reach into someone else's
+ * application later.
+ */
+function ownedBy(document: { uploaded_by: string; applicant_account_id: string | null }, accountId: string): boolean {
+  return document.uploaded_by === accountId || document.applicant_account_id === accountId;
 }

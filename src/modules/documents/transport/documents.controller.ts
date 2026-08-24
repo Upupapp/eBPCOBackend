@@ -1,8 +1,9 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
-import { RequireScopes } from '../../identity/transport/guards/public.decorator';
+import { Public, RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../../applications/domain/application';
 import { DocumentService } from '../application/document.service';
@@ -18,6 +19,13 @@ import { DocumentService } from '../application/document.service';
  * counting — and is why the size cap is enforced on the DECODED length rather
  * than the encoded one.
  */
+
+const signedLinkShape = z.object({
+  key: z.string().min(1).max(200),
+  expires: z.coerce.number().int().min(0),
+  n: z.string().min(1).max(64),
+  sig: z.string().min(1).max(200),
+}).strict();
 
 const uploadShape = z.object({
   fileName: z.string().min(1).max(255),
@@ -105,6 +113,64 @@ export class DocumentsController {
   }
 
   /**
+   * Redeems a signed URL and serves the bytes.
+   *
+   * **Public, and that is the point.** The signature is the authorisation: a
+   * signed URL exists so a download can be fetched without a bearer token, by a
+   * browser, an image tag or a download manager. Everything a caller would
+   * normally be checked for was checked when the URL was minted, which is why
+   * it lives for two minutes.
+   *
+   * This route did not exist. `signedUrl` has always pointed at
+   * `/documents/content`, nothing served it, and every link handed to an
+   * applicant answered 404 — so no document could be downloaded, and the
+   * integrity check behind it had never run outside a test.
+   */
+  @Public()
+  @Get('content')
+  async redeem(
+    @Query() query: unknown,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<Buffer> {
+    const link = parse(signedLinkShape, query ?? {});
+    const result = await this.documents.redeem(link.key, link.expires, link.n, link.sig);
+
+    if (!result.ok) {
+      if (result.reason === 'expired') {
+        throw new ProblemException(
+          ProblemType.notFound, 'No such resource', HttpStatus.NOT_FOUND,
+          'That link has expired. Open the document again to get a new one.',
+        );
+      }
+      if (result.reason === 'integrity') {
+        // The stored bytes no longer match the checksum recorded at upload.
+        // Refusing is the only safe answer: serving them would hand an
+        // applicant a document the LGU can no longer vouch for.
+        throw new ProblemException(
+          ProblemType.internal, 'The request could not be completed', HttpStatus.INTERNAL_SERVER_ERROR,
+        );
+      }
+      // Invalid and unknown answer alike. Distinguishing them would say whether
+      // a guessed key exists.
+      throw ProblemException.notFound('No such document.');
+    }
+
+    void reply
+      // ALWAYS an attachment, never inline. These are files an applicant
+      // uploaded, served from the API's own origin: an HTML or SVG document
+      // rendered inline here is stored cross-site scripting against every
+      // officer who opens it.
+      .header('content-disposition', `attachment; filename="${safeFileName(result.fileName)}"`)
+      .header('content-type', result.contentType)
+      // And never sniffed into something executable regardless of what the
+      // declared type says.
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store');
+
+    return result.bytes;
+  }
+
+  /**
    * A short-lived URL for the bytes.
    *
    * Not the bytes themselves: a document is megabytes and this process should
@@ -122,4 +188,16 @@ export class DocumentsController {
     if (!access.ok) throw ProblemException.notFound('No such document.');
     return { url: access.url };
   }
+}
+
+/**
+ * A filename safe to put in a Content-Disposition header.
+ *
+ * Applicants name their own files, and a name containing a quote or a newline
+ * would let the rest of the header be rewritten — a response-splitting hole
+ * dressed as a document called `plan".pdf`.
+ */
+function safeFileName(name: string): string {
+  const cleaned = name.replace(/[^\w.\- ]/g, '_').slice(0, 100);
+  return cleaned.length > 0 ? cleaned : 'document';
 }

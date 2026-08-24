@@ -9,6 +9,7 @@
     "GET /applications/:applicationId/timeline",
     "GET /businesses",
     "GET /documents/:documentId/content",
+    "GET /documents/content",
     "GET /health",
     "GET /me",
     "GET /me/export/:requestId",

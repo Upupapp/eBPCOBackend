@@ -278,6 +278,7 @@ const store = {
   get: (key: string) => Promise.resolve(objects.get(key) ?? null),
   delete: (key: string) => Promise.resolve(objects.delete(key)),
   signedUrl: (key: string) => Promise.resolve(`https://objects.test/${key}`),
+  verifySignedUrl: () => 'ok' as const,
   isPubliclyReadable: () => Promise.resolve(false),
 } as unknown as ObjectStore;
 
