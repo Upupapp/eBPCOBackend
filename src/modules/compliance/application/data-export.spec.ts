@@ -5,7 +5,7 @@ import { PgliteClient } from '../../../persistence/pglite-client';
 import { SqlClient } from '../../../persistence/sql-client';
 import { loadMigrations, migrate } from '../../../persistence/migrator';
 import { ObjectStore } from '../../documents/domain/object-store';
-import { DataExportService, EXPORT_TTL_HOURS, assertNoSecrets } from './data-export.service';
+import { DataExportService, EXPORT_SECTIONS, EXPORT_TTL_HOURS, assertNoSecrets } from './data-export.service';
 
 /**
  * A portable copy of one person's data, under RA 10173 §18.
@@ -210,6 +210,41 @@ describe('what the file contains', () => {
 
     const status = await dataExports.statusOf(MARIA, requestId);
     expect(status?.sha256).toMatch(/^[a-f0-9]{64}$/);
+  });
+});
+
+describe('completeness', () => {
+  it('carries the applicant’s own answers', async () => {
+    // The most obviously theirs thing in the record — fifteen screens they
+    // typed. Omitting it from a portability copy while including the LGU's
+    // notes about them would be an odd reading of whose data this is.
+    await db.query(
+      `update applications set form = $2 where id = $1`,
+      [mariaApplication, JSON.stringify({ lotArea: 240, engineer: 'Ana Dela Cruz, PRC 0012345' })],
+    );
+    const { requestId } = await dataExports.request(MARIA);
+    await dataExports.produce(requestId);
+
+    const applications = (await produced(requestId)).applications as { form: Record<string, unknown> }[];
+    expect(applications[0]!.form).toEqual({ lotArea: 240, engineer: 'Ana Dela Cruz, PRC 0012345' });
+  });
+
+  it('does not carry whether the LGU had a schema to check it against', () => {
+    // An operational fact about the LGU rather than personal data, classified
+    // `none` in the register — and absent from the applicant's own view of an
+    // application for the same reason.
+    expect(EXPORT_SECTIONS).not.toContain('formValidatedAgainst');
+  });
+
+  it('carries every section it claims to', async () => {
+    // Named rather than implied, so removing one is a failing test rather than
+    // a quiet omission. A copy that silently lost a section is
+    // indistinguishable, to the person receiving it, from one where the LGU
+    // held nothing.
+    const { requestId } = await dataExports.request(MARIA);
+    await dataExports.produce(requestId);
+
+    expect(Object.keys(await produced(requestId)).sort()).toEqual([...EXPORT_SECTIONS].sort());
   });
 });
 

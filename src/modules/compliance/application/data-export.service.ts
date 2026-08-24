@@ -235,8 +235,17 @@ export class DataExportService {
     );
 
     const applications = await one<Record<string, unknown>>(
+      // `form` included: it is the most obviously the applicant's own thing in
+      // the record — fifteen screens they typed themselves — and omitting it
+      // from a portability copy while including the LGU's notes about them
+      // would be an odd reading of whose data this is.
+      //
+      // `form_validated_against` is NOT, for the same reason it is absent from
+      // the applicant's own view of an application: whether the LGU had a
+      // schema to check the form against is an operational fact about the LGU
+      // rather than personal data, and the register classifies it as such.
       `select a.id, a.reference_number, a.permit_type, a.application_action, a.location,
-              a.lifecycle_status, a.classification, a.submitted_at, a.created_at, a.updated_at
+              a.lifecycle_status, a.classification, a.form, a.submitted_at, a.created_at, a.updated_at
          from applications a join applicants ap on ap.id = a.applicant_id
         where ap.account_id = $1 order by a.submitted_at`,
       [accountId],
@@ -328,6 +337,54 @@ export class DataExportService {
     };
   }
 }
+
+/**
+ * The sections a complete export carries.
+ *
+ * Named rather than implied, so removing one is a failing test rather than a
+ * quiet omission. A portability copy that silently lost a section is
+ * indistinguishable, to the person receiving it, from one where the LGU held
+ * nothing.
+ */
+export const EXPORT_SECTIONS = [
+  '_about',
+  'account',
+  'applicantProfile',
+  'businesses',
+  'applications',
+  'documents',
+  'evaluations',
+  'ordersOfPayment',
+  'payments',
+  'lettersOfInstruction',
+  'permits',
+  'permitReleases',
+  'history',
+  'notifications',
+  'notificationPreferences',
+  'devices',
+] as const;
+
+/**
+ * What is deliberately NOT exported, and why.
+ *
+ * Written down because "it is not in the export" and "nobody thought about it"
+ * look identical from outside, and the first is only defensible if someone
+ * decided it.
+ *
+ * - **Credentials** — the password verifier, the TOTP secret, push tokens.
+ *   Handing them back is not access; see the class comment above.
+ * - **Raw audit state** — `before_state` and `after_state` may contain any
+ *   personal data from the row they describe, including another person's. The
+ *   `history` section carries what happened and when instead.
+ * - **`revoked_sessions`** — a family id and two timestamps, kept only for
+ *   minutes. By the time an export is produced the rows are gone, and a list of
+ *   session identifiers is not something a person can carry anywhere.
+ * - **`data_export_requests`** — the history of asking for this file. Circular,
+ *   and of no use to the person holding it.
+ * - **`form_validated_against`** — an operational fact about the LGU rather
+ *   than personal data, classified `none` in the register.
+ */
 
 /**
  * The check that makes "no secrets" a property rather than an intention.
