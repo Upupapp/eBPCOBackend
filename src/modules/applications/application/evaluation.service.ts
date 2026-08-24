@@ -1,5 +1,6 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
+import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { Caller } from '../domain/application';
 
 /**
@@ -157,6 +158,40 @@ export class EvaluationService {
         // this is the entry that survives if the evaluation is ever superseded.
         afterState: { stage, result, remarks: remarks ?? null },
       }, tx);
+
+      // A passed stage told the applicant nothing. `evaluation-stage-passed` has
+      // been in the catalog — with copy, a category and a deep link — since the
+      // catalog was reconciled with the client, and nothing ever wrote it: the
+      // only writer of notifications was the lifecycle transition table, and an
+      // evaluation is not a transition. So an applicant watching their
+      // application saw five stages clear in silence.
+      //
+      // Adverse results are deliberately NOT notified here. They are followed by
+      // a move to Revision Required or Rejected, which notifies with the remarks
+      // that say what to do; a second notice fired from this point would either
+      // duplicate that or, if the officer never makes the move, announce a
+      // refusal the application has not actually received.
+      //
+      // Written in this transaction for the same reason the lifecycle writes its
+      // own: a notice for an evaluation that then rolls back is a notice about
+      // something that never happened.
+      if (result === 'Passed') {
+        const entry = entryFor('evaluation-stage-passed');
+        if (entry !== undefined) {
+          // Catalog copy verbatim, not a message naming the stage. The catalog
+          // is the closed list of what the LGU says, so that it can account for
+          // exactly what it told someone; the deep link carries them to the
+          // application where the stage is shown.
+          await tx.query(
+            `insert into notifications (account_id, type, application_id, title, body, deep_link)
+             values ($1, $2, $3, $4, $5, $6)`,
+            [
+              row.applicant_account_id, entry.type, applicationId,
+              entry.title, entry.body, deepLinkFor(entry, applicationId),
+            ],
+          );
+        }
+      }
 
       decided.set(stage, result);
       const complete = ORDER.every((candidate) => decided.has(candidate));

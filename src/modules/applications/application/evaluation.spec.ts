@@ -208,3 +208,65 @@ describe('an evaluation is attributable', () => {
     expect(Number(audit.rows[0]!.n)).toBe(0);
   });
 });
+
+describe('the applicant is told when a stage passes', () => {
+  // `evaluation-stage-passed` sat in the catalog with copy, a category and a
+  // deep link, and nothing ever wrote it. The only writer of notifications was
+  // the lifecycle transition table, and an evaluation is not a transition — so
+  // an applicant watching their application saw stages clear in silence.
+
+  const notices = async (): Promise<Array<{ type: string; deep_link: string | null }>> =>
+    (await db.query<{ type: string; deep_link: string | null }>(
+      'select type, deep_link from notifications order by created_at',
+    )).rows;
+
+  it('writes exactly one notice for a passed stage', async () => {
+    await pass('Initial');
+
+    expect(await notices()).toEqual([
+      { type: 'evaluation-stage-passed', deep_link: `/applications/${APPLICATION}` },
+    ]);
+  });
+
+  it('writes one per passed stage, not one for the set', async () => {
+    await pass('Initial');
+    await pass('Zoning');
+
+    expect((await notices()).map((n) => n.type)).toEqual([
+      'evaluation-stage-passed', 'evaluation-stage-passed',
+    ]);
+  });
+
+  it('says NOTHING for an adverse result', async () => {
+    // Deliberate. Revision Required and Rejected are followed by a lifecycle
+    // move that notifies with the remarks telling the applicant what to do. A
+    // notice fired from here would duplicate that, or — if the officer never
+    // makes the move — announce a refusal the application has not received.
+    await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Revision Required', evaluator,
+      remarks: 'The lot plan is not signed by a geodetic engineer.',
+    });
+
+    expect(await notices()).toEqual([]);
+  });
+
+  it('leaves no notice behind when the evaluation is refused', async () => {
+    // Same transaction as the evaluation row, for the same reason the audit
+    // entry is: a notice for something that then rolls back tells an applicant
+    // their stage cleared when it did not.
+    const refused = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Fire Safety', result: 'Passed', evaluator,
+    });
+
+    expect(refused.ok).toBe(false);
+    expect(await notices()).toEqual([]);
+  });
+
+  it('addresses the notice to the applicant, not the evaluator', async () => {
+    await pass('Initial');
+
+    const to = await db.query<{ account_id: string }>('select account_id from notifications');
+    expect(to.rows[0]?.account_id).toBe(APPLICANT_ACCOUNT);
+    expect(to.rows[0]?.account_id).not.toBe(EVALUATOR_ACCOUNT);
+  });
+});

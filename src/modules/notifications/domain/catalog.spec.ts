@@ -1,3 +1,6 @@
+import { readFileSync, readdirSync } from 'node:fs';
+import { join } from 'node:path';
+
 import { CATALOG, deepLinkFor, entryFor, isInCatalog } from './catalog';
 
 describe('the catalog is closed', () => {
@@ -93,5 +96,88 @@ describe('what each entry claims about itself', () => {
       expect(entry.body).not.toMatch(/^Your application has been updated/);
       expect(entry.dartName.length).toBeGreaterThan(3);
     }
+  });
+});
+
+describe('every notice in the catalog has something that sends it', () => {
+  // A catalog entry with no emitter is a notice the LGU believes it sends and
+  // does not. That is not hypothetical here: `evaluation-stage-passed` had copy,
+  // a category and a deep link, and nothing wrote it, so five evaluation stages
+  // cleared in silence. It was found by counting, not by reading.
+  //
+  // So the count is a gate. The list below is the notices that genuinely have
+  // no emitter yet, each with the reason, verified against the tree rather than
+  // assumed. Adding an entry with no emitter fails this test; wiring one up
+  // fails it too, until the line is removed. Neither direction is silent.
+  //
+  // WHAT THIS DOES NOT PROVE, stated because a gate trusted for more than it
+  // checks is worse than no gate: it looks for the wire name as a literal in
+  // the tree, so it catches a notice nothing MENTIONS. It does NOT catch one
+  // that is mentioned inside a branch that never runs — disabling the emitter
+  // in evaluation.service.ts leaves this passing, which was checked, not
+  // assumed. Reachability is proved by the behavioural tests beside each
+  // emitter; this gate exists to stop a type being added to the catalog and
+  // forgotten, which is how the ten below accumulated.
+
+  const NOT_YET_EMITTED: Readonly<Record<string, string>> = {
+    'letter-of-instruction-issued':
+      'nothing ISSUES a letter of instruction — the only path is respond(), and there is no create route',
+    'fsec-cleared':
+      'fire safety is recorded as an evaluation stage; there is no separate FSEC record or clearance route',
+    'payment-overdue':
+      'assessments carry a due_date, but no scheduled job compares it to the clock',
+    'inspection-scheduled':
+      'the inspections table exists (migration 005) and nothing inserts into it',
+    'appointment-reminder':
+      'there is no appointment feature — the word appears only as a mutable category',
+    'pledge-approaching':
+      'the pledge clock computes the date on read; no job watches it approach',
+    'pledge-lapsed':
+      'same — the lapse is computed when someone looks, and notices nobody',
+    'permit-commencement-warning':
+      'the PD 1096 commencement window is not tracked against a clock anywhere',
+    'occupancy-now-possible':
+      'no Certificate of Occupancy path distinct from the permit lifecycle, which already notifies on release',
+    'account-update':
+      'account changes write audit entries, not notices',
+  };
+
+  /** Every .ts under src that is not a test and not the catalog itself. */
+  function sources(dir: string, found: string[] = []): string[] {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) sources(path, found);
+      else if (entry.name.endsWith('.ts') && !entry.name.includes('.spec.') && !path.endsWith(join('domain', 'catalog.ts'))) {
+        found.push(path);
+      }
+    }
+    return found;
+  }
+
+  const tree = sources(join(__dirname, '../../..'))
+    .map((path) => readFileSync(path, 'utf8'))
+    .join('\n');
+
+  const serverGenerated = CATALOG.filter((entry) => entry.serverGenerated);
+  const unemitted = serverGenerated
+    .filter((entry) => !tree.includes(`'${entry.type}'`))
+    .map((entry) => entry.type);
+
+  it('emits every server-generated notice except the ones listed, with reasons', () => {
+    expect(unemitted.sort()).toEqual(Object.keys(NOT_YET_EMITTED).sort());
+  });
+
+  it('has a reason for each one, not a bare list', () => {
+    for (const reason of Object.values(NOT_YET_EMITTED)) {
+      expect(reason.length).toBeGreaterThan(30);
+    }
+  });
+
+  it('reports how much of the catalog actually reaches an applicant', () => {
+    // Recorded rather than asserted at a threshold: the number should move in
+    // one direction, and a threshold would let it sit still.
+    const emitted = serverGenerated.length - unemitted.length;
+    expect(emitted).toBe(13);
+    expect(serverGenerated).toHaveLength(23);
   });
 });

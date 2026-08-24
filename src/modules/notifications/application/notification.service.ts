@@ -162,6 +162,17 @@ export class NotificationService {
    * provider are all external, and TAB 15 owns their retry and backoff. What is
    * settled here is WHO gets told WHAT over WHICH channel and WHEN — the part
    * that has to be right regardless of which vendor sends it.
+   *
+   * The planned attempts are RECORDED HERE, in the same transaction that marks
+   * the notification dispatched. They used to be returned for the caller to
+   * insert afterwards, which quietly inverted the guarantee this outbox is
+   * built on: a crash between the caller's two statements left a notification
+   * marked dispatched with no attempt recorded against it, and nothing ever
+   * looks at a dispatched row again. That is at-most-once — the exact failure
+   * the `dispatched_at` comment says it errs away from — and it loses notices
+   * silently, which for a statutory notice is the worst available outcome.
+   * One transaction per notification, so a batch of 200 does not hold one lock
+   * for the length of the batch and a failure costs one row rather than all.
    */
   async planPending(limit = 100): Promise<DeliveryAttempt[]> {
     const pending = await this.db.query<{
@@ -186,20 +197,46 @@ export class NotificationService {
       const preferences = await this.preferences(row.account_id);
       const plan = planDelivery({ entry, preferences, now, hasDevice: row.has_device });
 
-      for (const channel of plan.immediate) {
-        attempts.push({ notificationId: row.id, channel, deferredUntil: null });
-      }
-      for (const channel of plan.deferred) {
-        attempts.push({ notificationId: row.id, channel, deferredUntil: plan.deferredUntil });
-      }
+      const planned: DeliveryAttempt[] = [
+        ...plan.immediate.map((channel) => ({ notificationId: row.id, channel, deferredUntil: null })),
+        ...plan.deferred.map((channel) => ({
+          notificationId: row.id, channel, deferredUntil: plan.deferredUntil,
+        })),
+      ];
 
-      // Marked dispatched only once a plan exists for it. A crash before this
-      // leaves the row pending and it is planned again — at-least-once, which
-      // for a notice is the right side to err on.
-      await this.db.query(
-        'update notifications set dispatched_at = $1 where id = $2',
-        [now, row.id],
-      );
+      await this.db.transaction(async (tx) => {
+        for (const attempt of planned) {
+          // `deferred` where quiet hours push it out, `queued` otherwise. The
+          // distinction matters to whoever writes the sender: a deferred
+          // attempt must not be picked up before its time, and one status for
+          // both would send a push at 3am.
+          //
+          // `on conflict do nothing` because (notification_id, channel) is
+          // unique and this must be safe to run twice — a replica whose lease
+          // expired mid-run may have recorded some of these already.
+          await tx.query(
+            `insert into notification_deliveries (notification_id, channel, status, deferred_until)
+             values ($1,$2,$3,$4)
+             on conflict (notification_id, channel) do nothing`,
+            [
+              attempt.notificationId, attempt.channel,
+              attempt.deferredUntil === null ? 'queued' : 'deferred',
+              attempt.deferredUntil,
+            ],
+          );
+        }
+
+        // Marked dispatched only once the attempts are recorded ALONGSIDE it. A
+        // crash anywhere before this commits leaves the row pending and it is
+        // planned again — at-least-once, which for a notice is the right side
+        // to err on.
+        await tx.query(
+          'update notifications set dispatched_at = $1 where id = $2',
+          [now, row.id],
+        );
+      });
+
+      attempts.push(...planned);
     }
 
     return attempts;

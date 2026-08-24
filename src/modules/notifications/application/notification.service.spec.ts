@@ -11,8 +11,12 @@ import { DEFAULT_PREFERENCES } from '../domain/delivery';
 import { NotificationService } from './notification.service';
 
 const MIGRATIONS_DIR = join(__dirname, '../../../../db/migrations');
-const DAYTIME = new Date('2026-08-19T10:00:00Z');
-const NIGHT = new Date('2026-08-19T23:00:00Z');
+// +08:00 explicitly: quiet hours are a Manila wall clock, and these fixtures
+// were `Z` times named for the Manila hour they were meant to be. `NIGHT` was
+// 23:00Z — seven in the morning in Manila — so this suite agreed with the
+// eight-hour slide in the planner instead of catching it.
+const DAYTIME = new Date('2026-08-19T10:00:00+08:00');
+const NIGHT = new Date('2026-08-19T23:00:00+08:00');
 
 let db: SqlClient;
 let notifications: NotificationService;
@@ -249,7 +253,8 @@ describe('draining the outbox', () => {
     const push = attempts.find((a) => a.channel === 'push');
 
     expect(push).toBeDefined();
-    expect(push?.deferredUntil?.toISOString()).toBe('2026-08-20T07:00:00.000Z');
+    // 07:00 on the 20th in Manila, i.e. 23:00Z on the 19th.
+    expect(push?.deferredUntil?.toISOString()).toBe('2026-08-19T23:00:00.000Z');
   });
 
   it('plans each notification once', async () => {
@@ -258,6 +263,68 @@ describe('draining the outbox', () => {
 
     expect((await notifications.planPending()).length).toBeGreaterThan(0);
     expect(await notifications.planPending()).toEqual([]);
+  });
+
+  it('records the planned attempts and marks the row dispatched atomically', async () => {
+    // The property the outbox rests on, tested across the boundary it used to
+    // straddle. `dispatched_at` was set by the service and the attempts were
+    // inserted by the caller afterwards, so a crash in between produced a
+    // notification marked dispatched with nothing recorded against it — and
+    // nothing revisits a dispatched row. Silently lost, which for a statutory
+    // notice is the worst outcome available.
+    //
+    // Simulated by failing the delivery insert, which is the statement that
+    // used to be outside the transaction.
+    await withDevice();
+    await lifecycle.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+
+    const failing: SqlClient = {
+      query: db.query.bind(db),
+      exec: db.exec.bind(db),
+      transaction: (fn) =>
+        db.transaction((tx) =>
+          fn({
+            query: (async (sql: string, params?: unknown[]) => {
+              if (sql.includes('insert into notification_deliveries')) {
+                throw new Error('provider table unavailable');
+              }
+              return tx.query(sql, params);
+            }),
+            exec: tx.exec.bind(tx),
+            transaction: tx.transaction.bind(tx),
+            close: tx.close.bind(tx),
+          }),
+        ),
+      close: db.close.bind(db),
+    };
+
+    await expect(new NotificationService(failing, () => DAYTIME).planPending()).rejects.toThrow(
+      'provider table unavailable',
+    );
+
+    // Still pending, so the next run plans it again. At-least-once.
+    const pending = await db.query<{ count: number }>(
+      'select count(*)::int as count from notifications where dispatched_at is null',
+    );
+    expect(pending.rows[0]?.count).toBe(1);
+
+    const rows = await db.query<{ count: number }>(
+      'select count(*)::int as count from notification_deliveries',
+    );
+    expect(rows.rows[0]?.count).toBe(0);
+  });
+
+  it('writes one delivery row per planned channel, and is safe to run twice', async () => {
+    await withDevice();
+    await lifecycle.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+
+    const attempts = await notifications.planPending();
+
+    const rows = await db.query<{ channel: string; status: string }>(
+      'select channel, status from notification_deliveries order by channel',
+    );
+    expect(rows.rows.map((r) => r.channel).sort()).toEqual([...attempts.map((a) => a.channel)].sort());
+    expect(rows.rows.every((r) => r.status === 'queued')).toBe(true);
   });
 
   it('leaves a row pending if planning never completes, erring toward at-least-once', async () => {

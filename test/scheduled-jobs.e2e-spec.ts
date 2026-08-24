@@ -182,7 +182,7 @@ describe('notification dispatch', () => {
       [randomUUID(), ACCOUNT],
     );
 
-    await runner().runIfDue(notificationDispatchJob(new NotificationService(db, () => now), db));
+    await runner().runIfDue(notificationDispatchJob(new NotificationService(db, () => now)));
 
     const row = await jobRow('notification-dispatch');
     expect(row.last_outcome).toBe('succeeded');
@@ -200,10 +200,10 @@ describe('notification dispatch', () => {
     );
     const notifications = new NotificationService(db, () => now);
 
-    await runner().runIfDue(notificationDispatchJob(notifications, db));
+    await runner().runIfDue(notificationDispatchJob(notifications));
     const after = await db.query<{ n: string }>('select count(*) as n from notification_deliveries');
     now = new Date(now.getTime() + 120_000);
-    await runner().runIfDue(notificationDispatchJob(notifications, db));
+    await runner().runIfDue(notificationDispatchJob(notifications));
 
     const again = await db.query<{ n: string }>('select count(*) as n from notification_deliveries');
     expect(again.rows[0]!.n).toBe(after.rows[0]!.n);
@@ -232,7 +232,7 @@ describe('a scheduler tick', () => {
       [
         retentionJob({ runRetention: () => Promise.resolve({ deleted: 0, skippedOpen: 0 }) } as unknown as DocumentService, 3650),
         auditVerificationJob(audit, logger()),
-        notificationDispatchJob(new NotificationService(db, () => now), db),
+        notificationDispatchJob(new NotificationService(db, () => now)),
         operationalPurgeJob(db, () => now),
       ],
       logger(),
@@ -294,7 +294,7 @@ describe('every seeded job has something to run it', () => {
     const registered = [
       retentionJob({ runRetention: () => Promise.resolve({ deleted: 0, skippedOpen: 0 }) } as unknown as DocumentService, null),
       auditVerificationJob(new AuditService(db, () => now), logger()),
-      notificationDispatchJob(new NotificationService(db, () => now), db),
+      notificationDispatchJob(new NotificationService(db, () => now)),
       operationalPurgeJob(db, () => now),
       dataExportJob(new DataExportService(db, store, () => now), db),
       dataExportExpiryJob(new DataExportService(db, store, () => now)),

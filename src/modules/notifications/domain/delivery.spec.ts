@@ -3,9 +3,15 @@ import { DEFAULT_PREFERENCES, Preferences, insideQuietHours, nextOpenWindow, pla
 
 // Every test pins the clock. An unpinned quiet-hours test passes in the morning
 // and fails at night, and CI runs at all hours.
-const DAYTIME = new Date('2026-08-19T10:00:00Z');
-const NIGHT = new Date('2026-08-19T23:00:00Z');
-const EARLY_HOURS = new Date('2026-08-19T03:00:00Z');
+//
+// Every fixture carries +08:00 EXPLICITLY. They were written as `Z` and named
+// for the Manila hour they were meant to represent — `NIGHT` was 23:00Z, which
+// is seven in the morning in Manila. So the suite asserted the eight-hour slide
+// rather than catching it, and read as if it had proved the opposite. The
+// offset is in the literal now so the name and the instant cannot drift apart.
+const DAYTIME = new Date('2026-08-19T10:00:00+08:00');
+const NIGHT = new Date('2026-08-19T23:00:00+08:00');
+const EARLY_HOURS = new Date('2026-08-19T03:00:00+08:00');
 
 const plan = (type: string, overrides: Partial<Preferences> = {}, now = DAYTIME, hasDevice = true) =>
   planDelivery({
@@ -21,14 +27,27 @@ describe('quiet hours wrap midnight', () => {
   const window = DEFAULT_PREFERENCES.quietHours;
 
   it.each([
-    ['21:00, the moment it starts', '2026-08-19T21:00:00Z', true],
-    ['23:00, before midnight', '2026-08-19T23:00:00Z', true],
-    ['03:00, after midnight', '2026-08-19T03:00:00Z', true],
-    ['06:59, just before it lifts', '2026-08-19T06:59:00Z', true],
-    ['07:00, the moment it lifts', '2026-08-19T07:00:00Z', false],
-    ['10:00, mid-morning', '2026-08-19T10:00:00Z', false],
-    ['20:59, just before it starts', '2026-08-19T20:59:00Z', false],
-  ])('%s is inside=%s', (_label, iso, expected) => {
+    ['21:00, the moment it starts', '2026-08-19T21:00:00+08:00', true],
+    ['23:00, before midnight', '2026-08-19T23:00:00+08:00', true],
+    ['03:00, after midnight', '2026-08-19T03:00:00+08:00', true],
+    ['06:59, just before it lifts', '2026-08-19T06:59:00+08:00', true],
+    ['07:00, the moment it lifts', '2026-08-19T07:00:00+08:00', false],
+    ['10:00, mid-morning', '2026-08-19T10:00:00+08:00', false],
+    ['20:59, just before it starts', '2026-08-19T20:59:00+08:00', false],
+  ])('%s in Manila is inside=%s', (_label, iso, expected) => {
+    expect(insideQuietHours(new Date(iso), window)).toBe(expected);
+  });
+
+  // The regression proper, stated in the frame the server actually runs in.
+  // Under the old comparison every one of these was inverted: the LGU's working
+  // morning was held and the applicant's night was not.
+  it.each([
+    ['15:00Z — 23:00 in Manila, the middle of the evening', '2026-08-19T15:00:00Z', true],
+    ['20:00Z — 04:00 in Manila, asleep', '2026-08-19T20:00:00Z', true],
+    ['23:00Z — 07:00 in Manila, awake', '2026-08-19T23:00:00Z', false],
+    ['01:00Z — 09:00 in Manila, the office is open', '2026-08-19T01:00:00Z', false],
+    ['06:00Z — 14:00 in Manila, mid-afternoon', '2026-08-19T06:00:00Z', false],
+  ])('%s', (_label, iso, expected) => {
     expect(insideQuietHours(new Date(iso), window)).toBe(expected);
   });
 
@@ -36,12 +55,26 @@ describe('quiet hours wrap midnight', () => {
     expect(insideQuietHours(NIGHT, { ...window, enabled: false })).toBe(false);
   });
 
-  it('opens at 07:00 the same morning when it is already past midnight', () => {
-    expect(nextOpenWindow(EARLY_HOURS, window).toISOString()).toBe('2026-08-19T07:00:00.000Z');
+  // 07:00 in Manila is 23:00Z the previous day. Asserting `07:00Z` here is what
+  // made the old expectations look right while naming the wrong instant.
+  it('opens at 07:00 Manila the same morning when it is already past midnight', () => {
+    expect(nextOpenWindow(EARLY_HOURS, window).toISOString()).toBe('2026-08-18T23:00:00.000Z');
   });
 
-  it('opens at 07:00 the NEXT morning when it is still the evening', () => {
-    expect(nextOpenWindow(NIGHT, window).toISOString()).toBe('2026-08-20T07:00:00.000Z');
+  it('opens at 07:00 Manila the NEXT morning when it is still the evening', () => {
+    expect(nextOpenWindow(NIGHT, window).toISOString()).toBe('2026-08-19T23:00:00.000Z');
+  });
+
+  it('always opens at the end time on a Manila wall clock, whatever the UTC date', () => {
+    // The property, rather than two more pinned instants: whenever the window
+    // opens, a clock in Manila reads exactly `end`.
+    for (const iso of ['2026-08-19T15:00:00Z', '2026-08-19T20:00:00Z', '2026-01-01T16:30:00Z']) {
+      const opens = nextOpenWindow(new Date(iso), window);
+      const manila = new Date(opens.getTime() + 8 * 60 * 60_000);
+      expect(`${String(manila.getUTCHours()).padStart(2, '0')}:${String(manila.getUTCMinutes()).padStart(2, '0')}`)
+        .toBe(window.end);
+      expect(opens.getTime()).toBeGreaterThan(new Date(iso).getTime());
+    }
   });
 });
 
@@ -88,7 +121,8 @@ describe('push is a convenience, and can be silenced', () => {
 
     expect(result.deferred).toContain('push');
     expect(result.suppressed).not.toContain('push');
-    expect(result.deferredUntil?.toISOString()).toBe('2026-08-20T07:00:00.000Z');
+    // 07:00 on the 20th in Manila — which is 23:00Z on the 19th.
+    expect(result.deferredUntil?.toISOString()).toBe('2026-08-19T23:00:00.000Z');
   });
 
   it('is sent immediately when the applicant has turned quiet hours off', () => {

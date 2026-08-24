@@ -59,7 +59,7 @@ export const SCHEDULER = Symbol('EBPCO_SCHEDULER');
         const jobs: Job[] = [
           retentionJob(documents, config.DOCUMENT_RETENTION_DAYS),
           auditVerificationJob(audit, logger),
-          notificationDispatchJob(notifications, db),
+          notificationDispatchJob(notifications),
           operationalPurgeJob(db),
           dataExportJob(dataExports, db),
           dataExportExpiryJob(dataExports),

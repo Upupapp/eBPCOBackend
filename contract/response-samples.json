@@ -1051,6 +1051,19 @@
         "data": [
           {
             "id": "00000000-0000-4000-8000-000000000000",
+            "type": "evaluation-stage-passed",
+            "category": "applicationUpdates",
+            "applicationId": "00000000-0000-4000-8000-000000000000",
+            "title": "Evaluation stage passed",
+            "body": "An evaluation stage has been completed successfully.",
+            "deepLink": "/applications/00000000-0000-4000-8000-000000000000",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "readAt": null,
+            "resolvedAt": null,
+            "requiresAction": false
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
             "type": "received-by-obo",
             "category": "applicationUpdates",
             "applicationId": "00000000-0000-4000-8000-000000000000",

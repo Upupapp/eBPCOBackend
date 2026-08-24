@@ -1,3 +1,4 @@
+import { PH_UTC_OFFSET_MINUTES } from '../../compliance/domain/pledge-clock';
 import { CatalogEntry, NotificationCategory } from './catalog';
 
 /**
@@ -24,7 +25,7 @@ export type Channel = 'push' | 'email' | 'sms';
 
 export interface QuietHours {
   readonly enabled: boolean;
-  /** 'HH:MM', local Philippine time. */
+  /** 'HH:MM', local Philippine time — a wall clock, not a UTC time. */
   readonly start: string;
   readonly end: string;
 }
@@ -57,27 +58,55 @@ function minutesOf(time: string): number {
 }
 
 /**
+ * The instant `at`, expressed as a wall clock in Manila.
+ *
+ * `start` and `end` are what the applicant set in a Settings screen in the
+ * Philippines: 21:00 means nine in the evening where they are, not 21:00 UTC.
+ * The server runs in UTC, so the two must be brought into the same frame before
+ * anything is compared — and shifting the instant is the direction that works,
+ * because the preference is a wall-clock time with no date attached.
+ *
+ * `PH_UTC_OFFSET_MINUTES` is imported rather than restated so that the offset
+ * lives in exactly one place, as the pledge clock's own comment intends.
+ */
+function manilaMinutes(at: Date): number {
+  const shifted = new Date(at.getTime() + PH_UTC_OFFSET_MINUTES * 60_000);
+  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes();
+}
+
+/**
  * Quiet hours wrap midnight (21:00–07:00), so "inside" is not a simple
  * comparison. Getting this wrong the obvious way means every push between
  * midnight and 07:00 is sent.
+ *
+ * The second way to get it wrong is subtler and was live here: comparing a
+ * Manila wall clock against UTC. That does not fail loudly — it slides the
+ * whole window eight hours, so pushes went out through the Manila night and
+ * were held through the Manila working morning, which is when an LGU actually
+ * sends notices.
  */
 export function insideQuietHours(at: Date, quietHours: QuietHours): boolean {
   if (!quietHours.enabled) return false;
 
-  const now = at.getUTCHours() * 60 + at.getUTCMinutes();
+  const now = manilaMinutes(at);
   const start = minutesOf(quietHours.start);
   const end = minutesOf(quietHours.end);
 
   return start <= end ? now >= start && now < end : now >= start || now < end;
 }
 
-/** The next moment the window opens. */
+/** The next moment the window opens, as a real instant. */
 export function nextOpenWindow(at: Date, quietHours: QuietHours): Date {
+  // Computed in Manila's frame and shifted back, for the same reason as above:
+  // "07:00" is 07:00 there. Doing the arithmetic on the UTC date would open the
+  // window at 07:00 UTC, which is three in the afternoon in Manila.
+  const offset = PH_UTC_OFFSET_MINUTES * 60_000;
   const end = minutesOf(quietHours.end);
-  const opens = new Date(at);
+  const local = new Date(at.getTime() + offset);
+  const opens = new Date(local);
   opens.setUTCHours(Math.floor(end / 60), end % 60, 0, 0);
-  if (opens.getTime() <= at.getTime()) opens.setUTCDate(opens.getUTCDate() + 1);
-  return opens;
+  if (opens.getTime() <= local.getTime()) opens.setUTCDate(opens.getUTCDate() + 1);
+  return new Date(opens.getTime() - offset);
 }
 
 export function planDelivery(options: {

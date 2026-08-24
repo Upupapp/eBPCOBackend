@@ -80,38 +80,19 @@ export function auditVerificationJob(audit: AuditService, logger: StructuredLogg
  * "dispatches" would be the most consequential lie in this file — an applicant
  * would be recorded as notified and never told.
  */
-export function notificationDispatchJob(
-  notifications: NotificationService,
-  db: SqlClient,
-): Job {
+export function notificationDispatchJob(notifications: NotificationService): Job {
   return {
     name: 'notification-dispatch',
     // Short: it runs every minute and does bounded work.
     leaseSeconds: 120,
     async run(): Promise<string> {
+      // The planned attempts are recorded by `planPending` itself, in the same
+      // transaction that marks each notification dispatched. This job used to
+      // insert them here, one statement later and outside that transaction,
+      // which meant a crash in between marked a notice delivered-planned while
+      // recording no attempt — and nothing ever revisits a dispatched row.
       const attempts = await notifications.planPending(200);
       if (attempts.length === 0) return 'nothing pending';
-
-      for (const attempt of attempts) {
-        // `deferred` where quiet hours push it out, `queued` otherwise. The
-        // distinction matters to whoever writes the sender: a deferred attempt
-        // must not be picked up before its time, and one status for both would
-        // send a push at 3am.
-        //
-        // `on conflict do nothing` because (notification_id, channel) is
-        // unique and every job must be safe to run twice — a replica whose
-        // lease expired mid-run may have queued some of these already.
-        await db.query(
-          `insert into notification_deliveries (notification_id, channel, status, deferred_until)
-           values ($1,$2,$3,$4)
-           on conflict (notification_id, channel) do nothing`,
-          [
-            attempt.notificationId, attempt.channel,
-            attempt.deferredUntil === null ? 'queued' : 'deferred',
-            attempt.deferredUntil,
-          ],
-        );
-      }
       return `${attempts.length} attempt(s) queued; NOT SENT — no delivery provider is configured`;
     },
   };
