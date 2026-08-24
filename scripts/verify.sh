@@ -17,6 +17,12 @@ npm run --silent lint
 echo "── tests ────────────────────────────────────────────────────────"
 npm run --silent test -- --silent
 
+echo "── reachability ─────────────────────────────────────────────────"
+# What the tests structurally cannot check: whether anything but the suite
+# reaches this code. Three sweeps found the same defect — built, tested, wired
+# to nothing — so it is a gate rather than an exercise.
+npm run --silent audit:reachability | tail -3
+
 echo "── secrets ──────────────────────────────────────────────────────"
 python3 scripts/scan-secrets.py
 

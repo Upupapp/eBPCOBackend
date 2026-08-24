@@ -25,5 +25,5 @@
     "forceConsistentCasingInFileNames": true,
     "exactOptionalPropertyTypes": true
   },
-  "include": ["src/**/*", "test/**/*", "eslint.config.mjs"]
+  "include": ["src/**/*", "test/**/*", "scripts/**/*", "eslint.config.mjs"]
 }

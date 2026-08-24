@@ -378,7 +378,9 @@ async function main(): Promise<void> {
       request: { method, path, query: query ?? null },
       status: response.statusCode,
       contentType: response.headers['content-type'],
-      body: response.json(),
+      // `json()` is typed `any` by light-my-request; narrowed here rather than
+      // left to spread through the sample file's type.
+      body: response.json<unknown>(),
     };
   }
 

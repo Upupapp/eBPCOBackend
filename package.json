@@ -12,12 +12,13 @@
     "start": "node dist/main.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src test --max-warnings 0",
+    "lint": "eslint src test scripts --max-warnings 0",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js",
     "test:cov": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js --coverage",
     "verify": "npm run typecheck && npm run lint && npm run test",
     "emit:catalog": "ts-node --transpile-only scripts/emit-notification-catalog.ts",
-    "emit:samples": "ts-node --transpile-only scripts/emit-response-samples.ts"
+    "emit:samples": "ts-node --transpile-only scripts/emit-response-samples.ts",
+    "audit:reachability": "ts-node --transpile-only scripts/reachability.ts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

@@ -1,7 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { CATALOG, deepLinkFor, entryFor, isInCatalog } from './catalog';
+import { CATALOG, SERVER_CATALOG, deepLinkFor, entryFor, isInCatalog } from './catalog';
 
 describe('the catalog is closed', () => {
   it('has exactly the twenty-five types the client declares', () => {
@@ -158,7 +158,10 @@ describe('every notice in the catalog has something that sends it', () => {
     .map((path) => readFileSync(path, 'utf8'))
     .join('\n');
 
-  const serverGenerated = CATALOG.filter((entry) => entry.serverGenerated);
+  // SERVER_CATALOG, not a filter written again here. The catalog already names
+  // "what the server may actually send"; computing it a second time is how two
+  // definitions of one thing start disagreeing.
+  const serverGenerated = SERVER_CATALOG;
   const unemitted = serverGenerated
     .filter((entry) => !tree.includes(`'${entry.type}'`))
     .map((entry) => entry.type);
