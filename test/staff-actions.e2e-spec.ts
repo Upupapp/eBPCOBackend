@@ -625,5 +625,20 @@ describe('the whole path, five officers, one application', () => {
     expect(detail.release.claimantName).toBe('Maria Santos');
     expect(detail.evaluations).toHaveLength(5);
     expect(detail.timeline.length).toBeGreaterThanOrEqual(11);
+
+    // The SHAPE, not just the count. Nothing pinned this, which is how the
+    // detail view and EvaluationService.of could hold two near-identical
+    // queries over the same rows without either one having to agree with the
+    // other. They are one reader now, and this is what it must return.
+    expect(detail.evaluations[0]).toEqual({
+      id: expect.stringMatching(/^[0-9a-f-]{36}$/) as unknown,
+      stage: 'Initial',
+      result: 'Passed',
+      remarks: null,
+      evaluatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T[\d:.]+Z$/) as unknown,
+    });
+    // Decided in order, and reported in it.
+    expect((detail.evaluations as Array<{ stage: string }>).map((e) => e.stage))
+      .toEqual(['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']);
   });
 });

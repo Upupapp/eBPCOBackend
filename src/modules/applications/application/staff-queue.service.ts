@@ -1,5 +1,6 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { exactInteger } from '../../../persistence/numeric-parsing';
+import { EvaluationService } from './evaluation.service';
 import { CalendarRepository } from '../../compliance/application/calendar.repository';
 import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } from '../../compliance/domain/pledge-clock';
 import { LifecycleStatus } from '../domain/lifecycle';
@@ -207,6 +208,7 @@ export class StaffQueueService {
   constructor(
     private readonly db: SqlClient,
     private readonly calendars: CalendarRepository,
+    private readonly evaluations: EvaluationService,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -316,9 +318,10 @@ export class StaffQueueService {
                   to_char(expires_on, 'YYYY-MM-DD') as expires_on, uploaded_at
              from documents where application_id = $1 and deleted_at is null
             order by uploaded_at`, [applicationId]),
-        this.db.query(
-          `select id, stage, result, remarks, evaluated_at from evaluations
-            where application_id = $1 order by evaluated_at`, [applicationId]),
+        // Not a query of its own. Reading evaluations belongs to the
+        // evaluations module, and this view asking the same question a second
+        // way is how the two answers start disagreeing.
+        this.evaluations.of(applicationId),
         this.db.query(
           `select id, reference_number, amount_centavos, method, status, submitted_at,
                   verified_at, official_receipt_number
@@ -368,7 +371,8 @@ export class StaffQueueService {
       formValidatedAgainst: (row['form_validated_against'] as string | null) ?? null,
       business: one(business),
       documents: many(documents),
-      evaluations: many(evaluations),
+      // Already shaped by the reader; `many` exists to camel-case raw rows.
+      evaluations,
       payments: many(payments),
       orderOfPayment: one(oop),
       permit: one(permit),

@@ -5,7 +5,6 @@
   "src/common/logging/logger.ts::StructuredLogger.trace": "same \u2014 no caller, kept so the level set is not surprising to a reader",
   "src/common/problem/problem.ts::ProblemException.unprocessable": "RFC 9457 helper for 422; every current validation failure is a 400, so nothing constructs it yet",
   "src/common/scheduling/job-runner.ts::JobRunner.status": "reads the job table for an operator; there is no job-status route, so only the spec calls it (UNWIRED FEATURE)",
-  "src/modules/applications/application/evaluation.service.ts::EvaluationService.of": "DUPLICATE READ: the staff detail view loads evaluations with its own query in staff-queue.service.ts, so these two reads of the same rows can drift apart",
   "src/modules/applications/domain/lifecycle.ts::TERMINAL": "the set behind isTerminal, unreached with it",
   "src/modules/applications/domain/lifecycle.ts::isTerminal": "asks whether a status ends the application; the engine tests the transition table directly instead",
   "src/modules/applications/domain/lifecycle.ts::pledgeApplies": "whether the RA 11032 clock runs in a status; the pledge clock derives this from suspensions instead",

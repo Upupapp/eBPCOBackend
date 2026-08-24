@@ -8,6 +8,7 @@ import { ROLE_SCOPES, StaffRole } from '../../identity/domain/account';
 import { SqlCalendarRepository, EMPTY_CALENDAR } from '../../compliance/application/calendar.repository';
 import { Caller } from '../domain/application';
 import { LifecycleStatus } from '../domain/lifecycle';
+import { EvaluationService } from './evaluation.service';
 import { StaffQueueService, visibleStatusesFor } from './staff-queue.service';
 
 const MIGRATIONS_DIR = join(__dirname, '../../../../db/migrations');
@@ -136,7 +137,7 @@ const stubCalendar = { load: (): Promise<typeof EMPTY_CALENDAR> => Promise.resol
 beforeEach(async () => {
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(MIGRATIONS_DIR));
-  queue = new StaffQueueService(db, stubCalendar, () => NOW);
+  queue = new StaffQueueService(db, stubCalendar, new EvaluationService(db), () => NOW);
 
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
@@ -371,7 +372,8 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
               (2026,'2026-08-31','National Heroes Day','Regular Holiday')`,
     );
     const withCalendar = new StaffQueueService(
-      db, new SqlCalendarRepository(db), () => new Date('2026-08-25T04:00:00Z'),
+      db, new SqlCalendarRepository(db), new EvaluationService(db),
+      () => new Date('2026-08-25T04:00:00Z'),
     );
     const charter = await loadCharter(5);
     await file({
@@ -425,7 +427,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
 
   it('asserts a breach once the calendar is fully proclaimed', async () => {
     await db.query(`insert into holiday_calendars (year, complete) values (2026, true)`);
-    const withCalendar = new StaffQueueService(db, new SqlCalendarRepository(db), () => NOW);
+    const withCalendar = new StaffQueueService(db, new SqlCalendarRepository(db), new EvaluationService(db), () => NOW);
     const charter = await loadCharter(3);
     await file({
       reference: 'BP-1', status: 'Under Evaluation', charterEntryId: charter,

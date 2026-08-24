@@ -56,9 +56,9 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
     },
     {
       provide: StaffQueueService,
-      inject: [SQL_CLIENT, CALENDAR_REPOSITORY],
-      useFactory: (db: SqlClient, calendars: CalendarRepository) =>
-        new StaffQueueService(db, calendars),
+      inject: [SQL_CLIENT, CALENDAR_REPOSITORY, EvaluationService],
+      useFactory: (db: SqlClient, calendars: CalendarRepository, evaluations: EvaluationService) =>
+        new StaffQueueService(db, calendars, evaluations),
     },
     {
       provide: LifecycleService,

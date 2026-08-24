@@ -53,20 +53,42 @@ export class EvaluationService {
     this.audit = audit ?? new AuditService(db, clock);
   }
 
+  /**
+   * Every recorded stage for one application, in the order they were decided.
+   *
+   * THE reader. The staff detail view used to run its own near-identical query
+   * over the same rows — same table, same filter, a differently spelled ORDER
+   * BY — which is two answers to one question, each free to drift when a column
+   * is added or a stage is filtered out for a reason that only occurs to
+   * whoever is editing one of them. The reachability audit found it: this
+   * method had no caller outside its own spec while the view it duplicated was
+   * serving officers.
+   *
+   * `nulls last` is explicit rather than implied. Postgres already orders ASC
+   * that way, so this is not a behaviour change — it is stating which end the
+   * undecided stages belong at, so that reversing the sort later does not move
+   * them silently.
+   */
   async of(applicationId: string): Promise<ReadonlyArray<{
-    stage: EvaluationStage; result: string; remarks: string | null; evaluatedAt: string | null;
+    id: string; stage: EvaluationStage; result: string;
+    remarks: string | null; evaluatedAt: string | null;
   }>> {
     const result = await this.db.query<{
-      stage: EvaluationStage; result: string; remarks: string | null; evaluated_at: Date | null;
+      id: string; stage: EvaluationStage; result: string;
+      remarks: string | null; evaluated_at: Date | null;
     }>(
-      `select stage, result, remarks, evaluated_at from evaluations
+      `select id, stage, result, remarks, evaluated_at from evaluations
         where application_id = $1 order by evaluated_at nulls last`,
       [applicationId],
     );
     return result.rows.map((row) => ({
+      id: row.id,
       stage: row.stage,
       result: row.result,
       remarks: row.remarks,
+      // The driver hands back a Date, which JSON renders in exactly this
+      // format; converting here makes the boundary explicit rather than
+      // depending on the serialiser to do it.
       evaluatedAt: row.evaluated_at === null ? null : row.evaluated_at.toISOString(),
     }));
   }
