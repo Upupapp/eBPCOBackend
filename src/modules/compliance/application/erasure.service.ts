@@ -82,6 +82,8 @@ export type ErasureResult =
  * added and forgotten here fails rather than quietly leaving personal data
  * behind after an erasure that reported success.
  */
+const IDENTIFIER = /^[a-z][a-z0-9_]*$/;
+
 export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = [
   { table: 'notification_deliveries', column: 'notification_id' },
   { table: 'notifications', column: 'account_id' },
@@ -145,6 +147,15 @@ export class ErasureService {
       erased.notification_deliveries = deliveries.rowCount;
 
       for (const { table, column } of ERASE_IN_ORDER.slice(1)) {
+        // The only interpolated SQL in this service, and the only place a table
+        // name reaches a statement as text. The values come from the constant
+        // above and nothing a caller sends, so this cannot be reached by input
+        // today — the check is here because it is the SHAPE of an injection,
+        // and a later change that derived this list from configuration or from
+        // the register would make it one silently.
+        if (!IDENTIFIER.test(table) || !IDENTIFIER.test(column)) {
+          throw new Error(`refusing to build SQL from "${table}"."${column}"`);
+        }
         const result = await tx.query(`delete from ${table} where ${column} = $1`, [accountId]);
         erased[table] = result.rowCount;
       }

@@ -101,9 +101,28 @@ export interface Account {
   readonly createdAt: Date;
 }
 
+/**
+ * Reading and managing your OWN account is not a job function.
+ *
+ * The role table grants what an officer may do to other people's permits. It
+ * said nothing about their own record, which meant a staff token carried no
+ * `profile:*` scope at all — and the moment the `/me` routes were scope-gated,
+ * an officer could not read their own profile, request their own data export,
+ * or exercise erasure.
+ *
+ * That is a compliance gap rather than an inconvenience: RA 10173 rights belong
+ * to the person, and an officer of the LGU is as much a data subject as an
+ * applicant is. Nothing about holding a job removes them.
+ *
+ * Granted to every account rather than added to each of the eight roles,
+ * because it is a property of having an account and not of any role — and a
+ * per-role list is one somebody adds a ninth role to without noticing.
+ */
+const SELF_SCOPES: readonly Scope[] = ['profile:read', 'profile:write'];
+
 export function scopesFor(account: Pick<Account, 'kind' | 'roles'>): readonly Scope[] {
   if (account.kind === 'applicant') return APPLICANT_SCOPES;
-  const granted = new Set<Scope>();
+  const granted = new Set<Scope>(SELF_SCOPES);
   for (const role of account.roles) {
     for (const scope of ROLE_SCOPES[role]) granted.add(scope);
   }

@@ -10,7 +10,7 @@ import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
-import { ROLE_SCOPES, StaffRole } from '../src/modules/identity/domain/account';
+import { StaffRole, scopesFor } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
 
 /**
@@ -48,7 +48,11 @@ async function staffToken(role: StaffRole): Promise<string> {
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
   const issued = await tokens.issueAccessToken({
-    sub: id, sid: randomUUID(), kind: 'staff', scopes: [...ROLE_SCOPES[role]],
+    sub: id, sid: randomUUID(), kind: 'staff', // scopesFor(), not ROLE_SCOPES: production issues tokens through it, and it
+    // grants profile:* to every account on top of the role's job scopes. A
+    // helper that reads the role table directly quietly tests a narrower
+    // token than any real caller holds.
+    scopes: [...scopesFor({ kind: 'staff', roles: [role] })],
   });
   return issued.token;
 }

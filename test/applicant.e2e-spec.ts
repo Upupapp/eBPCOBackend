@@ -10,7 +10,7 @@ import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
-import { APPLICANT_SCOPES, ROLE_SCOPES } from '../src/modules/identity/domain/account';
+import { APPLICANT_SCOPES, scopesFor } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
 
 /**
@@ -159,7 +159,7 @@ describe('the officer/applicant boundary', () => {
        values ($1,'staff','o@lgu.gov.ph','o@lgu.gov.ph','scrypt$1$1$1$a$b')`, [officer],
     );
     const token = (await tokens.issueAccessToken({
-      sub: officer, sid: randomUUID(), kind: 'staff', scopes: [...ROLE_SCOPES.evaluator],
+      sub: officer, sid: randomUUID(), kind: 'staff', scopes: [...scopesFor({ kind: 'staff', roles: ['evaluator'] })],
     })).token;
 
     const response = await get('/applications', token);

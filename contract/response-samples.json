@@ -1307,7 +1307,7 @@
         "type": "/problems/forbidden",
         "title": "Not permitted",
         "status": 403,
-        "detail": "A staff account cannot be erased on request: it attributes decisions on permit records. Disable it instead, through staff offboarding.",
+        "detail": "This account does not hold the permission this action requires.",
         "instance": "/me",
         "correlationId": "00000000-0000-4000-8000-000000000000"
       }

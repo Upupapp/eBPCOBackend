@@ -10,7 +10,7 @@ import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
-import { APPLICANT_SCOPES, ROLE_SCOPES } from '../src/modules/identity/domain/account';
+import { APPLICANT_SCOPES, scopesFor } from '../src/modules/identity/domain/account';
 
 /**
  * An applicant filing, uploading, paying and withdrawing — over HTTP.
@@ -181,7 +181,7 @@ describe('filing an application', () => {
        values ($1,'staff','o@lgu.gov.ph','o@lgu.gov.ph','scrypt$1$1$1$a$b')`, [officer],
     );
     const staff = (await tokens.issueAccessToken({
-      sub: officer, sid: randomUUID(), kind: 'staff', scopes: [...ROLE_SCOPES['records-officer']],
+      sub: officer, sid: randomUUID(), kind: 'staff', scopes: [...scopesFor({ kind: 'staff', roles: ['records-officer'] })],
     })).token;
 
     expect((await post('/applications', staff, submission())).statusCode).toBe(403);

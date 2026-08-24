@@ -6,7 +6,7 @@ import { ACCOUNT_REPOSITORY, AccountRepository } from '../application/account.re
 import { IdentityService } from '../application/identity.service';
 import { ErasureService } from '../../compliance/application/erasure.service';
 import { DataExportService } from '../../compliance/application/data-export.service';
-import { Public } from './guards/public.decorator';
+import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 
 /**
@@ -20,23 +20,34 @@ import type { AuthenticatedRequest } from './guards/authentication.guard';
 
 const credentials = z.object({
   grantType: z.literal('password'),
-  email: z.string().email(),
-  password: z.string().min(1),
-  totp: z.string().optional(),
+  email: z.string().email().max(320),
+  // Bounded. scrypt's cost comes from its parameters rather than the input
+  // length, but the body limit still allows a one-megabyte "password" that has
+  // to be read, copied and hashed on every attempt — and an unbounded field on
+  // the one endpoint an attacker can call without credentials is free work for
+  // them. 512 is far above anything a passphrase needs and far below anything
+  // worth defending against.
+  password: z.string().min(1).max(512),
+  // Six digits. Accepting an arbitrary string here let a caller send a
+  // megabyte to a comparison that only ever looks at six characters.
+  totp: z.string().regex(/^\d{6}$/, 'must be six digits').optional(),
 });
 
 const registration = z.object({
   firstName: z.string().min(1).max(100),
   lastName: z.string().min(1).max(100),
-  email: z.string().email(),
+  email: z.string().email().max(320),
   mobileNumber: z.string().regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX'),
-  password: z.string().min(1),
+  password: z.string().min(1).max(512),
 });
 
 const refreshRequest = z.object({ refreshToken: z.string().min(1) });
 const revokeRequest = z.object({ allSessions: z.boolean().optional() });
-const forgotRequest = z.object({ email: z.string().email() });
-const resetRequest = z.object({ token: z.string().min(1), password: z.string().min(1) });
+const forgotRequest = z.object({ email: z.string().email().max(320) });
+const resetRequest = z.object({
+  token: z.string().uuid('must be a reset token'),
+  password: z.string().min(1).max(512),
+});
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -201,6 +212,7 @@ export class MeController {
    */
   @Post('export')
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireScopes('profile:read')
   async requestExport(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     return { ...(await this.dataExports.request(callerOf(request))) };
   }
@@ -216,6 +228,7 @@ export class MeController {
    * with a dead deep link.
    */
   @Get('export/:requestId')
+  @RequireScopes('profile:read')
   async exportStatus(
     @Req() request: AuthenticatedRequest,
     @Param('requestId') requestId: string,
@@ -234,6 +247,7 @@ export class MeController {
    * expires with the request, and never outlives it.
    */
   @Get('export/:requestId/content')
+  @RequireScopes('profile:read')
   async exportContent(
     @Req() request: AuthenticatedRequest,
     @Param('requestId') requestId: string,
@@ -307,6 +321,7 @@ export class MeController {
    */
   @Delete()
   @HttpCode(HttpStatus.ACCEPTED)
+  @RequireScopes('profile:write')
   async erase(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     const result = await this.erasure.erase(callerOf(request));
     if (result.ok) {

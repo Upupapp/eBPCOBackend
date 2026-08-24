@@ -13,6 +13,8 @@ import { PostgresAccountRepository } from './infrastructure/postgres-account.rep
 import { PostgresSessionRepository } from './infrastructure/postgres-session.repository';
 import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { AccountStatusReader } from './application/account-status';
+import { PASSWORD_RESET_REPOSITORY, PasswordResetRepository } from './application/password-reset.repository';
+import { PostgresPasswordResetRepository } from './infrastructure/postgres-password-reset.repository';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { LocalBreachedPasswordScreen } from './infrastructure/breached-password-screen';
@@ -32,6 +34,12 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
   imports: [ComplianceModule],
   controllers: [AuthController, MeController],
   providers: [
+    {
+      provide: PASSWORD_RESET_REPOSITORY,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient): PasswordResetRepository =>
+        new PostgresPasswordResetRepository(db),
+    },
     {
       provide: AccountStatusReader,
       inject: [SQL_CLIENT],
@@ -84,13 +92,14 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
     },
     {
       provide: IdentityService,
-      inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy],
+      inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy, PASSWORD_RESET_REPOSITORY],
       useFactory: (
         accounts: AccountRepository,
         tokens: TokenService,
         hasher: PasswordHasher,
         policy: PasswordPolicy,
-      ) => new IdentityService(accounts, tokens, hasher, policy),
+        resetTickets: PasswordResetRepository,
+      ) => new IdentityService(accounts, tokens, hasher, policy, resetTickets),
     },
 
     // Registered globally: a new controller is protected the moment it exists,

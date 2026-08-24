@@ -2,6 +2,7 @@ import { randomUUID, timingSafeEqual } from 'node:crypto';
 
 import { Account, Scope, requiresMfa, scopesFor } from '../domain/account';
 import { PasswordHasher } from '../domain/password-hasher';
+import { PasswordResetRepository, resetTokenDigest } from './password-reset.repository';
 import { PasswordPolicy, PasswordRejection } from '../domain/password-policy';
 import { AccountRepository, normaliseEmail } from './account.repository';
 import { TokenService } from './token.service';
@@ -51,13 +52,12 @@ export class IdentityService {
    */
   private decoyHash: string | null = null;
 
-  private readonly resetTickets = new Map<string, { accountId: string; expiresAt: Date; usedAt: Date | null }>();
-
   constructor(
     private readonly accounts: AccountRepository,
     private readonly tokens: TokenService,
     private readonly hasher: PasswordHasher,
     private readonly policy: PasswordPolicy,
+    private readonly resetTickets: PasswordResetRepository,
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
@@ -173,8 +173,11 @@ export class IdentityService {
     if (account === null) return null;
 
     const token = randomUUID();
-    const expiresAt = new Date(this.clock().getTime() + ttlSeconds * 1000);
-    this.resetTickets.set(token, { accountId: account.id, expiresAt, usedAt: null });
+    const now = this.clock();
+    const expiresAt = new Date(now.getTime() + ttlSeconds * 1000);
+    // Only the digest is stored. The token goes to the applicant by email, and
+    // a leak of this store should not hand over working reset links.
+    await this.resetTickets.issue(resetTokenDigest(token), account.id, now, expiresAt);
     return { token, expiresAt };
   }
 
@@ -189,20 +192,29 @@ export class IdentityService {
     token: string,
     newPassword: string,
   ): Promise<{ ok: boolean; rejections: readonly PasswordRejection[] }> {
-    const ticket = this.resetTickets.get(token);
     const now = this.clock();
-    if (ticket === undefined || ticket.usedAt !== null || ticket.expiresAt.getTime() <= now.getTime()) {
-      return { ok: false, rejections: [] };
-    }
+    // Redeemed first, and atomically. Checking the ticket and then marking it
+    // used lets two requests arriving together both pass — which for a password
+    // reset means two people setting a password on one account.
+    const ticket = await this.resetTickets.redeem(resetTokenDigest(token), now);
+    if (ticket === null) return { ok: false, rejections: [] };
 
     const account = await this.accounts.findById(ticket.accountId);
     if (account === null) return { ok: false, rejections: [] };
 
     const rejections = await this.policy.evaluate(newPassword, { email: account.email });
-    if (rejections.length > 0) return { ok: false, rejections };
+    if (rejections.length > 0) {
+      // The ticket is already spent. That is deliberate: a weak password is a
+      // failed attempt at a reset, not a free retry, and leaving the ticket
+      // live would let an attacker who obtained one probe the password policy
+      // indefinitely. The applicant requests a new link, which costs them one
+      // email and costs an attacker the whole exercise.
+      return { ok: false, rejections };
+    }
 
     await this.accounts.updatePasswordHash(account.id, await this.hasher.hash(newPassword));
-    this.resetTickets.set(token, { ...ticket, usedAt: now });
+    // Every session, everywhere. Someone resetting a password is often doing it
+    // because they think somebody else has it.
     await this.tokens.endAllSessions(account.id);
 
     return { ok: true, rejections: [] };

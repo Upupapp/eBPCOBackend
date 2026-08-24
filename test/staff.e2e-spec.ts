@@ -11,7 +11,7 @@ import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
 import { IdentityService } from '../src/modules/identity/application/identity.service';
-import { ROLE_SCOPES, Scope, StaffRole } from '../src/modules/identity/domain/account';
+import { Scope, StaffRole, scopesFor } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
 
 /**
@@ -66,7 +66,11 @@ async function staffToken(role: StaffRole): Promise<string> {
     [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
-  return tokenFor('staff', ROLE_SCOPES[role], id);
+  // scopesFor(), not ROLE_SCOPES: production issues tokens through it, and it
+  // grants profile:* to every account on top of the role's job scopes. A helper
+  // reading the role table directly quietly tests a narrower token than any
+  // real caller holds.
+  return tokenFor('staff', scopesFor({ kind: 'staff', roles: [role] }), id);
 }
 
 const EDGES: ReadonlyArray<readonly [LifecycleStatus, LifecycleStatus]> = [
@@ -192,7 +196,8 @@ describe('the staff surface is closed by default', () => {
 
   it('stops an ERASED account, because erasure disables it', async () => {
     const token = (await tokens.issueAccessToken({
-      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+      scopes: ['profile:read', 'profile:write'],
     })).token;
     expect((await get('/me', token)).statusCode).toBe(200);
 
@@ -396,6 +401,19 @@ describe('what /me tells a portal', () => {
     expect(second.requestId).toBe(first.requestId);
   });
 
+  it('lets an officer export their own data, because they are a data subject too', async () => {
+    // RA 10173 rights belong to the person. Scoping the /me routes locked staff
+    // out of their own export until `profile:*` was granted to every account
+    // rather than to job roles — which is where it belongs, since reading your
+    // own record is not a job function.
+    const response = await app.inject({
+      method: 'POST', url: '/me/export',
+      headers: { authorization: `Bearer ${await staffToken('cashier')}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+  });
+
   it('will not show one applicant another’s export request', async () => {
     const token = (await tokens.issueAccessToken({
       sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
@@ -404,9 +422,22 @@ describe('what /me tells a portal', () => {
       method: 'POST', url: '/me/export', headers: { authorization: `Bearer ${token}` },
     })).json<{ requestId: string }>().requestId;
 
+    // Another APPLICANT, which is the meaningful comparison — a staff caller
+    // would now be refused by scope before reaching the ownership check, and
+    // would prove the wrong thing.
+    const someoneElse = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant','other@example.ph','other@example.ph','scrypt$1$1$1$a$b')`,
+      [someoneElse],
+    );
+    const theirToken = (await tokens.issueAccessToken({
+      sub: someoneElse, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+
     const other = await app.inject({
       method: 'GET', url: `/me/export/${requestId}`,
-      headers: { authorization: `Bearer ${await staffToken('evaluator')}` },
+      headers: { authorization: `Bearer ${theirToken}` },
     });
 
     expect(other.statusCode).toBe(404);

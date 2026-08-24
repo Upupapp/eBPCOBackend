@@ -1,5 +1,6 @@
 import { PasswordHasher, TEST_SCRYPT_COST } from '../domain/password-hasher';
 import { PasswordPolicy } from '../domain/password-policy';
+import { InMemoryPasswordResetRepository } from '../infrastructure/in-memory-password-reset.repository';
 import { InMemoryAccountRepository } from '../infrastructure/in-memory-account.repository';
 import { InMemorySessionRepository } from '../infrastructure/in-memory-session.repository';
 import { LocalBreachedPasswordScreen } from '../infrastructure/breached-password-screen';
@@ -15,8 +16,9 @@ function build() {
   const hasher = new PasswordHasher(TEST_SCRYPT_COST);
   const tokens = new TokenService({ signingKey: new Uint8Array(32).fill(3), sessions });
   const policy = new PasswordPolicy(new LocalBreachedPasswordScreen());
-  const identity = new IdentityService(accounts, tokens, hasher, policy);
-  return { identity, accounts, sessions, tokens, hasher };
+  const resetTickets = new InMemoryPasswordResetRepository();
+  const identity = new IdentityService(accounts, tokens, hasher, policy, resetTickets);
+  return { identity, accounts, sessions, tokens, hasher, resetTickets };
 }
 
 async function seedStaff(
