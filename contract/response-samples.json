@@ -238,6 +238,8 @@
           }
         },
         "applicantEmail": "maria.santos@example.ph",
+        "form": {},
+        "formValidatedAgainst": null,
         "business": {
           "id": "00000000-0000-4000-8000-000000000000",
           "name": "Aling Nena Sari-Sari Store",
@@ -360,6 +362,8 @@
           }
         },
         "applicantEmail": "maria.santos@example.ph",
+        "form": {},
+        "formValidatedAgainst": null,
         "business": {
           "id": "00000000-0000-4000-8000-000000000000",
           "name": "Aling Nena Sari-Sari Store",
@@ -780,6 +784,7 @@
             "dateSubmitted": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "openInstructionCount": 0,
+            "form": {},
             "classification": "Simple",
             "pledge": {
               "pledgedWorkingDays": 7,
@@ -807,6 +812,7 @@
             "dateSubmitted": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "openInstructionCount": 0,
+            "form": {},
             "classification": "Simple",
             "pledge": {
               "pledgedWorkingDays": 7,
@@ -849,6 +855,7 @@
             "dateSubmitted": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "openInstructionCount": 0,
+            "form": {},
             "classification": "Simple",
             "pledge": {
               "pledgedWorkingDays": 7,
@@ -891,6 +898,7 @@
             "dateSubmitted": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "openInstructionCount": 0,
+            "form": {},
             "classification": "Simple",
             "pledge": {
               "pledgedWorkingDays": 7,
@@ -933,6 +941,7 @@
             "dateSubmitted": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
             "openInstructionCount": 1,
+            "form": {},
             "classification": "Simple",
             "pledge": {
               "pledgedWorkingDays": 7,
@@ -972,6 +981,7 @@
         "dateSubmitted": "2026-01-01T00:00:00.000Z",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "openInstructionCount": 1,
+        "form": {},
         "classification": "Simple",
         "pledge": {
           "pledgedWorkingDays": 7,
@@ -1116,6 +1126,16 @@
         "dateSubmitted": "2026-01-01T00:00:00.000Z",
         "updatedAt": "2026-01-01T00:00:00.000Z",
         "openInstructionCount": 0,
+        "form": {
+          "scope": {
+            "fencing": {
+              "material": "hollow block on RC footing",
+              "linearMetres": 42
+            }
+          },
+          "lotArea": 240,
+          "engineer": "Ana Dela Cruz, PRC 0012345"
+        },
         "classification": "Simple",
         "pledge": {
           "pledgedWorkingDays": 7,
@@ -1127,6 +1147,28 @@
         "payment": {
           "status": "Not Yet Available"
         }
+      }
+    },
+    "problem.formTooLarge": {
+      "request": {
+        "method": "POST",
+        "path": "/applications",
+        "query": null
+      },
+      "status": 400,
+      "contentType": "application/problem+json; charset=utf-8",
+      "body": {
+        "type": "/problems/validation-failed",
+        "title": "The request did not validate",
+        "status": 400,
+        "instance": "/applications",
+        "correlationId": "00000000-0000-4000-8000-000000000000",
+        "errors": [
+          {
+            "pointer": "/form",
+            "message": "is 293KB; the limit is 256KB"
+          }
+        ]
       }
     },
     "problem.paymentBeforeAssessment": {

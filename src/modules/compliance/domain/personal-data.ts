@@ -158,6 +158,10 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     charter_entry_id: structural,
     pledge_suspended_since: none('statutory'),
     version: structural,
+    // Whatever the applicant typed into the wizard: names, dimensions, the
+    // engineer who signed the plans. Free-form by design.
+    form: content('statutory', PERMIT_RECORD),
+    form_validated_against: none('statutory'),
     submitted_at: none('statutory'),
     created_at: none('statutory'),
     updated_at: none('statutory'),

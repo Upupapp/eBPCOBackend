@@ -41,6 +41,8 @@ export interface ApplicationRecord {
   readonly dateSubmitted: Date | null;
   readonly updatedAt: Date;
   readonly openInstructionCount: number;
+  /** The applicant's own answers, returned to them. */
+  readonly form: Readonly<Record<string, unknown>>;
   /** Present only when an officer has issued one. */
   readonly orderOfPayment: OrderOfPaymentRecord | null;
   /**
@@ -93,6 +95,16 @@ export function toApplicantView(record: ApplicationRecord): Record<string, unkno
     dateSubmitted: record.dateSubmitted?.toISOString() ?? null,
     updatedAt: record.updatedAt.toISOString(),
     openInstructionCount: record.openInstructionCount,
+
+    // Their own answers, back. An applicant who has to reopen a filing to check
+    // what they put in a field, and cannot, will file again rather than trust
+    // it — which is one more application for an officer to reconcile.
+    //
+    // `formValidatedAgainst` is deliberately NOT here. Whether the LGU had a
+    // schema to check the form against is an operational fact about the LGU,
+    // not something an applicant can act on, and showing it would invite
+    // "so nobody checked my application?"
+    form: record.form,
   };
 
   // Absent, not null: the LGU has made no pledge for a permit type its charter

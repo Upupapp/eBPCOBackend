@@ -2,6 +2,7 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { lookup, remember, requestDigest } from '../../../persistence/idempotency';
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
+import { FormViolation, schemaFor } from '../domain/application-form';
 
 /**
  * Filing an application, exactly once.
@@ -30,8 +31,10 @@ export type SubmitResult =
   | {
       readonly ok: false;
       readonly reason: 'no-applicant-record' | 'unknown-permit-type' | 'business-not-yours'
-        | 'documents-not-yours' | 'key-reused';
+        | 'documents-not-yours' | 'key-reused' | 'form-rejected';
       readonly detail: string;
+      /** Present for `form-rejected`, so a client can point at the field. */
+      readonly violations?: readonly FormViolation[];
     };
 
 export interface Submission {
@@ -40,6 +43,8 @@ export interface Submission {
   readonly businessId: string | null;
   readonly location: string | null;
   readonly documentIds: readonly string[];
+  /** The applicant's answers. Structurally bounded by the transport; semantically checked here if a schema exists. */
+  readonly form: Record<string, unknown>;
 }
 
 export class SubmissionService {
@@ -59,6 +64,9 @@ export class SubmissionService {
     idempotencyKey: string;
   }): Promise<SubmitResult> {
     const { caller, submission, idempotencyKey } = options;
+    // The form is part of the request's identity. Without it, a replay carrying
+    // different answers under the same key would be treated as the same
+    // submission and the applicant's corrections would be silently discarded.
     const digest = requestDigest({ ...submission, documentIds: [...submission.documentIds].sort() });
 
     return this.db.transaction(async (tx) => {
@@ -136,6 +144,24 @@ export class SubmissionService {
         }
       }
 
+      // Semantic validation, where there is anything to validate against. The
+      // registry is empty until the LGU's forms are supplied (M-10), so today
+      // this always takes the second branch — and the branch it takes is
+      // recorded on the row rather than assumed, so `form_validated_against is
+      // null` finds every application filed before there was a schema.
+      const schema = schemaFor(submission.permitType);
+      if (schema !== undefined) {
+        const violations = schema.validate(submission.form);
+        if (violations.length > 0) {
+          return {
+            ok: false,
+            reason: 'form-rejected',
+            detail: 'Some answers on the form are not valid for this permit type.',
+            violations,
+          };
+        }
+      }
+
       const now = this.clock();
 
       // The charter entry in force ON THE FILING DATE, not the latest one. An
@@ -155,13 +181,15 @@ export class SubmissionService {
       const inserted = await tx.query<{ id: string }>(
         `insert into applications
            (reference_number, applicant_id, business_id, permit_type, application_action,
-            location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by)
-         values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10)
+            location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
+            form, form_validated_against)
+         values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12)
          returning id`,
         [
           referenceNumber, applicantId, submission.businessId, submission.permitType,
           submission.applicationAction, submission.location,
           charterEntry?.classification ?? null, charterEntry?.id ?? null, now, caller.accountId,
+          JSON.stringify(submission.form), schema?.version ?? null,
         ],
       );
       const applicationId = inserted.rows[0]?.id ?? '';

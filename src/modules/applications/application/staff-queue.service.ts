@@ -185,6 +185,8 @@ const QUEUE_SQL = `
     exists (select 1 from payments p
              where p.application_id = a.id and p.verified_at is not null) as payment_verified,
     a.classification as charter_classification,
+    a.form,
+    a.form_validated_against,
     a.pledge_suspended_since,
     ce.pledged_working_days,
     (select min(t.occurred_at) from application_transitions t
@@ -362,6 +364,8 @@ export class StaffQueueService {
     return {
       summary: this.toQueueRow(row, calendar),
       applicantEmail: account.rows[0]?.email ?? '',
+      form: (row['form'] as Record<string, unknown> | null) ?? {},
+      formValidatedAgainst: (row['form_validated_against'] as string | null) ?? null,
       business: one(business),
       documents: many(documents),
       evaluations: many(evaluations),
@@ -585,6 +589,20 @@ function decodeCursor(cursor: string): { updatedAt: Date; id: string } | null {
 export interface StaffApplicationDetail {
   readonly summary: QueueRow;
   readonly applicantEmail: string;
+  /**
+   * The applicant's own answers, and what checked them.
+   *
+   * An officer evaluating an application needs this more than anyone. Storing
+   * it and not showing it here would leave the evaluation exactly where it was
+   * when the form was being discarded — a permit type, a location and a stack
+   * of documents.
+   *
+   * `formValidatedAgainst` is null wherever no schema existed when the
+   * application was filed, which is currently all of them. An officer reading
+   * an unusual answer should know whether anything checked it.
+   */
+  readonly form: Readonly<Record<string, unknown>>;
+  readonly formValidatedAgainst: string | null;
   readonly business: Readonly<Record<string, unknown>> | null;
   readonly documents: ReadonlyArray<Record<string, unknown>>;
   readonly evaluations: ReadonlyArray<Record<string, unknown>>;

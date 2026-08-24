@@ -479,6 +479,17 @@ async function main(): Promise<void> {
     permitType: 'Fencing',
     applicationAction: 'New',
     location: '12 Rizal Street, Poblacion Uno, Cabuyao',
+    // A form, so the recorded shape shows what an application actually carries
+    // rather than the empty case.
+    form: {
+      lotArea: 240,
+      scope: { fencing: { linearMetres: 42, material: 'hollow block on RC footing' } },
+      engineer: 'Ana Dela Cruz, PRC 0012345',
+    },
+  }, randomUUID());
+  await record('problem.formTooLarge', 'POST', '/applications', applicantToken, {
+    permitType: 'Fencing', applicationAction: 'New',
+    form: { notes: 'x'.repeat(300_000) },
   }, randomUUID());
   await record('problem.paymentBeforeAssessment', 'POST',
     `/applications/${seeded.detailed}/payments`, applicantToken, {

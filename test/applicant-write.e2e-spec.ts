@@ -109,6 +109,42 @@ describe('filing an application', () => {
     expect(body.payment).toEqual({ status: 'Not Yet Available' });
   });
 
+  it('stores what the applicant typed, which it used to discard', async () => {
+    // `form` reached the controller, was parsed, and was dropped. An officer
+    // opening the application saw a permit type, a location and a stack of
+    // documents, and none of the fifteen screens the applicant had filled in.
+    const answers = { lotArea: 240, storeys: 2, engineer: 'Ana Dela Cruz, PRC 0012345' };
+
+    const filed = await post('/applications', maria, submission({ form: answers }));
+
+    expect(filed.statusCode).toBe(201);
+    const row = await db.query<{ form: Record<string, unknown> }>(
+      'select form from applications where id = $1', [filed.json<{ id: string }>().id],
+    );
+    expect(row.rows[0]!.form).toEqual(answers);
+  });
+
+  it('refuses a form larger than the limit, pointing at the form', async () => {
+    // An endpoint accepting arbitrary JSON with no bounds accepts a
+    // ten-megabyte nested object.
+    const response = await post('/applications', maria, submission({
+      form: { notes: 'x'.repeat(300_000) },
+    }));
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().errors[0].pointer).toBe('/form');
+  });
+
+  it('points at the field an applicant has to go back to', async () => {
+    // "Some answers are not valid" sends someone back through fifteen screens.
+    const response = await post('/applications', maria, submission({
+      form: { scope: { fencing: { material: 'x'.repeat(9_000) } } },
+    }));
+
+    expect(response.statusCode).toBe(400);
+    expect(response.json().errors[0].pointer).toBe('/form/scope/fencing/material');
+  });
+
   it('refuses a filing with no Idempotency-Key', async () => {
     // The mobile client queues these offline and replays them, so a replay is
     // the normal case rather than an edge one.

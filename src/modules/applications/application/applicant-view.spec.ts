@@ -11,6 +11,7 @@ const record = (overrides: Partial<ApplicationRecord> = {}): ApplicationRecord =
   businessName: null,
   paymentSubmittedAt: null,
   paymentVerifiedAt: null,
+  form: {},
   location: 'Lot 7 Block 3, Barangay Bagumbayan',
   classification: null,
   pledgedWorkingDays: null,
@@ -254,5 +255,24 @@ describe('the payment status is chosen from the facts', () => {
     } finally {
       jest.useRealTimers();
     }
+  });
+});
+
+describe('the applicant’s own answers, read back', () => {
+  it('are returned to them', () => {
+    // An applicant who has to reopen a filing to check what they put in a
+    // field, and cannot, will file again rather than trust it — which is one
+    // more application for an officer to reconcile.
+    const view = toApplicantView(record({ form: { lotArea: 240, storeys: 2 } }));
+
+    expect(view.form).toEqual({ lotArea: 240, storeys: 2 });
+  });
+
+  it('do not carry whether the LGU had a schema to check them against', () => {
+    // An operational fact about the LGU, not something an applicant can act on.
+    // Showing it invites "so nobody checked my application?"
+    const view = toApplicantView(record({ form: { lotArea: 240 } }));
+
+    expect(view).not.toHaveProperty('formValidatedAgainst');
   });
 });

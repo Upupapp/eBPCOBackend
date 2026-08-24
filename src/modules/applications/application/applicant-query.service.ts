@@ -30,6 +30,7 @@ const RECORD_SQL = `
     b.name as business_name,
     a.location,
     a.classification,
+    a.form,
     ce.pledged_working_days,
     a.pledge_suspended_since,
     a.submitted_at,
@@ -158,6 +159,7 @@ export class ApplicantQueryService {
       dateSubmitted: submitted,
       updatedAt: date(row.updated_at) ?? new Date(0),
       openInstructionCount: Number(row.open_instruction_count ?? 0),
+      form: (row.form as Record<string, unknown> | null) ?? {},
       paymentSubmittedAt: date(row.payment_submitted_at),
       paymentVerifiedAt: date(row.payment_verified_at),
       orderOfPayment: row.oop_number === null || row.oop_number === undefined ? null : {

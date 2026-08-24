@@ -8,6 +8,7 @@ import { Caller } from '../domain/application';
 import { LifecycleService } from '../application/lifecycle.service';
 import { InstructionResponseService } from '../application/instruction-response.service';
 import { SubmissionService } from '../application/submission.service';
+import { validateStructure } from '../domain/application-form';
 import { ApplicantQueryService } from '../application/applicant-query.service';
 import { PaymentService } from '../../payments/application/payment.service';
 
@@ -28,9 +29,10 @@ const submissionShape = z.object({
   businessId: z.string().uuid().nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   documentIds: z.array(z.string().uuid()).max(60).optional(),
-  // Accepted and not yet validated per permit type. The unified DPWH/JMC forms
-  // have not been supplied (M-10), and validating against a field set invented
-  // here would reject applications the LGU would have accepted.
+  // Open by shape, bounded by size. The field SET is permit-type-specific and
+  // has not been supplied (M-10); the structural limits below do not depend on
+  // knowing it, and without them this endpoint accepts a ten-megabyte nested
+  // object.
   form: z.record(z.string(), z.unknown()).optional(),
 // `.strict()` on every write shape. A field the client sent and this server
 // silently dropped is a field the client believes was honoured — and on a
@@ -127,6 +129,15 @@ export class ApplicantWriteController {
     const caller = applicantCaller(request);
     const input = parse(submissionShape, body);
 
+    const form = input.form ?? {};
+    const structural = validateStructure(form);
+    if (structural.length > 0) {
+      throw ProblemException.validation(structural.map((violation) => ({
+        pointer: violation.pointer,
+        message: violation.message,
+      })));
+    }
+
     const result = await this.submissions.submit({
       caller,
       idempotencyKey: idempotencyKey(key),
@@ -136,10 +147,20 @@ export class ApplicantWriteController {
         businessId: input.businessId ?? null,
         location: input.location ?? null,
         documentIds: input.documentIds ?? [],
+        form,
       },
     });
 
     if (!result.ok) {
+      if (result.reason === 'form-rejected') {
+        // 400 with field pointers, not 422. The answers are malformed rather
+        // than the application being in the wrong state, and an applicant needs
+        // to know WHICH field to go back to.
+        throw ProblemException.validation((result.violations ?? []).map((violation) => ({
+          pointer: violation.pointer,
+          message: violation.message,
+        })));
+      }
       if (result.reason === 'key-reused') {
         throw new ProblemException(
           ProblemType.conflict, 'The resource is not in a state that permits this',

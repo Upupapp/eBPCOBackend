@@ -36,6 +36,7 @@ const submission = (overrides: Partial<Submission> = {}): Submission => ({
   businessId: null,
   location: '12 Rizal Street, Poblacion Uno',
   documentIds: [],
+  form: {},
   ...overrides,
 });
 
@@ -335,5 +336,89 @@ describe('the pledge an applicant is given', () => {
     );
     expect(row.rows[0]!.charter_entry_id).toBeNull();
     expect(row.rows[0]!.classification).toBeNull();
+  });
+});
+
+/**
+ * `form` used to reach the controller, be parsed, and be dropped. An applicant
+ * filled in fifteen screens of a wizard, and an officer opening the application
+ * saw a permit type, a location and a stack of documents — none of what they
+ * had actually typed.
+ */
+describe('the applicant’s own answers', () => {
+  it('survive the filing', async () => {
+    const answers = { lotArea: 240, storeys: 2, engineer: 'Ana Dela Cruz, PRC 0012345' };
+
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ form: answers }), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) return;
+
+    const row = await db.query<{ form: Record<string, unknown> }>(
+      'select form from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]!.form).toEqual(answers);
+  });
+
+  it('defaults to an empty object rather than null', async () => {
+    // A null form is a third state a reader has to handle. There is no such
+    // thing as an application with no answers — only one with none yet.
+    const result = await submissions.submit({
+      caller: maria, submission: submission(), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) return;
+
+    const row = await db.query<{ form: unknown }>(
+      'select form from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]!.form).toEqual({});
+  });
+
+  it('records that nothing checked it, rather than leaving that to be assumed', async () => {
+    // `where form_validated_against is null` is every application filed before
+    // there was a schema to check against — the question somebody will need
+    // answered when the LGU's forms arrive, and one that cannot be
+    // reconstructed afterwards.
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ form: { anything: true } }), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) return;
+
+    const row = await db.query<{ form_validated_against: string | null }>(
+      'select form_validated_against from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]!.form_validated_against).toBeNull();
+  });
+
+  it('makes a replay with DIFFERENT answers a different request', async () => {
+    // The form is part of the request's identity. Without it, a replay carrying
+    // corrected answers under the same key would be treated as the same
+    // submission and the corrections silently discarded.
+    const key = randomUUID();
+    await submissions.submit({
+      caller: maria, submission: submission({ form: { storeys: 1 } }), idempotencyKey: key,
+    });
+
+    const corrected = await submissions.submit({
+      caller: maria, submission: submission({ form: { storeys: 2 } }), idempotencyKey: key,
+    });
+
+    expect(corrected.ok).toBe(false);
+    if (corrected.ok) return;
+    expect(corrected.reason).toBe('key-reused');
+  });
+
+  it('replays identical answers as the same request', async () => {
+    const key = randomUUID();
+    const form = { storeys: 2, lotArea: 240 };
+    const first = await submissions.submit({
+      caller: maria, submission: submission({ form }), idempotencyKey: key,
+    });
+    const replay = await submissions.submit({
+      caller: maria, submission: submission({ form }), idempotencyKey: key,
+    });
+
+    expect(replay.ok && replay.replayed).toBe(true);
+    expect(first.ok && replay.ok && replay.applicationId).toBe(first.ok ? first.applicationId : '');
   });
 });
