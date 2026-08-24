@@ -4,6 +4,7 @@ import { Caller } from '../../applications/domain/application';
 import { centavos, parseCentavos } from '../domain/money';
 import { SettlementCheck, checkSettles } from '../domain/order-of-payment';
 import { requestDigest } from './assessment.service';
+import { lookup, remember } from '../../../persistence/idempotency';
 
 /**
  * Submitting proof of payment, and verifying it.
@@ -29,6 +30,15 @@ export interface PaymentProof {
 export type SubmitResult =
   | { readonly ok: true; readonly paymentId: string; readonly replayed: boolean; readonly settlement: SettlementCheck }
   | { readonly ok: false; readonly reason: 'no-order-of-payment' | 'already-verified' | 'conflict'; readonly detail: string };
+
+export type RecordOnsiteResult =
+  | { readonly ok: true; readonly paymentId: string; readonly replayed: boolean }
+  | {
+      readonly ok: false;
+      readonly reason: 'no-order-of-payment' | 'already-paid' | 'does-not-settle'
+        | 'self-receipt' | 'conflict';
+      readonly detail: string;
+    };
 
 export type VerifyResult =
   | { readonly ok: true; readonly paymentId: string }
@@ -132,6 +142,138 @@ export class PaymentService {
       );
 
       return { ok: true, paymentId, replayed: false, settlement };
+    });
+  }
+
+  /**
+   * Cash across a counter.
+   *
+   * The applicant hands over money and the cashier issues an Official Receipt.
+   * That is one act, not two, and modelling it as "record, then have somebody
+   * else verify" would ask an officer to confirm money they never handled.
+   *
+   * **The submitter is the APPLICANT, not the cashier.** That is not a
+   * workaround for `verifier_is_not_the_submitter` — it is what happened. The
+   * applicant paid; the cashier received it and receipted it. Recording the
+   * cashier as submitter would be recording them as having paid their own
+   * LGU's fee, which is both false and would collapse the two roles the
+   * constraint exists to keep apart.
+   *
+   * The constraint then does something useful for free: where the cashier IS
+   * the applicant — staff do apply for permits on their own houses — the two
+   * account ids are equal and the insert is refused. A cashier must not
+   * receipt their own permit fee, and nobody had to write that rule.
+   *
+   * Who recorded it is not lost: the audit entry names the cashier, and that is
+   * the right place for it, since it is a fact about the LGU's handling rather
+   * than about the payment.
+   */
+  async recordOnsite(options: {
+    applicationId: string;
+    cashier: Caller;
+    officialReceiptNumber: string;
+    amountCentavos: number;
+    idempotencyKey: string;
+  }): Promise<RecordOnsiteResult> {
+    const { applicationId, cashier, officialReceiptNumber, amountCentavos, idempotencyKey } = options;
+    const digest = requestDigest({ applicationId, officialReceiptNumber, amountCentavos });
+
+    return this.db.transaction(async (tx) => {
+      const replay = await lookup<{ paymentId: string }>(tx, {
+        accountId: cashier.accountId, key: idempotencyKey,
+        operation: 'payment.record-onsite', digest,
+      });
+      if (replay.kind === 'mismatch') {
+        return {
+          ok: false, reason: 'conflict',
+          detail: 'This Idempotency-Key was already used for a different receipt. Use a new key.',
+        };
+      }
+      if (replay.kind === 'replay') {
+        return { ok: true, paymentId: replay.previous.body.paymentId, replayed: true };
+      }
+
+      const context = await tx.query<{
+        order_id: string; total_centavos: string; applicant_account_id: string; already_paid: boolean;
+      }>(
+        `select o.id as order_id, o.total_centavos, acc.id as applicant_account_id,
+                exists (select 1 from payments p
+                         where p.application_id = a.id and p.verified_at is not null) as already_paid
+           from applications a
+           join applicants ap on ap.id = a.applicant_id
+           join accounts acc on acc.id = ap.account_id
+           join orders_of_payment o
+             on o.application_id = a.id and o.superseded_at is null
+          where a.id = $1
+          for update of a`,
+        [applicationId],
+      );
+      const row = context.rows[0];
+      if (row === undefined) {
+        // No Order of Payment means nothing to receipt. Saying that
+        // specifically is the difference between the cashier waiting and the
+        // cashier telephoning the assessor.
+        return {
+          ok: false, reason: 'no-order-of-payment',
+          detail: 'No Order of Payment has been issued for this application, so there is nothing to pay.',
+        };
+      }
+      if (row.already_paid) {
+        return {
+          ok: false, reason: 'already-paid',
+          detail: 'A verified payment is already recorded against this application.',
+        };
+      }
+      if (row.applicant_account_id === cashier.accountId) {
+        // The database would refuse this anyway. Answering here says why.
+        return {
+          ok: false, reason: 'self-receipt',
+          detail: 'You cannot receipt a payment on your own application. Ask a colleague.',
+        };
+      }
+
+      const total = parseCentavos(row.total_centavos);
+      const settlement = checkSettles(total, centavos(amountCentavos));
+      if (!settlement.settles) {
+        // ADR 0010: no partial payments. An LGU that accepts part of a fee has
+        // to track a balance, chase it, and decide what a half-paid permit is —
+        // and none of that is built or decided.
+        return {
+          ok: false, reason: 'does-not-settle',
+          detail: `The Order of Payment is for ${total} centavos and this receipt is for `
+            + `${amountCentavos}. Partial payments are not accepted.`,
+        };
+      }
+
+      const now = this.clock();
+      const inserted = await tx.query<{ id: string }>(
+        `insert into payments
+           (order_of_payment_id, application_id, reference_number, amount_centavos, method, status,
+            submitted_at, submitted_by, verified_at, verified_by, official_receipt_number)
+         values ($1,$2,$3,$4,'Onsite','Paid',$5,$6,$5,$7,$8)
+         returning id`,
+        [row.order_id, applicationId, officialReceiptNumber, total, now,
+         row.applicant_account_id, cashier.accountId, officialReceiptNumber],
+      );
+      const paymentId = inserted.rows[0]?.id ?? '';
+
+      await this.audit.append({
+        action: 'payment.recorded-onsite',
+        subjectType: 'payment',
+        subjectId: paymentId,
+        outcome: 'allowed',
+        // The cashier, not the applicant. Who handled the money is a fact about
+        // the LGU's handling, and this is where it belongs.
+        actorAccountId: cashier.accountId,
+        afterState: { applicationId, officialReceiptNumber, amountCentavos: total },
+      }, tx);
+
+      await remember(tx, {
+        accountId: cashier.accountId, key: idempotencyKey,
+        operation: 'payment.record-onsite', digest, status: 201, body: { paymentId },
+      });
+
+      return { ok: true, paymentId, replayed: false };
     });
   }
 

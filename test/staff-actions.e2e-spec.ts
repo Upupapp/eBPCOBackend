@@ -57,10 +57,12 @@ async function staffToken(role: StaffRole): Promise<string> {
   return issued.token;
 }
 
-const post = (url: string, token: string, payload: Record<string, unknown> = {}) =>
+const post = (
+  url: string, token: string, payload: Record<string, unknown> = {}, key: string = randomUUID(),
+) =>
   app.inject({
     method: 'POST', url,
-    headers: { authorization: `Bearer ${token}`, 'idempotency-key': randomUUID() },
+    headers: { authorization: `Bearer ${token}`, 'idempotency-key': key },
     payload,
   });
 
@@ -318,6 +320,187 @@ describe('the cashier’s queue', () => {
     const again = await post(`/staff/payments/${paymentId}/verify`, token, { officialReceiptNumber: 'OR-2' });
 
     expect(again.statusCode).toBe(409);
+  });
+});
+
+describe('cash across a counter', () => {
+  async function assessed(reference = 'BP-CASH'): Promise<{ applicationId: string; total: number }> {
+    const applicationId = await file(reference, 'Under Evaluation');
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared, scanned_at)
+       values ($1,$2,$3,'Valid identity document','psa.pdf','application/pdf',1024,
+               '${'c'.repeat(64)}','documents/${reference}.pdf','Approved',true,now())`,
+      [randomUUID(), applicationId, APPLICANT_ACCOUNT],
+    );
+    const evaluator = await staffToken('evaluator');
+    for (const stage of STAGES) {
+      await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage, result: 'Passed' });
+    }
+    const order = await post(`/staff/applications/${applicationId}/order-of-payment`, await staffToken('assessor'));
+    return { applicationId, total: order.json<{ totalCentavos: number }>().totalCentavos };
+  }
+
+  it('records the payment as settled, in one act', async () => {
+    // The applicant hands over money and the cashier issues an Official
+    // Receipt. That is one act, not two — modelling it as "record, then have
+    // somebody else verify" asks an officer to confirm money they never
+    // handled.
+    const { applicationId, total } = await assessed();
+
+    const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-2026-114772', amountCentavos: total });
+
+    expect(response.statusCode).toBe(201);
+    const row = await db.query<{ status: string; method: string; official_receipt_number: string }>(
+      'select status, method, official_receipt_number from payments where application_id = $1',
+      [applicationId],
+    );
+    expect(row.rows[0]!.status).toBe('Paid');
+    expect(row.rows[0]!.method).toBe('Onsite');
+    expect(row.rows[0]!.official_receipt_number).toBe('OR-2026-114772');
+  });
+
+  it('records the APPLICANT as the one who paid, and the cashier as the one who received it', async () => {
+    // Not a workaround for the separation-of-duty constraint — it is what
+    // happened. Recording the cashier as submitter would be recording them as
+    // having paid their own LGU's fee.
+    const { applicationId, total } = await assessed();
+
+    await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+
+    const row = await db.query<{ submitted_by: string; verified_by: string }>(
+      'select submitted_by, verified_by from payments where application_id = $1', [applicationId],
+    );
+    expect(row.rows[0]!.submitted_by).toBe(APPLICANT_ACCOUNT);
+    expect(row.rows[0]!.verified_by).not.toBe(APPLICANT_ACCOUNT);
+  });
+
+  it('names the cashier in the audit trail, where who handled the money belongs', async () => {
+    const { applicationId, total } = await assessed();
+
+    await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+
+    const audit = await db.query<{ n: string }>(
+      `select count(*) as n from audit_events where action = 'payment.recorded-onsite'`,
+    );
+    expect(Number(audit.rows[0]!.n)).toBe(1);
+  });
+
+  it('refuses a cashier receipting their own application', async () => {
+    // Staff do apply for permits on their own houses. The database constraint
+    // would refuse this anyway; answering here says why.
+    const cashier = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff','selfcashier@lgu.gov.ph','selfcashier@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+      [cashier],
+    );
+    await db.query('insert into account_roles (account_id, role) values ($1,$2)', [cashier, 'cashier']);
+    const theirApplicant = randomUUID();
+    await db.query(
+      `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Cash','Ier')`,
+      [theirApplicant, cashier],
+    );
+    const { total } = await assessed('BP-OTHER');
+    const own = randomUUID();
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                                 lifecycle_status, submitted_at, created_by)
+       values ($1,'BP-OWN',$2,'Fencing','New','Submitted',now(),$3)`,
+      [own, theirApplicant, cashier],
+    );
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                      architectural_centavos, structural_centavos, electrical_centavos,
+                                      others_centavos, total_centavos, fee_schedule_version, assessed_by)
+       values ($1,$2,'OP-OWN',50000,120000,0,512000,0,0,$3,'2026.1',$4)`,
+      [randomUUID(), own, total, APPLICANT_ACCOUNT],
+    );
+    const token = (await tokens.issueAccessToken({
+      sub: cashier, sid: randomUUID(), kind: 'staff',
+      scopes: [...scopesFor({ kind: 'staff', roles: ['cashier'] })],
+    })).token;
+
+    const response = await post(`/staff/applications/${own}/onsite-payment`, token,
+      { officialReceiptNumber: 'OR-SELF', amountCentavos: total });
+
+    expect(response.statusCode).toBe(403);
+    expect(response.json().detail).toMatch(/your own application/i);
+  });
+
+  it('refuses a receipt that does not settle the Order of Payment', async () => {
+    // ADR 0010: an LGU that accepts part of a fee has to track a balance, chase
+    // it, and decide what a half-paid permit is.
+    const { applicationId, total } = await assessed();
+
+    const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total - 1 });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/partial payments are not accepted/i);
+  });
+
+  it('refuses before an Order of Payment exists, and says so', async () => {
+    const applicationId = await file('BP-NOOP', 'Under Evaluation');
+
+    const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: 1000 });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/no order of payment/i);
+  });
+
+  it('refuses a second receipt against an application already paid', async () => {
+    const { applicationId, total } = await assessed();
+    const cashier = await staffToken('cashier');
+    await post(`/staff/applications/${applicationId}/onsite-payment`, cashier,
+      { officialReceiptNumber: 'OR-1', amountCentavos: total });
+
+    const again = await post(`/staff/applications/${applicationId}/onsite-payment`, cashier,
+      { officialReceiptNumber: 'OR-2', amountCentavos: total });
+
+    expect(again.statusCode).toBe(409);
+  });
+
+  it('records one payment however many times the receipt is replayed', async () => {
+    const { applicationId, total } = await assessed();
+    const cashier = await staffToken('cashier');
+    const key = randomUUID();
+    const receipt = { officialReceiptNumber: 'OR-1', amountCentavos: total };
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await post(`/staff/applications/${applicationId}/onsite-payment`, cashier, receipt, key);
+    }
+
+    const count = await db.query<{ n: string }>(
+      'select count(*) as n from payments where application_id = $1', [applicationId],
+    );
+    expect(Number(count.rows[0]!.n)).toBe(1);
+  });
+
+  it('is closed to an evaluator', async () => {
+    const { applicationId, total } = await assessed();
+
+    const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('evaluator'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('will not let a cashier record a bank transfer as cash', async () => {
+    // No `method` field: this endpoint IS the onsite one. Letting a caller
+    // choose would let a cashier record a transfer as though they had received
+    // it in person.
+    const { applicationId, total } = await assessed();
+
+    const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
+      await staffToken('cashier'),
+      { officialReceiptNumber: 'OR-1', amountCentavos: total, method: 'Bank Transfer' });
+
+    expect(response.statusCode).toBe(400);
   });
 });
 

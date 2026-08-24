@@ -199,6 +199,19 @@ alert on: one failure is noise, nine is an outage nobody has noticed.
 
 ---
 
+## 4c. Running the gate
+
+`./scripts/verify.sh` — typecheck, lint, tests, secret scan, build.
+
+**The test run is bounded to two workers on purpose.** Almost every suite spins
+up PGlite, which is real PostgreSQL in-process and carries its own memory per
+instance; Jest's default of one worker per core ran fifty-two of them in
+parallel and the whole run was OOM-killed. That is the worst failure a gate can
+have — it looks like a crash rather than a result, and the next person runs it
+less often. Two is slower and finishes.
+
+---
+
 ## 4b. Contract evidence
 
 `contract/` holds two generated files: the responses the server really produces,

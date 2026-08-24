@@ -721,6 +721,19 @@
         ]
       }
     },
+    "staff.onsitePayment": {
+      "request": {
+        "method": "POST",
+        "path": "/staff/applications/00000000-0000-4000-8000-000000000000/onsite-payment",
+        "query": null
+      },
+      "status": 201,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "paymentId": "00000000-0000-4000-8000-000000000000",
+        "replayed": false
+      }
+    },
     "staff.payments.verify": {
       "request": {
         "method": "POST",
@@ -865,7 +878,7 @@
               "suspendedSince": null
             },
             "payment": {
-              "status": "Not Yet Available",
+              "status": "Paid",
               "orderOfPayment": {
                 "number": "OP-2026-000001",
                 "assessedAt": "2026-01-01T00:00:00.000Z",

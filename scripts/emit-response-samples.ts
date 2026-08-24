@@ -444,6 +444,9 @@ async function main(): Promise<void> {
   await record('staff.orderOfPayment.create', 'POST',
     `/staff/applications/${seeded.assessable}/order-of-payment`, assessorToken, {}, randomUUID());
   await record('staff.payments.queue', 'GET', '/staff/payments', cashierToken);
+  await record('staff.onsitePayment', 'POST',
+    `/staff/applications/${seeded.assessable}/onsite-payment`, cashierToken,
+    { officialReceiptNumber: 'OR-2026-114773', amountCentavos: 682_000 }, randomUUID());
   await record('staff.payments.verify', 'POST',
     `/staff/payments/${seeded.payment}/verify`, cashierToken,
     { officialReceiptNumber: 'OR-2026-114772' }, randomUUID());

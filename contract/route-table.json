@@ -38,6 +38,7 @@
     "POST /notifications/:notificationId/read",
     "POST /notifications/:notificationId/resolve",
     "POST /staff/applications/:applicationId/evaluations",
+    "POST /staff/applications/:applicationId/onsite-payment",
     "POST /staff/applications/:applicationId/order-of-payment",
     "POST /staff/applications/:applicationId/permit",
     "POST /staff/applications/:applicationId/release",

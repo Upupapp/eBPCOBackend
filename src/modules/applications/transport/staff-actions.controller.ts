@@ -1,4 +1,4 @@
-import { Body, Controller, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -9,6 +9,7 @@ import { StaffQueueService } from '../application/staff-queue.service';
 import { EVALUATION_RESULTS, EVALUATION_STAGES, EvaluationService } from '../application/evaluation.service';
 import { AssessmentService } from '../../payments/application/assessment.service';
 import { PermitService } from '../../permits/application/permit.service';
+import { PaymentService } from '../../payments/application/payment.service';
 
 /**
  * The things an officer DOES to an application, as opposed to reading it.
@@ -40,6 +41,22 @@ const permitShape = z.object({
   scope: z.string().min(1).max(2000),
   conditions: z.array(z.string().max(1000)).max(50).optional(),
 });
+
+/**
+ * Cash across a counter.
+ *
+ * No `method` field: this endpoint IS the onsite one, and letting a caller
+ * choose would let a cashier record a bank transfer as though they had received
+ * it in person. No `submittedBy` either — the submitter is the applicant, taken
+ * from the application, because that is who paid.
+ */
+const onsiteShape = z.object({
+  officialReceiptNumber: z.string().min(1).max(60),
+  // Required, and must equal the Order of Payment exactly (ADR 0010). Defaulting
+  // it to the assessed total would mean a mistyped receipt still recorded a
+  // settled payment.
+  amountCentavos: z.number().int().min(1),
+}).strict();
 
 const preparationShape = z.object({
   claimLocation: z.string().min(1).max(400),
@@ -120,6 +137,7 @@ export class StaffActionsController {
     private readonly evaluations: EvaluationService,
     private readonly assessment: AssessmentService,
     private readonly permits: PermitService,
+    private readonly payments: PaymentService,
   ) {}
 
   /** Readable and actionable are different questions; this answers the first. */
@@ -175,6 +193,54 @@ export class StaffActionsController {
 
     if (!result.ok) throw refusal(result.reason, result.detail);
     return { orderId: result.orderId, number: result.number, totalCentavos: result.total };
+  }
+
+  /**
+   * Records a walk-in payment, receipted.
+   *
+   * Here rather than under `/staff/payments` because it CREATES a payment
+   * against a named application rather than acting on one that already exists,
+   * and a POST to a collection whose id you do not yet have is the wrong shape.
+   */
+  @Post('onsite-payment')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('staff:verify-payment')
+  async recordOnsite(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Body() body: unknown,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<Record<string, unknown>> {
+    const input = parse(onsiteShape, body);
+    const idempotencyKey = parse(z.string().uuid('an Idempotency-Key must be a UUID'), key ?? null);
+
+    const result = await this.payments.recordOnsite({
+      applicationId,
+      cashier: callerOf(request),
+      officialReceiptNumber: input.officialReceiptNumber,
+      amountCentavos: input.amountCentavos,
+      idempotencyKey,
+    });
+
+    if (result.ok) return { paymentId: result.paymentId, replayed: result.replayed };
+
+    if (result.reason === 'self-receipt') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail,
+      );
+    }
+    if (result.reason === 'already-paid' || result.reason === 'conflict') {
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this',
+        HttpStatus.CONFLICT, result.detail,
+      );
+    }
+    // 422 for the rest: the request is well formed and the caller is entitled
+    // to make it; something about the application is not yet true.
+    throw new ProblemException(
+      ProblemType.unprocessable, 'A precondition is unmet',
+      HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+    );
   }
 
   @Post('permit')
