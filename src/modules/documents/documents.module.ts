@@ -10,6 +10,7 @@ import { DocumentService } from './application/document.service';
 import { LocalSignatureScanner, MalwareScanner } from './domain/malware-scanner';
 import { ObjectStore } from './domain/object-store';
 import { FilesystemObjectStore } from './infrastructure/filesystem-object-store';
+import { DocumentsController } from './transport/documents.controller';
 
 export const OBJECT_STORE = Symbol('EBPCO_OBJECT_STORE');
 export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
@@ -24,9 +25,14 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
       useFactory: (config: AppConfig): ObjectStore =>
         // The S3 adapter belongs here once E-1's hosting half is answered. The
         // filesystem store is real and complete, and it is what development
-        // uses; deploying it would mean documents living on one replica's disk,
-        // which TAB 21's readiness review must catch.
-        new FilesystemObjectStore(config.OBJECT_STORE_ENDPOINT, config.JWT_SIGNING_KEY),
+        // uses; deploying it would mean documents living on one replica's disk.
+        //
+        // OBJECT_STORE_LOCAL_PATH, not OBJECT_STORE_ENDPOINT. The endpoint is
+        // the S3 adapter's setting, and passing it here wrote every uploaded
+        // document into a directory named `https:/objects.internal/` under the
+        // process working directory — invisible to anyone looking for them, and
+        // gone on the next redeploy. The store now refuses a URL outright.
+        new FilesystemObjectStore(config.OBJECT_STORE_LOCAL_PATH, config.JWT_SIGNING_KEY),
     },
     {
       provide: MALWARE_SCANNER,
@@ -51,6 +57,7 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
         }),
     },
   ],
+  controllers: [DocumentsController],
   exports: [DocumentService, OBJECT_STORE, MALWARE_SCANNER],
 })
 export class DocumentsModule {

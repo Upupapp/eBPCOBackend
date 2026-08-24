@@ -7,3 +7,19 @@ coverage/
 .env
 .env.*
 !.env.example
+
+# Where the filesystem object store writes in development. Uploaded document
+# bytes are not source, and 32 of them reached the index once because the store
+# was pointed at a URL and `git add -A` swept up the result.
+.data/
+# Belt and braces: if the store is ever pointed at a URL again, the directory it
+# creates is named after the scheme and must not be committed either.
+http:/
+https:/
+
+# Held back from the public repository by owner decision (20 August 2026).
+# READINESS-REVIEW.md itemises every unfixed security weakness — unencrypted
+# secrets, an existence oracle, untuned limits — and on a public repo that is a
+# map for anyone who finds a deployment. It lives on disk and is shared
+# directly until the gaps it lists are closed.
+docs/READINESS-REVIEW.md

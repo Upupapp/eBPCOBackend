@@ -11,6 +11,7 @@ import { PermitsModule } from './modules/permits/permits.module';
 import { SchedulingModule } from './common/scheduling/scheduling.module';
 import { ComplianceModule } from './modules/compliance/compliance.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
+import { BusinessesModule } from './modules/businesses/businesses.module';
 import { PersistenceModule, SQL_CLIENT_OVERRIDE } from './persistence/persistence.module';
 import { SqlClient } from './persistence/sql-client';
 
@@ -31,7 +32,7 @@ export class AppModule {
       imports: [
         HealthModule, PersistenceModule, IdentityModule, DocumentsModule,
         ApplicationsModule, PaymentsModule, PermitsModule,
-        ComplianceModule, NotificationsModule, SchedulingModule,
+        ComplianceModule, NotificationsModule, BusinessesModule, SchedulingModule,
       ],
       providers: [
         { provide: CONFIG, useValue: config },

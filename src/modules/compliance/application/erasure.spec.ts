@@ -61,9 +61,12 @@ beforeEach(async () => {
     [randomUUID(), ACCOUNT],
   );
   await db.query(
-    `insert into refresh_tokens (id, family_id, account_id, secret_digest, expires_at)
-     values ($1,$2,$3,'digest', now() + interval '30 days')`,
-    [randomUUID(), randomUUID(), ACCOUNT],
+    // Both timestamps from the same clock. Mixing the pinned clock with the
+    // database's `now()` is what made the scheduled-job fixtures fail once wall
+    // time passed the pinned instant.
+    `insert into refresh_tokens (id, family_id, account_id, secret_digest, issued_at, expires_at)
+     values ($1,$2,$3,'digest',$4,$5)`,
+    [randomUUID(), randomUUID(), ACCOUNT, NOW, new Date(NOW.getTime() + 30 * 86_400_000)],
   );
   // One audit entry BEFORE the erasure, so the chain has something to break.
   await new AuditService(db, () => NOW).append({

@@ -93,6 +93,17 @@ const schema = z
     // the server, so it applies even if this process stops waiting.
     DB_STATEMENT_TIMEOUT_MS: intFromEnv(1_000, 300_000, 30_000),
 
+    // Where the FILESYSTEM object store writes, which is not the same thing as
+    // OBJECT_STORE_ENDPOINT — that is the S3 adapter's setting. Passing the
+    // endpoint here wrote documents into a directory named after a URL, under
+    // whatever the process working directory happened to be.
+    //
+    // Development and tests only. A deployment with more than one replica needs
+    // the S3 adapter, because a filesystem store means documents live on one
+    // replica's disk.
+    OBJECT_STORE_LOCAL_PATH: z.string().min(1).optional()
+      .transform((value) => value ?? '.data/objects'),
+
     // Periodic work. Off by default so a test or a one-off process does not
     // start deleting documents as a side effect of booting; every deployment
     // that should run jobs sets it explicitly.

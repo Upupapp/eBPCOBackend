@@ -91,9 +91,14 @@ describe('the operational purge', () => {
 
   it('removes a consumed refresh token, which is a digest of a secret with no purpose', async () => {
     await db.query(
-      `insert into refresh_tokens (id, family_id, account_id, secret_digest, expires_at, consumed_at)
-       values ($1,$2,$3,'digest',$4,$5)`,
-      [randomUUID(), randomUUID(), ACCOUNT, new Date(now.getTime() + 86_400_000), now],
+      // `issued_at` is set explicitly rather than defaulted. The column
+      // defaults to the real `now()`, and with `expires_at` derived from the
+      // PINNED clock the row violates `expires_at > issued_at` as soon as wall
+      // time passes the pinned instant — a test that starts failing on a day
+      // nobody changed anything.
+      `insert into refresh_tokens (id, family_id, account_id, secret_digest, issued_at, expires_at, consumed_at)
+       values ($1,$2,$3,'digest',$4,$5,$6)`,
+      [randomUUID(), randomUUID(), ACCOUNT, now, new Date(now.getTime() + 86_400_000), now],
     );
 
     await runner().runIfDue(operationalPurgeJob(db, () => now));
@@ -105,9 +110,9 @@ describe('the operational purge', () => {
   it('keeps a live session', async () => {
     // Purging one would sign an applicant out mid-application.
     await db.query(
-      `insert into refresh_tokens (id, family_id, account_id, secret_digest, expires_at)
-       values ($1,$2,$3,'digest',$4)`,
-      [randomUUID(), randomUUID(), ACCOUNT, new Date(now.getTime() + 86_400_000)],
+      `insert into refresh_tokens (id, family_id, account_id, secret_digest, issued_at, expires_at)
+       values ($1,$2,$3,'digest',$4,$5)`,
+      [randomUUID(), randomUUID(), ACCOUNT, now, new Date(now.getTime() + 86_400_000)],
     );
 
     await runner().runIfDue(operationalPurgeJob(db, () => now));

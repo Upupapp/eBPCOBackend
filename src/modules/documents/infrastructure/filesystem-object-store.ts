@@ -21,7 +21,20 @@ export class FilesystemObjectStore implements ObjectStore {
     private readonly root: string,
     private readonly signingKey: string,
     private readonly clock: () => Date = () => new Date(),
-  ) {}
+  ) {
+    // A URL is not a directory, and accepting one silently is how this store
+    // came to write documents into a folder literally named
+    // `https:/objects.internal/` under the process working directory — where
+    // they are invisible to anyone looking for them and gone on the next
+    // redeploy. The composition root was passing OBJECT_STORE_ENDPOINT, which
+    // is the S3 adapter's setting and means nothing here.
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(root)) {
+      throw new Error(
+        `FilesystemObjectStore needs a directory, not a URL: got "${root}". `
+        + 'Set OBJECT_STORE_LOCAL_PATH, or use the S3 adapter for a remote endpoint.',
+      );
+    }
+  }
 
   // `contentType` is accepted and ignored: a filesystem has nowhere to record
   // it. S3 stores it as object metadata, and the interface carries it so the

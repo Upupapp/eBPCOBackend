@@ -9,9 +9,12 @@ import { PermitsModule } from '../permits/permits.module';
 import { EvaluationService } from './application/evaluation.service';
 import { LifecycleService } from './application/lifecycle.service';
 import { ApplicantQueryService } from './application/applicant-query.service';
+import { InstructionResponseService } from './application/instruction-response.service';
+import { SubmissionService } from './application/submission.service';
 import { StaffQueueService } from './application/staff-queue.service';
 import { StaffActionsController } from './transport/staff-actions.controller';
 import { ApplicantApplicationsController } from './transport/applicant-applications.controller';
+import { ApplicantWriteController } from './transport/applicant-write.controller';
 import { StaffApplicationsController } from './transport/staff-applications.controller';
 
 export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
@@ -42,6 +45,16 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
         new ApplicantQueryService(db, calendars),
     },
     {
+      provide: InstructionResponseService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new InstructionResponseService(db),
+    },
+    {
+      provide: SubmissionService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new SubmissionService(db),
+    },
+    {
       provide: StaffQueueService,
       inject: [SQL_CLIENT, CALENDAR_REPOSITORY],
       useFactory: (db: SqlClient, calendars: CalendarRepository) =>
@@ -58,7 +71,10 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
       useFactory: (db: SqlClient) => new EvaluationService(db),
     },
   ],
-  controllers: [ApplicantApplicationsController, StaffApplicationsController, StaffActionsController],
+  controllers: [
+    ApplicantApplicationsController, ApplicantWriteController,
+    StaffApplicationsController, StaffActionsController,
+  ],
   exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })
 export class ApplicationsModule {}
