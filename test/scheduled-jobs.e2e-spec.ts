@@ -14,6 +14,9 @@ import {
 import { AuditService } from '../src/modules/compliance/application/audit.service';
 import { NotificationService } from '../src/modules/notifications/application/notification.service';
 import { DocumentService } from '../src/modules/documents/application/document.service';
+import { DataExportService } from '../src/modules/compliance/application/data-export.service';
+import { dataExportExpiryJob, dataExportJob } from '../src/common/scheduling/jobs';
+import { ObjectStore } from '../src/modules/documents/domain/object-store';
 
 /**
  * The four jobs, driven by the scheduler, against a real database.
@@ -238,11 +241,16 @@ describe('a scheduler tick', () => {
 
     await scheduler.tick();
 
+    // Asserted over the jobs this tick actually ran, not over every seeded row.
+    // The seeded set grows as jobs are added, and a test that counts rows fails
+    // for the wrong reason when it does.
+    const ran = ['document-retention', 'audit-chain-verification',
+      'notification-dispatch', 'operational-data-purge'];
     const rows = await db.query<{ name: string; last_outcome: string | null }>(
-      'select name, last_outcome from scheduled_jobs order by name',
+      'select name, last_outcome from scheduled_jobs where name = any($1) order by name',
+      [ran],
     );
-    expect(rows.rows.every((row) => row.last_outcome === 'succeeded')).toBe(true);
-    expect(rows.rows).toHaveLength(4);
+    expect(rows.rows.map((row) => row.last_outcome)).toEqual(ran.map(() => 'succeeded'));
   });
 
   it('lets one failing job not stop the others', async () => {
@@ -261,5 +269,98 @@ describe('a scheduler tick', () => {
 
     expect((await jobRow('document-retention')).last_outcome).toBe('failed');
     expect((await jobRow('operational-data-purge')).last_outcome).toBe('succeeded');
+  });
+});
+
+const objects = new Map<string, Buffer>();
+const store = {
+  put: (key: string, bytes: Buffer) => { objects.set(key, bytes); return Promise.resolve(); },
+  get: (key: string) => Promise.resolve(objects.get(key) ?? null),
+  delete: (key: string) => Promise.resolve(objects.delete(key)),
+  signedUrl: (key: string) => Promise.resolve(`https://objects.test/${key}`),
+  isPubliclyReadable: () => Promise.resolve(false),
+} as unknown as ObjectStore;
+
+describe('every seeded job has something to run it', () => {
+  it('matches the jobs the scheduling module registers', async () => {
+    // A row in `scheduled_jobs` with no implementation looks enabled, is
+    // claimed by nobody, and never runs — and the only symptom is that
+    // something quietly stops happening. Seeding and registering are in two
+    // different files, so this is the only place they meet.
+    const seeded = (await db.query<{ name: string }>('select name from scheduled_jobs order by name'))
+      .rows.map((row) => row.name);
+
+    const registered = [
+      retentionJob({ runRetention: () => Promise.resolve({ deleted: 0, skippedOpen: 0 }) } as unknown as DocumentService, null),
+      auditVerificationJob(new AuditService(db, () => now), logger()),
+      notificationDispatchJob(new NotificationService(db, () => now), db),
+      operationalPurgeJob(db, () => now),
+      dataExportJob(new DataExportService(db, store, () => now), db),
+      dataExportExpiryJob(new DataExportService(db, store, () => now)),
+    ].map((job) => job.name).sort();
+
+    expect(registered).toEqual(seeded);
+  });
+});
+
+describe('data exports', () => {
+  beforeEach(async () => {
+    objects.clear();
+    await db.query(
+      `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Maria','Santos')`,
+      [randomUUID(), ACCOUNT],
+    );
+  });
+
+  it('produces a queued export and records what it did', async () => {
+    const dataExports = new DataExportService(db, store, () => now);
+    await dataExports.request(ACCOUNT);
+
+    await runner().runIfDue(dataExportJob(dataExports, db));
+
+    const row = await jobRow('data-export');
+    expect(row.last_outcome).toBe('succeeded');
+    expect(row.last_detail).toBe('1 produced, 0 failed');
+    expect(objects.size).toBe(1);
+  });
+
+  it('lets one applicant’s failure not block everyone else’s', async () => {
+    // One person's request failing is their problem to be told about — the row
+    // records why — and treating it as a job failure would stop every other
+    // queued export behind it.
+    const failing = {
+      ...store,
+      put: (key: string) => (key.startsWith('0')
+        ? Promise.reject(new Error('object store unreachable'))
+        : Promise.resolve()),
+    } as unknown as ObjectStore;
+    const dataExports = new DataExportService(db, failing, () => now);
+    await dataExports.request(ACCOUNT);
+
+    const outcome = await runner().runIfDue(dataExportJob(dataExports, db));
+
+    // The job succeeds whatever happened to the individual request.
+    expect('failed' in outcome).toBe(false);
+    expect((await jobRow('data-export')).last_outcome).toBe('succeeded');
+  });
+
+  it('reports nothing queued rather than looking broken', async () => {
+    await runner().runIfDue(dataExportJob(new DataExportService(db, store, () => now), db));
+
+    expect((await jobRow('data-export')).last_detail).toBe('nothing queued');
+  });
+
+  it('deletes a produced file once its window closes', async () => {
+    // An expiry nothing enforces is a comment.
+    const dataExports = new DataExportService(db, store, () => now);
+    const { requestId } = await dataExports.request(ACCOUNT);
+    await dataExports.produce(requestId);
+    expect(objects.size).toBe(1);
+
+    now = new Date(now.getTime() + 72 * 3_600_000);
+    await runner().runIfDue(dataExportExpiryJob(new DataExportService(db, store, () => now)));
+
+    expect(objects.size).toBe(0);
+    expect((await jobRow('data-export-expiry')).last_detail).toContain('1 export(s) expired');
   });
 });

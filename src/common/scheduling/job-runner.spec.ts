@@ -232,7 +232,11 @@ describe('answering "did it run?"', () => {
 
     expect(retention.lastOutcome).toBe('succeeded');
     expect(retention.lastFinishedAt).not.toBeNull();
-    expect(status).toHaveLength(4);
+
+    // Every seeded job, not a magic number. The seeded set grows as jobs are
+    // added, and a hardcoded count fails for the wrong reason when it does.
+    const seeded = await db.query<{ n: string }>('select count(*) as n from scheduled_jobs');
+    expect(status).toHaveLength(Number(seeded.rows[0]!.n));
   });
 
   it('does not report an expired claim as held', async () => {

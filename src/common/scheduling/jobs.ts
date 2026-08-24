@@ -4,6 +4,7 @@ import { Job } from './job-runner';
 import { AuditService } from '../../modules/compliance/application/audit.service';
 import { DocumentService } from '../../modules/documents/application/document.service';
 import { NotificationService } from '../../modules/notifications/application/notification.service';
+import { DataExportService } from '../../modules/compliance/application/data-export.service';
 
 /**
  * The four jobs, and what each is allowed to claim about itself.
@@ -150,6 +151,61 @@ export function operationalPurgeJob(db: SqlClient, clock: () => Date = () => new
 
       return `idempotency keys ${keys.rowCount}, refresh tokens ${tokens.rowCount}, `
         + `reset tickets ${tickets.rowCount}`;
+    },
+  };
+}
+
+/**
+ * Produces queued data exports.
+ *
+ * Bounded per run rather than draining the queue: an export reads an
+ * applicant's whole record, and a burst of requests should not hold a
+ * connection from the pool for minutes while people are filing applications.
+ * The job runs every two minutes, so a backlog clears steadily.
+ *
+ * A failed export does NOT fail the job. One applicant's request failing is
+ * their problem to be told about — the row records why — and treating it as a
+ * job failure would stop every other queued export behind it.
+ */
+export function dataExportJob(dataExports: DataExportService, db: SqlClient, batch = 5): Job {
+  return {
+    name: 'data-export',
+    leaseSeconds: 600,
+    async run(): Promise<string> {
+      const queued = await db.query<{ id: string }>(
+        `select id from data_export_requests where status = 'queued'
+          order by requested_at limit $1`,
+        [batch],
+      );
+      if (queued.rows.length === 0) return 'nothing queued';
+
+      let produced = 0;
+      let failed = 0;
+      for (const row of queued.rows) {
+        const outcome = await dataExports.produce(row.id);
+        if (outcome.ok) produced += 1;
+        else failed += 1;
+      }
+
+      return `${produced} produced, ${failed} failed`;
+    },
+  };
+}
+
+/**
+ * Deletes produced exports once their window closes.
+ *
+ * The other half of the promise the expiry makes. A portable copy of somebody's
+ * entire permit history left on storage indefinitely is a standing disclosure,
+ * and an expiry nothing enforces is a comment.
+ */
+export function dataExportExpiryJob(dataExports: DataExportService): Job {
+  return {
+    name: 'data-export-expiry',
+    leaseSeconds: 600,
+    async run(): Promise<string> {
+      const { expired } = await dataExports.sweepExpired();
+      return `${expired} export(s) expired and deleted`;
     },
   };
 }

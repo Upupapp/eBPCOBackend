@@ -244,6 +244,72 @@ describe('what /me tells a portal', () => {
     expect(response.json().detail).toMatch(/offboarding/i);
   });
 
+  it('queues a data export and answers with a request id', async () => {
+    // RA 10173 §18. 202 and a request id, not the file: an export reads every
+    // application, document record, payment and notification an applicant has,
+    // and doing that inside a request times out for exactly the people with the
+    // most data.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+
+    const response = await app.inject({
+      method: 'POST', url: '/me/export', headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(response.statusCode).toBe(202);
+    const body = response.json<{ requestId: string; requestedAt: string }>();
+    expect(body.requestId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(body.requestedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it('returns the same request when the button is pressed twice', async () => {
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+    const post = () => app.inject({
+      method: 'POST', url: '/me/export', headers: { authorization: `Bearer ${token}` },
+    });
+
+    const first = (await post()).json<{ requestId: string }>();
+    const second = (await post()).json<{ requestId: string }>();
+
+    expect(second.requestId).toBe(first.requestId);
+  });
+
+  it('will not show one applicant another’s export request', async () => {
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+    const requestId = (await app.inject({
+      method: 'POST', url: '/me/export', headers: { authorization: `Bearer ${token}` },
+    })).json<{ requestId: string }>().requestId;
+
+    const other = await app.inject({
+      method: 'GET', url: `/me/export/${requestId}`,
+      headers: { authorization: `Bearer ${await staffToken('evaluator')}` },
+    });
+
+    expect(other.statusCode).toBe(404);
+  });
+
+  it('does not offer a download before the file exists', async () => {
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+    const requestId = (await app.inject({
+      method: 'POST', url: '/me/export', headers: { authorization: `Bearer ${token}` },
+    })).json<{ requestId: string }>().requestId;
+
+    const download = await app.inject({
+      method: 'GET', url: `/me/export/${requestId}/content`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+    expect(download.statusCode).toBe(404);
+    expect(download.json().detail).toMatch(/still being produced|expired/i);
+  });
+
   it('never returns anything that could authenticate the account', async () => {
     const response = await get('/me', await staffToken('evaluator'));
 

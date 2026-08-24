@@ -429,6 +429,20 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     year: none(), holiday_date: none(), name: none(), kind: none(), proclamation: none(),
   },
   document_number_sequences: { series: none(), year: none(), last_issued: none() },
+  data_export_requests: {
+    id: none('operational'),
+    account_id: linkable('operational', 'RA 10173 s.18 portability'),
+    status: none('operational'),
+    requested_at: none('operational'),
+    completed_at: none('operational'),
+    // Points at an object containing the subject's entire record.
+    storage_key: content('operational', 'RA 10173 s.18 portability'),
+    byte_size: none('operational'),
+    sha256: none('operational'),
+    expires_at: none('operational'),
+    failure_detail: none('operational'),
+  },
+
   scheduled_jobs: {
     name: none(), interval_seconds: none(), enabled: none(),
     last_started_at: none(), last_finished_at: none(), last_outcome: none(),

@@ -4,6 +4,9 @@ import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { AuditService } from './application/audit.service';
 import { ErasureService } from './application/erasure.service';
+import { DataExportService } from './application/data-export.service';
+import { OBJECT_STORE } from '../documents/documents.module';
+import { ObjectStore } from '../documents/domain/object-store';
 
 /**
  * The chained audit trail, and the data-subject rights that read and write it.
@@ -25,11 +28,16 @@ import { ErasureService } from './application/erasure.service';
       useFactory: (db: SqlClient) => new AuditService(db),
     },
     {
+      provide: DataExportService,
+      inject: [SQL_CLIENT, OBJECT_STORE],
+      useFactory: (db: SqlClient, store: ObjectStore) => new DataExportService(db, store),
+    },
+    {
       provide: ErasureService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new ErasureService(db),
     },
   ],
-  exports: [AuditService, ErasureService],
+  exports: [AuditService, ErasureService, DataExportService],
 })
 export class ComplianceModule {}

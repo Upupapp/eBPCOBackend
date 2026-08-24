@@ -7,6 +7,7 @@ import { DRAIN_STATE, SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { DrainState } from '../lifecycle/shutdown';
 import { AuditService } from '../../modules/compliance/application/audit.service';
+import { DataExportService } from '../../modules/compliance/application/data-export.service';
 import { ComplianceModule } from '../../modules/compliance/compliance.module';
 import { DocumentService } from '../../modules/documents/application/document.service';
 import { NotificationService } from '../../modules/notifications/application/notification.service';
@@ -14,7 +15,8 @@ import { NotificationsModule } from '../../modules/notifications/notifications.m
 import { Job, JobRunner } from './job-runner';
 import { Scheduler } from './scheduler';
 import {
-  auditVerificationJob, notificationDispatchJob, operationalPurgeJob, retentionJob,
+  auditVerificationJob, dataExportExpiryJob, dataExportJob,
+  notificationDispatchJob, operationalPurgeJob, retentionJob,
 } from './jobs';
 
 export const JOB_RUNNER = Symbol('EBPCO_JOB_RUNNER');
@@ -47,18 +49,20 @@ export const SCHEDULER = Symbol('EBPCO_SCHEDULER');
       provide: SCHEDULER,
       inject: [
         JOB_RUNNER, SQL_CLIENT, StructuredLogger, DRAIN_STATE, CONFIG,
-        DocumentService, AuditService, NotificationService,
+        DocumentService, AuditService, NotificationService, DataExportService,
       ],
       useFactory: (
         runner: JobRunner, db: SqlClient, logger: StructuredLogger, drain: DrainState,
         config: AppConfig, documents: DocumentService, audit: AuditService,
-        notifications: NotificationService,
+        notifications: NotificationService, dataExports: DataExportService,
       ): Scheduler => {
         const jobs: Job[] = [
           retentionJob(documents, config.DOCUMENT_RETENTION_DAYS),
           auditVerificationJob(audit, logger),
           notificationDispatchJob(notifications, db),
           operationalPurgeJob(db),
+          dataExportJob(dataExports, db),
+          dataExportExpiryJob(dataExports),
         ];
         return new Scheduler(runner, jobs, logger, drain, config.SCHEDULER_TICK_SECONDS);
       },

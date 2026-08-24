@@ -1,10 +1,11 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { ACCOUNT_REPOSITORY, AccountRepository } from '../application/account.repository';
 import { IdentityService } from '../application/identity.service';
 import { ErasureService } from '../../compliance/application/erasure.service';
+import { DataExportService } from '../../compliance/application/data-export.service';
 import { Public } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 
@@ -183,7 +184,66 @@ export class MeController {
   constructor(
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepository,
     private readonly erasure: ErasureService,
+    private readonly dataExports: DataExportService,
   ) {}
+
+  /**
+   * The RA 10173 §18 right to a portable copy of your own data.
+   *
+   * 202 and a request id, not the file. An export reads every application,
+   * document record, payment and notification the applicant has, and doing that
+   * inside a request times out for exactly the people with the most data — who
+   * are the ones most likely to be asking.
+   *
+   * Pressing the button twice returns the SAME request rather than an error.
+   * A second press is not a second request, and refusing would read as the LGU
+   * declining to answer a statutory right.
+   */
+  @Post('export')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async requestExport(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
+    return { ...(await this.dataExports.request(callerOf(request))) };
+  }
+
+  /**
+   * Where a request has got to.
+   *
+   * The contract says the feed carries the result. It does not yet: emitting a
+   * notification needs a catalog entry the mobile client can parse, and its
+   * enum parser throws on an unknown type — so a notice sent before the client
+   * knows the type is a crash on a handset. Until the mobile lane adds it, this
+   * is how a client finds out, and saying so is better than sending a notice
+   * with a dead deep link.
+   */
+  @Get('export/:requestId')
+  async exportStatus(
+    @Req() request: AuthenticatedRequest,
+    @Param('requestId') requestId: string,
+  ): Promise<Record<string, unknown>> {
+    const status = await this.dataExports.statusOf(callerOf(request), requestId);
+    // Someone else's request answers the same as one that does not exist.
+    if (status === null) throw ProblemException.notFound('No such export request.');
+    return { ...status };
+  }
+
+  /**
+   * A short-lived link to the produced file.
+   *
+   * Separate from the status so the link is minted at the moment it is asked
+   * for rather than sitting in a status response somebody screenshots. It
+   * expires with the request, and never outlives it.
+   */
+  @Get('export/:requestId/content')
+  async exportContent(
+    @Req() request: AuthenticatedRequest,
+    @Param('requestId') requestId: string,
+  ): Promise<Record<string, unknown>> {
+    const url = await this.dataExports.downloadUrl(callerOf(request), requestId);
+    if (url === null) {
+      throw ProblemException.notFound('That export is not available. It may still be being produced, or it may have expired.');
+    }
+    return { url };
+  }
 
   @Get()
   async me(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
@@ -248,12 +308,7 @@ export class MeController {
   @Delete()
   @HttpCode(HttpStatus.ACCEPTED)
   async erase(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
-    const caller = request.caller;
-    if (caller === undefined) {
-      throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED);
-    }
-
-    const result = await this.erasure.erase(caller.sub);
+    const result = await this.erasure.erase(callerOf(request));
     if (result.ok) {
       const { acceptedAt, erasedCategories, retainedCategories } = result.receipt;
       // `counts` stays out of the response: it names tables, which is internal
@@ -266,4 +321,19 @@ export class MeController {
       ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail,
     );
   }
+}
+
+/**
+ * The caller's own account id, from the token and from nowhere else.
+ *
+ * A function rather than a repeated guard, because every route on `/me` needs
+ * it and the one that forgets is the one that takes an account id from
+ * somewhere a caller can influence.
+ */
+function callerOf(request: AuthenticatedRequest): string {
+  const claims = request.caller;
+  if (claims === undefined) {
+    throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED);
+  }
+  return claims.sub;
 }
