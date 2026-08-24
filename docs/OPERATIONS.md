@@ -153,6 +153,24 @@ alert on: one failure is noise, nine is an outage nobody has noticed.
 
 ---
 
+## 4b. Contract evidence
+
+`contract/` holds two generated files: the responses the server really produces,
+and the route table it really registers. `npm run emit:samples` regenerates
+both, and the diff is the record of what changed on the wire — so **run it after
+any change to a response shape and commit the result.**
+
+It writes into this repository. Handing the files to the contract repository,
+which validates them against its OpenAPI schemas, is an explicit command:
+`npm run emit:samples -- ../ebpco-contract/reconciliation`. That used to be the
+default, which meant regenerating this repository's evidence silently edited a
+sibling one.
+
+See `contract/README.md` for why the ids and timestamps are fixed, and for the
+rule that keeps that from hiding a real defect.
+
+---
+
 ## 5. NOT verified, and not verifiable from a developer machine
 
 This is the section to read before a pilot.

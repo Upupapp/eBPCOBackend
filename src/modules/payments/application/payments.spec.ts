@@ -142,7 +142,11 @@ describe('issuing an Order of Payment', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.total).toBe(50_000 + 120_000 + 512_000);
-    expect(result.number).toMatch(/^OP-2026-/);
+    // A sequence, not a slice of a UUID. An applicant reads this number to a
+    // cashier and writes it on a form: every character being one of ten rather
+    // than one of thirty-six is the difference between a transcription and a
+    // dispute, with B/8, 0/O and 1/I all in play at a counter.
+    expect(result.number).toMatch(/^OP-2026-\d{6}$/);
   });
 
   it('records which schedule version it was computed under', async () => {
@@ -558,5 +562,31 @@ describe('reconciliation', () => {
       }),
       { numRuns: 300 },
     );
+  });
+});
+
+describe('the Order of Payment number', () => {
+  it('is never issued twice', async () => {
+    // Two Orders sharing a number is two assessments the Treasurer cannot tell
+    // apart. The previous 32 bits of randomness were small enough to collide
+    // and bought nothing — the number is not a secret.
+    await loadSchedule();
+    const numbers: string[] = [];
+
+    for (let i = 0; i < 4; i += 1) {
+      const application = randomUUID();
+      await db.query(
+        `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                                   lifecycle_status, submitted_at, created_by)
+         values ($1,$2,(select applicant_id from applications where id = $3),'Fencing','New',
+                 'Submitted',now(),$4)`,
+        [application, `BP-2026-EXTRA-${i}`, APPLICATION, APPLICANT_ACCOUNT],
+      );
+      const issued = await assessment.issue({ applicationId: application, officer: assessor });
+      if (issued.ok) numbers.push(issued.number);
+    }
+
+    expect(numbers).toHaveLength(4);
+    expect(new Set(numbers).size).toBe(4);
   });
 });

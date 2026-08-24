@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
 
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
@@ -181,7 +181,26 @@ export class AssessmentService {
     supersedes?: { id: string; reason: string };
   }): Promise<IssueResult> {
     const { applicationId, officer, items, total, schedule, dueDate, supersedes } = options;
-    const number = `OP-${this.clock().getFullYear()}-${randomUUID().slice(0, 8).toUpperCase()}`;
+
+    // From the same atomic counter the permit numbers use (migration 010), not
+    // a slice of a random UUID.
+    //
+    // An applicant reads this number to a cashier and writes it on a form.
+    // `OP-2026-C92477BE` is materially harder to say, hear and transcribe than
+    // `OP-2026-000019` — every character is one of thirty-six rather than one
+    // of ten, and B/8, 0/O and 1/I are all in play at a counter. The randomness
+    // also bought nothing: 32 bits is small enough to collide, and the number
+    // is not a secret.
+    const year = this.clock().getFullYear();
+    const sequence = await this.db.query<{ last_issued: number }>(
+      `insert into document_number_sequences (series, year, last_issued)
+       values ('OP', $1, 1)
+       on conflict (series, year)
+         do update set last_issued = document_number_sequences.last_issued + 1
+       returning last_issued`,
+      [year],
+    );
+    const number = `OP-${year}-${String(Number(sequence.rows[0]?.last_issued ?? 1)).padStart(6, '0')}`;
     const by = (line: FeeLine): number => items.find((item) => item.line === line)?.amount ?? 0;
 
     const inserted = await this.db.query<{ id: string }>(
