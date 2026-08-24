@@ -12,6 +12,7 @@ import { PasswordPolicy } from './domain/password-policy';
 import { PostgresAccountRepository } from './infrastructure/postgres-account.repository';
 import { PostgresSessionRepository } from './infrastructure/postgres-session.repository';
 import { SQL_CLIENT } from '../../persistence/persistence.module';
+import { AccountStatusReader } from './application/account-status';
 import { ComplianceModule } from '../compliance/compliance.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { LocalBreachedPasswordScreen } from './infrastructure/breached-password-screen';
@@ -31,6 +32,11 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
   imports: [ComplianceModule],
   controllers: [AuthController, MeController],
   providers: [
+    {
+      provide: AccountStatusReader,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new AccountStatusReader(db),
+    },
 
     // Bound here and nowhere else. The in-memory implementations still exist,
     // and the shared contract suite holds both to identical behaviour, so
@@ -91,6 +97,8 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
     // route fails open when someone forgets, and fails silently.
     { provide: APP_GUARD, useClass: AuthenticationGuard },
   ],
-  exports: [IdentityService, TokenService, ACCOUNT_REPOSITORY, SESSION_REPOSITORY],
+  exports: [
+    AccountStatusReader, IdentityService, TokenService, ACCOUNT_REPOSITORY, SESSION_REPOSITORY,
+  ],
 })
 export class IdentityModule {}

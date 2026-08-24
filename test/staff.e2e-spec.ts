@@ -134,9 +134,79 @@ describe('the staff surface is closed by default', () => {
   });
 
   it('refuses a caller holding no application scope', async () => {
-    const response = await get('/staff/applications', await tokenFor('staff', ['staff:administer'] as const));
+    // A REAL account with a narrow scope set. Minting a token over an invented
+    // subject used to reach the scope check; it now stops at the guard's
+    // account lookup with a 401, which is correct and is not what this test is
+    // about.
+    const id = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff','narrow@lgu.gov.ph','narrow@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+      [id],
+    );
+
+    const response = await get(
+      '/staff/applications',
+      await tokenFor('staff', ['staff:administer'] as const, id),
+    );
 
     expect(response.statusCode).toBe(403);
+  });
+
+  it('refuses a token whose account no longer exists, as 401 and not 500', async () => {
+    // The defect this replaces. A verified signature was let straight through,
+    // and the first write that referenced the account hit a foreign key —
+    // producing a 500 on a write and a 200 on a read, which is an existence
+    // oracle wearing a server error.
+    const response = await get('/staff/applications', await tokenFor('staff', ['applications:read'] as const));
+
+    expect(response.statusCode).toBe(401);
+  });
+
+  it('answers a vanished account exactly as it answers a forged token', async () => {
+    // Answering differently would make this an oracle for whether an account id
+    // exists — the defect being fixed, repeated in a new place.
+    const vanished = await get('/staff/applications', await tokenFor('staff', ['applications:read'] as const));
+    const forged = await get('/staff/applications', 'not-a-real-token');
+
+    expect(vanished.statusCode).toBe(forged.statusCode);
+    expect(vanished.json()).toEqual({ ...forged.json(), instance: vanished.json().instance,
+      correlationId: vanished.json().correlationId });
+  });
+
+  it('stops a DISABLED account inside its token’s lifetime', async () => {
+    // `disabled_at` was checked at sign-in and at refresh and nowhere else, so
+    // an account disabled a moment after either kept full access for up to
+    // fifteen minutes. That window covers a staff member just offboarded and an
+    // account suspended for suspected fraud.
+    const token = await staffToken('building-official');
+    expect((await get('/staff/applications', token)).statusCode).toBe(200);
+
+    await db.query('update accounts set disabled_at = now() where kind = $1', ['staff']);
+
+    const after = await get('/staff/applications', token);
+    expect(after.statusCode).toBe(401);
+    expect(after.json().detail).toMatch(/disabled/i);
+  });
+
+  it('stops an ERASED account, because erasure disables it', async () => {
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+    expect((await get('/me', token)).statusCode).toBe(200);
+
+    await app.inject({ method: 'DELETE', url: '/me', headers: { authorization: `Bearer ${token}` } });
+
+    expect((await get('/me', token)).statusCode).toBe(401);
+  });
+
+  it('never asks the database on a public route', async () => {
+    // The probes an orchestrator polls must not pay for this. They are
+    // `@Public()`, so they skip the guard entirely — asserted by closing the
+    // database and finding liveness still answers.
+    await db.close();
+
+    expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
   });
 
   it('gives an applicant nothing, even holding the read scope', async () => {

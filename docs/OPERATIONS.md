@@ -122,6 +122,37 @@ held unscanned) into a total one.
 
 ---
 
+## 3a. One query per authenticated request
+
+The authentication guard resolves the caller's account on every request that is
+not `@Public()` — one indexed primary-key lookup.
+
+That cost is deliberate. A verified signature says the token was issued here and
+has not expired; it says nothing about whether the account still exists or is
+still allowed to act, and both can change inside a token's fifteen-minute life.
+Before this, `disabled_at` was consulted at sign-in and at refresh and nowhere
+else, so an account disabled a moment after either kept full access for up to
+fifteen minutes — a window that covers a staff member just offboarded and an
+account suspended for suspected fraud.
+
+The health and readiness probes are `@Public()` and skip the guard, so nothing
+an orchestrator polls pays for this.
+
+**A short-lived cache would cut the cost and reintroduce exactly the staleness
+this removes.** Deliberately not added: with no load test yet it would trade a
+known correctness property for an unmeasured saving. If load testing (M-34)
+shows the lookup matters, the cache TTL becomes the revocation window and should
+be chosen as such rather than for throughput.
+
+**Still open:** signing out of every device revokes refresh tokens, so no new
+access tokens can be minted — but an access token already issued keeps working
+until it expires. The guard checks the ACCOUNT, not the SESSION. Closing that
+means the guard also verifying the token's session family is still live, which
+is a further query and a behavioural tightening; it is written down here rather
+than half-done.
+
+---
+
 ## 4a. Scheduled work
 
 Every replica runs a scheduler; they coordinate through the database. A job is
