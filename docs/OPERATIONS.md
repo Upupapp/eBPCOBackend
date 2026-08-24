@@ -144,12 +144,22 @@ known correctness property for an unmeasured saving. If load testing (M-34)
 shows the lookup matters, the cache TTL becomes the revocation window and should
 be chosen as such rather than for throughput.
 
-**Still open:** signing out of every device revokes refresh tokens, so no new
-access tokens can be minted — but an access token already issued keeps working
-until it expires. The guard checks the ACCOUNT, not the SESSION. Closing that
-means the guard also verifying the token's session family is still live, which
-is a further query and a behavioural tightening; it is written down here rather
-than half-done.
+The same query also asks whether the token's session has been signed out.
+Revoking a refresh token stops NEW access tokens being minted and does nothing
+to one already issued — so "sign out of every device" did not sign anyone out of
+anything for up to fifteen minutes, which on a lost or shared handset is the
+whole window in which signing out was the thing to do.
+
+`revoked_sessions` records the sign-out, and the record expires after the
+access-token lifetime because past that the token has expired on its own. That
+is what keeps the table small enough to consult on every request. The
+`operational-data-purge` job sweeps it.
+
+**A session with no record is allowed through, deliberately.** The table records
+sessions that HAVE been signed out; it is not a register of every session that
+exists. Inferring liveness from the absence of a row would couple authentication
+to the retention behaviour of a background purge — the day that job's WHERE
+clause changes, every session in the system would end.
 
 ---
 

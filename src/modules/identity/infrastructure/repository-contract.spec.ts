@@ -93,7 +93,10 @@ describe.each(implementations)('%s repositories', (_name, create) => {
     await harness.teardown();
   });
 
-  describe('accounts', () => {
+  /** The access-token lifetime a revocation record has to outlive. */
+const ACCESS_TTL = 900;
+
+describe('accounts', () => {
     it('round-trips an account', async () => {
       const account = anAccount();
       await harness.accounts.save(account);
@@ -206,7 +209,7 @@ describe.each(implementations)('%s repositories', (_name, create) => {
       const other = aToken(account.id);
       await harness.sessions.save(other);
 
-      const revoked = await harness.sessions.revokeFamily(family, new Date());
+      const revoked = await harness.sessions.revokeFamily(family, new Date(), ACCESS_TTL);
 
       expect(revoked).toBe(2);
       expect((await harness.sessions.findById(other.id))?.revokedAt).toBeNull();
@@ -218,9 +221,9 @@ describe.each(implementations)('%s repositories', (_name, create) => {
       const family = randomUUID();
       await harness.sessions.save(aToken(account.id, { familyId: family }));
 
-      await harness.sessions.revokeFamily(family, new Date());
+      await harness.sessions.revokeFamily(family, new Date(), ACCESS_TTL);
 
-      expect(await harness.sessions.revokeFamily(family, new Date())).toBe(0);
+      expect(await harness.sessions.revokeFamily(family, new Date(), ACCESS_TTL)).toBe(0);
     });
 
     it('revokes every family of one account and leaves others alone', async () => {
@@ -233,7 +236,7 @@ describe.each(implementations)('%s repositories', (_name, create) => {
       const untouched = aToken(theirs.id);
       await harness.sessions.save(untouched);
 
-      expect(await harness.sessions.revokeAllForAccount(mine.id, new Date())).toBe(2);
+      expect(await harness.sessions.revokeAllForAccount(mine.id, new Date(), ACCESS_TTL)).toBe(2);
       expect((await harness.sessions.findById(untouched.id))?.revokedAt).toBeNull();
     });
 

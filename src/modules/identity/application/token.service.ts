@@ -154,7 +154,9 @@ export class TokenService {
     const now = this.clock();
 
     if (stored.consumedAt !== null) {
-      await this.sessions.revokeFamily(stored.familyId, now);
+      // A replayed refresh token is a possible theft, so the family's access
+      // tokens must stop working too — not just its refresh tokens.
+      await this.sessions.revokeFamily(stored.familyId, now, this.accessTtl);
       this.onSecurityEvent({
         type: 'refresh-token-replayed',
         accountId: stored.accountId,
@@ -175,11 +177,11 @@ export class TokenService {
   }
 
   async endSession(familyId: string): Promise<void> {
-    await this.sessions.revokeFamily(familyId, this.clock());
+    await this.sessions.revokeFamily(familyId, this.clock(), this.accessTtl);
   }
 
   async endAllSessions(accountId: string): Promise<number> {
-    return this.sessions.revokeAllForAccount(accountId, this.clock());
+    return this.sessions.revokeAllForAccount(accountId, this.clock(), this.accessTtl);
   }
 
   private async mint(accountId: string, familyId: string): Promise<IssuedRefreshToken> {

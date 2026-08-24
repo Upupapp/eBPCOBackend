@@ -148,9 +148,14 @@ export function operationalPurgeJob(db: SqlClient, clock: () => Date = () => new
       const tickets = await db.query(
         'delete from password_reset_tickets where expires_at < $1 or used_at is not null', [now],
       );
+      // A revocation record protects nothing once the access tokens it refers
+      // to have expired on their own.
+      const revocations = await db.query(
+        'delete from revoked_sessions where expires_at < $1', [now],
+      );
 
       return `idempotency keys ${keys.rowCount}, refresh tokens ${tokens.rowCount}, `
-        + `reset tickets ${tickets.rowCount}`;
+        + `reset tickets ${tickets.rowCount}, session revocations ${revocations.rowCount}`;
     },
   };
 }

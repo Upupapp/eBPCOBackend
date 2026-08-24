@@ -10,6 +10,7 @@ import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
+import { IdentityService } from '../src/modules/identity/application/identity.service';
 import { ROLE_SCOPES, Scope, StaffRole } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
 
@@ -198,6 +199,54 @@ describe('the staff surface is closed by default', () => {
     await app.inject({ method: 'DELETE', url: '/me', headers: { authorization: `Bearer ${token}` } });
 
     expect((await get('/me', token)).statusCode).toBe(401);
+  });
+
+  it('stops an access token the moment its session is signed out', async () => {
+    // Revoking the refresh token stops NEW access tokens being minted and does
+    // nothing to one already issued — so signing out of a lost handset did
+    // nothing for up to fifteen minutes, which is the whole window in which
+    // signing out was the thing to do.
+    const sid = randomUUID();
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid, kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+    expect((await get('/me', token)).statusCode).toBe(200);
+
+    await app.get(IdentityService).signOut(sid);
+
+    const after = await get('/me', token);
+    expect(after.statusCode).toBe(401);
+    expect(after.json().detail).toMatch(/signed out/i);
+  });
+
+  it('signs every session out, not just the live ones', async () => {
+    // Revoking only families with a live refresh token would leave an access
+    // token from an already-expired family still working — exactly the case
+    // someone signing out everywhere is worried about.
+    const sid = randomUUID();
+    await db.query(
+      `insert into refresh_tokens (id, family_id, account_id, secret_digest, issued_at, expires_at, revoked_at)
+       values ($1,$2,$3,'digest',now(),now() + interval '30 days', now())`,
+      [randomUUID(), sid, APPLICANT_ACCOUNT],
+    );
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid, kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+
+    await app.get(IdentityService).signOutEverywhere(APPLICANT_ACCOUNT);
+
+    expect((await get('/me', token)).statusCode).toBe(401);
+  });
+
+  it('leaves a session nobody signed out alone', async () => {
+    // The revocation table records sessions that HAVE been signed out; it is
+    // not a register of every session that exists. Treating an unrecorded
+    // family as revoked would infer liveness from the absence of a row.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+
+    expect((await get('/me', token)).statusCode).toBe(200);
   });
 
   it('never asks the database on a public route', async () => {

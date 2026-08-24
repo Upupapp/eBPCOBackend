@@ -429,6 +429,16 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     year: none(), holiday_date: none(), name: none(), kind: none(), proclamation: none(),
   },
   document_number_sequences: { series: none(), year: none(), last_issued: none() },
+  revoked_sessions: {
+    // A session identifier, not an account one. It cannot be resolved to a
+    // person without the refresh_tokens row it refers to, and that row is
+    // deleted by the purge — but it is a key that once belonged to one
+    // person's session, so it is linkable rather than nothing.
+    family_id: linkable('operational', 'session revocation'),
+    revoked_at: none('operational'),
+    expires_at: none('operational'),
+  },
+
   data_export_requests: {
     id: none('operational'),
     account_id: linkable('operational', 'RA 10173 s.18 portability'),

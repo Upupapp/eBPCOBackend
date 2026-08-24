@@ -28,22 +28,52 @@ import { SqlClient } from '../../../persistence/sql-client';
  * be trading a known correctness property for an unmeasured saving.
  */
 
-export type AccountStanding = 'active' | 'disabled' | 'unknown';
+export type AccountStanding = 'active' | 'disabled' | 'unknown' | 'session-revoked';
+
+const UUID = /^[0-9a-fA-F-]{36}$/;
 
 export class AccountStatusReader {
-  constructor(private readonly db: SqlClient) {}
+  constructor(
+    private readonly db: SqlClient,
+    private readonly clock: () => Date = () => new Date(),
+  ) {}
 
-  async standingOf(accountId: string): Promise<AccountStanding> {
+  /**
+   * One round trip for both questions.
+   *
+   * The account and the session are separate concerns and separate answers, and
+   * asking them in two queries would double the per-request cost for no benefit
+   * — nothing acts on the first answer before the second is needed.
+   *
+   * An UNKNOWN session is allowed through, deliberately. The revocation table
+   * records sessions that HAVE been signed out; it is not a register of every
+   * session that exists. Treating an unrecorded family as revoked would mean
+   * inferring liveness from the absence of a row, which is the coupling this
+   * design exists to avoid — and the account check above is what actually
+   * carries the authority, since a family id grants nothing on its own.
+   */
+  async standingOf(accountId: string, sessionId?: string): Promise<AccountStanding> {
     // Guarded before the query. A malformed subject in a token that somehow
     // verified should not reach the database at all.
-    if (!/^[0-9a-fA-F-]{36}$/.test(accountId)) return 'unknown';
+    if (!UUID.test(accountId)) return 'unknown';
+    const session = sessionId !== undefined && UUID.test(sessionId) ? sessionId : null;
 
-    const result = await this.db.query<{ disabled_at: Date | null }>(
-      'select disabled_at from accounts where id = $1',
-      [accountId],
+    const result = await this.db.query<{ disabled_at: Date | null; session_revoked: boolean }>(
+      `select a.disabled_at,
+              coalesce((
+                select r.expires_at > $3 from revoked_sessions r where r.family_id = $2
+              ), false) as session_revoked
+         from accounts a
+        where a.id = $1`,
+      [accountId, session, this.clock()],
     );
+
     const row = result.rows[0];
     if (row === undefined) return 'unknown';
-    return row.disabled_at === null ? 'active' : 'disabled';
+    if (row.disabled_at !== null) return 'disabled';
+    // Checked after the account, so a disabled account reads as disabled rather
+    // than as a revoked session — the more useful of the two messages.
+    if (row.session_revoked) return 'session-revoked';
+    return 'active';
   }
 }

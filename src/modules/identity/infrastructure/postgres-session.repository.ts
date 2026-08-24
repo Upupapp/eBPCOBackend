@@ -54,20 +54,37 @@ export class PostgresSessionRepository implements SessionRepository {
     await this.db.query('update refresh_tokens set consumed_at = $1 where id = $2 and consumed_at is null', [at, id]);
   }
 
-  async revokeFamily(familyId: string, at: Date): Promise<number> {
-    const result = await this.db.query(
-      'update refresh_tokens set revoked_at = $1 where family_id = $2 and revoked_at is null',
-      [at, familyId],
-    );
-    return result.rowCount;
+  async revokeFamily(familyId: string, at: Date, accessTokenTtlSeconds: number): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const result = await tx.query(
+        'update refresh_tokens set revoked_at = $1 where family_id = $2 and revoked_at is null',
+        [at, familyId],
+      );
+      // Recorded whether or not a refresh token was still live. A caller
+      // signing out twice, or signing out after the refresh token already
+      // expired, still holds an access token that must stop working.
+      await recordRevocations(tx, [familyId], at, accessTokenTtlSeconds);
+      return result.rowCount;
+    });
   }
 
-  async revokeAllForAccount(accountId: string, at: Date): Promise<number> {
-    const result = await this.db.query(
-      'update refresh_tokens set revoked_at = $1 where account_id = $2 and revoked_at is null',
-      [at, accountId],
-    );
-    return result.rowCount;
+  async revokeAllForAccount(accountId: string, at: Date, accessTokenTtlSeconds: number): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      // Every family this account has, live or not. Revoking only the live ones
+      // would leave an access token from a family whose refresh token had
+      // already expired still working — which is exactly the case someone
+      // signing out everywhere is worried about.
+      const families = await tx.query<{ family_id: string }>(
+        'select distinct family_id from refresh_tokens where account_id = $1',
+        [accountId],
+      );
+      const result = await tx.query(
+        'update refresh_tokens set revoked_at = $1 where account_id = $2 and revoked_at is null',
+        [at, accountId],
+      );
+      await recordRevocations(tx, families.rows.map((row) => row.family_id), at, accessTokenTtlSeconds);
+      return result.rowCount;
+    });
   }
 
   async countActiveFamilies(accountId: string): Promise<number> {
@@ -78,4 +95,28 @@ export class PostgresSessionRepository implements SessionRepository {
     );
     return result.rows[0]?.count ?? 0;
   }
+}
+
+/**
+ * Writes the revocation records, idempotently.
+ *
+ * `on conflict do update` rather than `do nothing`: signing out again should
+ * push the expiry out, not leave the first record to lapse while a newer access
+ * token is still live.
+ */
+async function recordRevocations(
+  tx: SqlClient,
+  familyIds: readonly string[],
+  at: Date,
+  accessTokenTtlSeconds: number,
+): Promise<void> {
+  if (familyIds.length === 0) return;
+  const expiresAt = new Date(at.getTime() + accessTokenTtlSeconds * 1000);
+  await tx.query(
+    `insert into revoked_sessions (family_id, revoked_at, expires_at)
+     select unnest($1::uuid[]), $2, $3
+     on conflict (family_id) do update
+       set revoked_at = excluded.revoked_at, expires_at = excluded.expires_at`,
+    [[...familyIds], at, expiresAt],
+  );
 }

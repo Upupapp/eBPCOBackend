@@ -63,7 +63,7 @@ export class AuthenticationGuard implements CanActivate {
     // A verified signature says the token was issued by us and has not expired.
     // It says nothing about whether the account still exists or is still
     // allowed to act, and both can change inside a token's lifetime.
-    const standing = await this.accounts.standingOf(claims.sub);
+    const standing = await this.accounts.standingOf(claims.sub, claims.sid);
 
     if (standing === 'unknown') {
       // The same answer as a forged or expired token, deliberately. Answering
@@ -73,6 +73,20 @@ export class AuthenticationGuard implements CanActivate {
         ProblemType.unauthorized,
         'Authentication is required',
         HttpStatus.UNAUTHORIZED,
+      );
+    }
+
+    if (standing === 'session-revoked') {
+      // Signing out has to mean something to a token already issued. Revoking
+      // the refresh token alone stops NEW access tokens being minted and leaves
+      // the current one working for up to fifteen minutes — which on a lost or
+      // shared handset is the whole window in which signing out was the thing
+      // to do.
+      throw new ProblemException(
+        ProblemType.unauthorized,
+        'Authentication is required',
+        HttpStatus.UNAUTHORIZED,
+        'This session has been signed out. Sign in again to continue.',
       );
     }
 

@@ -65,3 +65,56 @@ it('does not distinguish unknown from disabled by anything the caller can see', 
   expect(refused).toContain(await accounts.standingOf(randomUUID()));
   expect(refused).toContain(await accounts.standingOf(DISABLED));
 });
+
+describe('a signed-out session', () => {
+  const FAMILY = randomUUID();
+
+  it('is refused while the record is live', async () => {
+    await db.query(
+      `insert into revoked_sessions (family_id, revoked_at, expires_at)
+       values ($1, now(), now() + interval '15 minutes')`,
+      [FAMILY],
+    );
+
+    expect(await accounts.standingOf(ACTIVE, FAMILY)).toBe('session-revoked');
+  });
+
+  it('is allowed again once the record has expired, because the token has too', async () => {
+    // A revocation record protects nothing after the access tokens it refers to
+    // have expired on their own. That is what keeps the table small enough to
+    // consult on every request.
+    await db.query(
+      `insert into revoked_sessions (family_id, revoked_at, expires_at)
+       values ($1, now() - interval '1 hour', now() - interval '45 minutes')`,
+      [FAMILY],
+    );
+
+    expect(await accounts.standingOf(ACTIVE, FAMILY)).toBe('active');
+  });
+
+  it('leaves a session nobody signed out alone', async () => {
+    // The table records sessions that HAVE been signed out; it is not a
+    // register of every session that exists.
+    expect(await accounts.standingOf(ACTIVE, randomUUID())).toBe('active');
+  });
+
+  it('reports a disabled account as disabled even when the session is also revoked', async () => {
+    // The more useful of the two messages. "Your account has been disabled"
+    // tells someone what to do; "this session has been signed out" invites them
+    // to sign in again and fail.
+    await db.query(
+      `insert into revoked_sessions (family_id, revoked_at, expires_at)
+       values ($1, now(), now() + interval '15 minutes')`,
+      [FAMILY],
+    );
+
+    expect(await accounts.standingOf(DISABLED, FAMILY)).toBe('disabled');
+  });
+
+  it('ignores a malformed session id rather than refusing on it', async () => {
+    // A malformed family cannot match a revocation record, and treating it as
+    // revoked would refuse a caller for a token defect the account check should
+    // decide on.
+    expect(await accounts.standingOf(ACTIVE, "1' or '1'='1")).toBe('active');
+  });
+});

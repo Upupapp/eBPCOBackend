@@ -17,8 +17,19 @@ export interface SessionRepository {
   /** Marks one token as exchanged. A second exchange of the same token is a replay. */
   markConsumed(id: string, at: Date): Promise<void>;
   /** Revokes every token in a family. Used on sign-out, on reset, and on replay. */
-  revokeFamily(familyId: string, at: Date): Promise<number>;
+  /**
+   * Ends a family, and RECORDS that it ended.
+   *
+   * Both halves matter and they stop different things. Revoking the refresh
+   * token stops new access tokens being minted; the record stops one already
+   * minted from being accepted. Without the second, signing out of a lost
+   * handset did nothing for up to fifteen minutes.
+   *
+   * `accessTokenTtlSeconds` is how long the record needs to outlive the
+   * revocation — past that, any token bearing the family has expired anyway.
+   */
+  revokeFamily(familyId: string, at: Date, accessTokenTtlSeconds: number): Promise<number>;
   /** Revokes every family belonging to an account -- "sign out everywhere". */
-  revokeAllForAccount(accountId: string, at: Date): Promise<number>;
+  revokeAllForAccount(accountId: string, at: Date, accessTokenTtlSeconds: number): Promise<number>;
   countActiveFamilies(accountId: string): Promise<number>;
 }

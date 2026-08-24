@@ -26,7 +26,11 @@ export class InMemorySessionRepository implements SessionRepository {
     return Promise.resolve();
   }
 
-  revokeFamily(familyId: string, at: Date): Promise<number> {
+  /** The revoked set stands in for the `revoked_sessions` table. */
+  readonly revokedFamilies = new Map<string, Date>();
+
+  revokeFamily(familyId: string, at: Date, accessTokenTtlSeconds: number): Promise<number> {
+    this.revokedFamilies.set(familyId, new Date(at.getTime() + accessTokenTtlSeconds * 1000));
     let revoked = 0;
     for (const [id, token] of this.tokens) {
       if (token.familyId === familyId && token.revokedAt === null) {
@@ -37,7 +41,12 @@ export class InMemorySessionRepository implements SessionRepository {
     return Promise.resolve(revoked);
   }
 
-  revokeAllForAccount(accountId: string, at: Date): Promise<number> {
+  revokeAllForAccount(accountId: string, at: Date, accessTokenTtlSeconds: number): Promise<number> {
+    for (const token of this.tokens.values()) {
+      if (token.accountId === accountId) {
+        this.revokedFamilies.set(token.familyId, new Date(at.getTime() + accessTokenTtlSeconds * 1000));
+      }
+    }
     let revoked = 0;
     for (const [id, token] of this.tokens) {
       if (token.accountId === accountId && token.revokedAt === null) {
