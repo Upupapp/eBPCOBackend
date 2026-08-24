@@ -104,6 +104,32 @@ const schema = z
     OBJECT_STORE_LOCAL_PATH: z.string().min(1).optional()
       .transform((value) => value ?? '.data/objects'),
 
+    // How long an access token lives, in seconds.
+    //
+    // The 900-second ceiling is a security property and is enforced in
+    // TokenService, not here: it bounds how long a session that has been signed
+    // out could keep working if the revocation record were ever lost. The
+    // default sits AT that ceiling deliberately, and the reason is a
+    // measurement nobody has taken.
+    //
+    // The mobile client refreshes REACTIVELY — it discovers expiry by getting a
+    // 401 and then refreshes and retries. Halving this does not halve a risk
+    // window and then stop; it triples the round trips on exactly the
+    // connections the offline queue exists for, and an applicant on a rural
+    // link pays for that on every screen. Since revocation now works, the
+    // stolen-token window is bounded by an explicit sign-out rather than by
+    // expiry, which is the stronger of the two mechanisms and the one that
+    // improved.
+    //
+    // Lower it where the trade is worth it — shared kiosk hardware in a city
+    // hall, say, where the network is good and the device is not the
+    // applicant's. That is a deployment decision, which is why it is here.
+    //
+    // The floor is 60 seconds. Below that a client can spend more time
+    // refreshing than working, and the mobile client's single-flight refresh
+    // stops being an optimisation and becomes the critical path.
+    ACCESS_TOKEN_TTL_SECONDS: intFromEnv(60, 900, 900),
+
     // Periodic work. Off by default so a test or a one-off process does not
     // start deleting documents as a side effect of booting; every deployment
     // that should run jobs sets it explicitly.

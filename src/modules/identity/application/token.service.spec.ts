@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { SignJWT } from 'jose';
 
 import { InMemorySessionRepository } from '../infrastructure/in-memory-session.repository';
@@ -32,6 +34,34 @@ describe('access tokens', () => {
 
     await expect(service.verifyAccessToken(token)).resolves.toEqual(claims);
     expect(expiresIn).toBe(ACCESS_TOKEN_TTL_SECONDS);
+  });
+
+  it('issues a token that expires when the configured lifetime says', async () => {
+    // The value is now a deployment decision, so the thing to assert is that
+    // the configured number reaches the token rather than that it equals 900.
+    const service = new TokenService({
+      signingKey: KEY, sessions: new InMemorySessionRepository(), accessTtlSeconds: 300,
+    });
+
+    const issued = await service.issueAccessToken({
+      sub: randomUUID(), sid: randomUUID(), kind: 'applicant', scopes: [],
+    });
+
+    expect(issued.expiresIn).toBe(300);
+  });
+
+  it('tells the client the lifetime, so a client that wanted to refresh early could', async () => {
+    // The mobile client refreshes reactively today — it discovers expiry from a
+    // 401. `expiresIn` is what a client would need to stop doing that, and
+    // returning it costs nothing.
+    const service = new TokenService({ signingKey: KEY, sessions: new InMemorySessionRepository() });
+
+    const issued = await service.issueAccessToken({
+      sub: randomUUID(), sid: randomUUID(), kind: 'applicant', scopes: [],
+    });
+
+    expect(issued.expiresIn).toBeGreaterThan(0);
+    expect(issued.expiresIn).toBeLessThanOrEqual(900);
   });
 
   it('refuses a lifetime above the ceiling', () => {

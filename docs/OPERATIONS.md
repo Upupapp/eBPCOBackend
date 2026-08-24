@@ -41,6 +41,7 @@ find out what is missing.
 | `SHUTDOWN_DEADLINE_MS` | `20000` | **Must stay below the orchestrator's termination grace period**, or the process is SIGKILLed mid-transaction and the deadline never fires. Kubernetes' default `terminationGracePeriodSeconds` is 30, and `12 + 20 = 32` exceeds it — raise the grace period or lower these. |
 | `BODY_LIMIT_BYTES` | `1048576` | An unbounded body is a denial-of-service surface. |
 | `RATE_LIMIT_MAX` | `300` | — |
+| `ACCESS_TOKEN_TTL_SECONDS` | `900` | **The default sits at the ceiling deliberately.** The mobile client refreshes *reactively* — it learns a token expired by getting a 401, then refreshes and retries — so halving this does not halve a risk window and stop; it triples the round trips on exactly the connections the offline queue exists for. Since sign-out now revokes access tokens directly (§3a), the stolen-token window is bounded by an explicit revocation rather than by expiry. Lower it where the trade is worth it — shared kiosk hardware in a city hall, good network, device not the applicant's. The 900s ceiling is enforced in code and is not a tuning knob. |
 | `SCHEDULER_ENABLED` | `false` | Off by default. See §4a. |
 | `SCHEDULER_TICK_SECONDS` | `15` | Must stay well below the shortest job interval, or a job due every minute waits for the next tick. |
 | `DOCUMENT_RETENTION_DAYS` | *(unset)* | The LGU's number (M-15). Unset means retention runs and deletes nothing. |
@@ -154,6 +155,10 @@ whole window in which signing out was the thing to do.
 access-token lifetime because past that the token has expired on its own. That
 is what keeps the table small enough to consult on every request. The
 `operational-data-purge` job sweeps it.
+
+Shortening `ACCESS_TOKEN_TTL_SECONDS` also shortens how long each revocation
+record must be kept, since the record only has to outlive the tokens it refers
+to. The two are the same number by construction rather than by coincidence.
 
 **A session with no record is allowed through, deliberately.** The table records
 sessions that HAVE been signed out; it is not a register of every session that

@@ -66,6 +66,7 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
       inject: [CONFIG, SESSION_REPOSITORY, StructuredLogger],
       useFactory: (config: AppConfig, sessions: SessionRepository, logger: StructuredLogger) =>
         new TokenService({
+          accessTtlSeconds: config.ACCESS_TOKEN_TTL_SECONDS,
           signingKey: new TextEncoder().encode(config.JWT_SIGNING_KEY),
           sessions,
           onSecurityEvent: (event) => {
