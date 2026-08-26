@@ -23,3 +23,8 @@ https:/
 # map for anyone who finds a deployment. It lives on disk and is shared
 # directly until the gaps it lists are closed.
 docs/READINESS-REVIEW.md
+# Held back for the same reason as the readiness review: this repository is
+# public, and both documents enumerate what the system cannot yet do. The
+# owner's call, not a default.
+docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.html
+docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.pdf

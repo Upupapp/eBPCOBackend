@@ -21,7 +21,9 @@ export type StaffRole =
   | 'cashier'
   | 'building-official'
   | 'releasing-officer'
-  | 'administrator';
+  | 'administrator'
+  | 'auditor'
+  | 'super-admin';
 
 /**
  * What a token bears. Deliberately coarse: fine-grained permission lives in the
@@ -45,7 +47,8 @@ export type Scope =
   | 'staff:verify-payment'
   | 'staff:approve'
   | 'staff:release'
-  | 'staff:administer';
+  | 'staff:administer'
+  | 'audit:read';
 
 export const APPLICANT_SCOPES: readonly Scope[] = [
   'applications:read', 'applications:write',
@@ -77,6 +80,61 @@ export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
   'building-official': ['applications:read', 'documents:read', 'payments:read', 'staff:approve'],
   'releasing-officer': ['applications:read', 'staff:release'],
   administrator: ['staff:administer'],
+
+  // ── added by the web-portal reconciliation (WP-01) ───────────────────
+  //
+  // READ EVERYTHING, CHANGE NOTHING. Until now every role that could read
+  // could also act, so there was no way to give someone oversight without
+  // giving them authority — which is the whole point of the position. The
+  // absence of a write scope here is the definition of the role, not an
+  // omission to be filled in later.
+  auditor: ['applications:read', 'documents:read', 'payments:read', 'audit:read'],
+
+  // The portal's Super Admin. It holds every READ scope and the administration
+  // scope, and DELIBERATELY NOT the four acting scopes -- assess, verify,
+  // approve, release.
+  //
+  // Seeing every screen is not the same as being able to perform every act.
+  // Granting all sixteen scopes to one role would dissolve the separation of
+  // duty the rest of this table exists to enforce: the officer who assesses a
+  // fee must not be the one who confirms it was paid, and a role that can do
+  // both makes that rule unenforceable by anyone holding it. An administrator
+  // who genuinely needs to assess can be given the assessor role as well --
+  // visibly, in the role table, where it can be audited.
+  'super-admin': [
+    'applications:read', 'applications:write',
+    'documents:read', 'documents:write',
+    'payments:read', 'notifications:read',
+    'audit:read', 'staff:administer',
+  ],
+};
+
+/**
+ * The staff web portal's role names, mapped to this table's.
+ *
+ * The portal and this service grew separate vocabularies -- seven names against
+ * eight, three of which happened to agree. Reconciled in ONE direction: these
+ * role identifiers are the wire vocabulary, and the portal's names are display
+ * labels over them. The alternative, translating at the edge, means two lists
+ * that must be kept in step by whoever remembers, and an authorisation decision
+ * is the last place to put a mapping nobody owns.
+ *
+ * `Payment Officer` deliberately has NO single entry. The portal had one role
+ * where this table has two, and collapsing them would silently merge assessing
+ * a fee with confirming its payment. That is the separation of duty above, so
+ * the portal shows two roles.
+ */
+export const PORTAL_ROLE_LABELS: Readonly<Record<StaffRole, string>> = {
+  'receiving-officer': 'Receiving Officer',
+  'records-officer': 'Records Officer',
+  evaluator: 'Evaluator',
+  assessor: 'Assessor',
+  cashier: 'Cashier',
+  'building-official': 'Approving Officer',
+  'releasing-officer': 'Releasing Officer',
+  administrator: 'Administrator',
+  auditor: 'Auditor',
+  'super-admin': 'Super Admin',
 };
 
 /**
@@ -85,6 +143,9 @@ export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
  */
 export const MFA_REQUIRED_ROLES: readonly StaffRole[] = [
   'assessor', 'cashier', 'building-official', 'releasing-officer', 'administrator',
+  // A super-admin can create and role other officers, which is authority over
+  // every act in the list above even though it performs none of them directly.
+  'super-admin',
 ];
 
 export interface Account {

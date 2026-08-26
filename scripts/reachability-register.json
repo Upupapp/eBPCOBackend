@@ -27,6 +27,7 @@
   "src/modules/documents/domain/__fixtures__.ts::pngChunk": "TEST FIXTURE helper behind makePng",
   "src/modules/documents/domain/malware-scanner.ts::UnavailableScanner": "TEST DOUBLE, and its own comment says so: a scanner that is always down, so the fail-closed path can be tested",
   "src/modules/health/readiness.service.ts::ReadinessService.registered": "lists which probes registered, for a spec that asserts every dependency is covered; /ready reports their results instead",
+  "src/modules/identity/domain/account.ts::PORTAL_ROLE_LABELS": "WP-01 reconciliation: the portal-facing display name for each wire role. Asserted by the role gate and served to the portal at TAB 16; until a client reads it, only the spec does",
   "src/modules/identity/domain/password-hasher.ts::TEST_SCRYPT_COST": "TEST CONSTANT: a deliberately weak scrypt cost so the suite is not dominated by key derivation",
   "src/modules/identity/infrastructure/in-memory-account.repository.ts::InMemoryAccountRepository": "TEST DOUBLE: the modules wire the Postgres adapter; this one keeps identity unit tests off a database",
   "src/modules/identity/infrastructure/in-memory-account.repository.ts::InMemoryAccountRepository.setProfile": "TEST DOUBLE seam for arranging a profile without SQL",

@@ -74,8 +74,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-24",
-              "workingDaysElapsed": 27,
-              "workingDaysRemaining": -20,
+              "workingDaysElapsed": 29,
+              "workingDaysRemaining": -22,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -101,8 +101,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-24",
-              "workingDaysElapsed": 7,
-              "workingDaysRemaining": 0,
+              "workingDaysElapsed": 9,
+              "workingDaysRemaining": -2,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -128,8 +128,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-13",
-              "workingDaysElapsed": 36,
-              "workingDaysRemaining": -29,
+              "workingDaysElapsed": 38,
+              "workingDaysRemaining": -31,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -169,8 +169,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-28",
-              "workingDaysElapsed": 3,
-              "workingDaysRemaining": 4,
+              "workingDaysElapsed": 5,
+              "workingDaysRemaining": 2,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -198,7 +198,7 @@
         },
         "awaitingAction": 5,
         "overduePledge": 0,
-        "pledgeIndeterminate": 3
+        "pledgeIndeterminate": 4
       }
     },
     "staff.applications.detail": {
@@ -230,8 +230,8 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-08-19",
-            "workingDaysElapsed": 9,
-            "workingDaysRemaining": -2,
+            "workingDaysElapsed": 11,
+            "workingDaysRemaining": -4,
             "approximate": true,
             "suspended": false,
             "overdue": false
@@ -354,8 +354,8 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-07-13",
-            "workingDaysElapsed": 36,
-            "workingDaysRemaining": -29,
+            "workingDaysElapsed": 38,
+            "workingDaysRemaining": -31,
             "approximate": true,
             "suspended": false,
             "overdue": false
@@ -1165,7 +1165,7 @@
         "classification": "Simple",
         "pledge": {
           "pledgedWorkingDays": 7,
-          "dueDate": "2026-09-03",
+          "dueDate": "2026-09-07",
           "approximate": true,
           "suspended": false,
           "suspendedSince": null
