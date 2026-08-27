@@ -57,6 +57,48 @@ async function staffToken(role: StaffRole): Promise<string> {
   return issued.token;
 }
 
+/**
+ * An Order of Payment now requires an APPROVED assessment behind it (TAB 05).
+ *
+ * Two officers, because that is the point: the one who prepares the figures may
+ * not be the one who approves them. A test that used one token would pass only
+ * while the separation of duty was broken.
+ */
+// Raised from the five-second default because the work is genuinely larger:
+// since TAB 05 an Order of Payment requires a drafted, submitted and approved
+// assessment behind it, which is three more round trips and two more accounts
+// per test against a real PostgreSQL. The alternative — keeping the old limit
+// by not exercising the approval — would be testing a flow that no longer
+// exists.
+jest.setTimeout(30_000);
+
+let preparerToken: string | null = null;
+let approverToken: string | null = null;
+
+async function approvedAssessment(applicationId: string): Promise<void> {
+  // Minted once PER TEST, not per call. Every call meant two account inserts
+  // and two token signings, which pushed these tests past the five-second
+  // default — a fixture cost masquerading as a slow endpoint. Caching across
+  // tests fails differently and more confusingly: the database is rebuilt in
+  // `beforeEach`, so a token from the previous test names an account that no
+  // longer exists and the guard answers 401.
+  preparerToken ??= await staffToken('assessor');
+  // A SECOND ASSESSOR, not a building official. The review is four-eyes within
+  // the assessing function — the same shape as evaluation's self-review rule,
+  // where the refusal is between people holding the same role rather than
+  // between roles. `staff:approve` is for approving the PERMIT.
+  approverToken ??= await staffToken('assessor');
+  const preparer = preparerToken;
+  const approver = approverToken;
+  const draft = await post(`/staff/applications/${applicationId}/assessments`, preparer);
+  if (draft.statusCode !== 201) throw new Error(`draft failed: ${draft.body}`);
+  const assessmentId = draft.json<{ id: string }>().id;
+  const submitted = await post(`/staff/assessments/${assessmentId}/submit`, preparer);
+  if (submitted.statusCode !== 200) throw new Error(`submit failed: ${submitted.body}`);
+  const approved = await post(`/staff/assessments/${assessmentId}/approve`, approver);
+  if (approved.statusCode !== 200) throw new Error(`approve failed: ${approved.body}`);
+}
+
 const post = (
   url: string, token: string, payload: Record<string, unknown> = {}, key: string = randomUUID(),
 ) =>
@@ -100,6 +142,8 @@ const STAGES = ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval'] as 
 const SCOPE = 'Perimeter fence, 42 linear metres, hollow block on reinforced concrete footing';
 
 beforeEach(async () => {
+  preparerToken = null;
+  approverToken = null;
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(join(__dirname, '../db/migrations')));
   app = await createApp(loadConfig(ENV), new StructuredLogger('error', () => undefined), db);
@@ -337,6 +381,7 @@ describe('cash across a counter', () => {
     for (const stage of STAGES) {
       await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage, result: 'Passed' });
     }
+    await approvedAssessment(applicationId);
     const order = await post(`/staff/applications/${applicationId}/order-of-payment`, await staffToken('assessor'));
     return { applicationId, total: order.json<{ totalCentavos: number }>().totalCentavos };
   }
@@ -569,6 +614,7 @@ describe('the whole path, five officers, one application', () => {
       await post(`/staff/applications/${id}/evaluations`, evaluator, { stage, result: 'Passed' });
     }
 
+    await approvedAssessment(id);
     const order = await post(`/staff/applications/${id}/order-of-payment`, assessor);
     expect(order.statusCode).toBe(201);
     expect(order.json<{ totalCentavos: number }>().totalCentavos).toBe(682_000);

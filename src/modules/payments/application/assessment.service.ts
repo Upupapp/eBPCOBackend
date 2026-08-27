@@ -11,7 +11,8 @@ import {
   assertIssuable,
   buildLineItems,
 } from '../domain/order-of-payment';
-import { FeeSchedule, FeeScheduleUnavailable, amountsFor, scheduleInForce } from '../domain/fee-schedule';
+import { FeeSchedule, FeeScheduleUnavailable, scheduleInForce } from '../domain/fee-schedule';
+import { AssessmentWorkflowService } from './assessment-workflow.service';
 
 /**
  * Issuing and correcting Orders of Payment.
@@ -25,17 +26,24 @@ import { FeeSchedule, FeeScheduleUnavailable, amountsFor, scheduleInForce } from
 
 export type IssueResult =
   | { readonly ok: true; readonly orderId: string; readonly number: string; readonly total: Centavos }
-  | { readonly ok: false; readonly reason: 'no-schedule' | 'already-assessed' | 'invalid'; readonly detail: string };
+  | { readonly ok: false; readonly reason: 'no-schedule' | 'already-assessed' | 'invalid' | 'not-approved'; readonly detail: string };
 
 export class AssessmentService {
   private readonly audit: AuditService;
+  private readonly workflow: AssessmentWorkflowService;
 
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    workflow?: AssessmentWorkflowService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    // Constructed with this service's own `schedules()` so both read the same
+    // published schedule through the same code path -- two readings of the fee
+    // schedule is how a draft and the Order it becomes start disagreeing.
+    this.workflow = workflow
+      ?? new AssessmentWorkflowService(db, clock, () => this.schedules(), this.audit);
   }
 
   async schedules(): Promise<FeeSchedule[]> {
@@ -87,6 +95,28 @@ export class AssessmentService {
       return { ok: false, reason: 'already-assessed', detail: 'an Order of Payment is already in force' };
     }
 
+    // ── THE SECOND SIGNATURE ────────────────────────────────────────────
+    //
+    // An Order is issued FROM an approved assessment and from nothing else.
+    // This used to read the schedule, compute six figures and write the Order
+    // in one act under one officer's authority — which is the control weakness
+    // TAB 05 exists to close, and the one this codebase already refuses
+    // elsewhere: an evaluator may not evaluate their own application, and the
+    // officer who records a payment may not confirm it.
+    //
+    // The figures now come from the approved assessment rather than from a
+    // fresh read of the schedule, deliberately: re-computing here would let an
+    // Order differ from the figures a second officer actually approved.
+    const approved = await this.workflow.approvedFor(applicationId);
+    if (approved === null) {
+      return {
+        ok: false,
+        reason: 'not-approved',
+        detail: 'No approved assessment exists for this application. Prepare one, submit it, '
+          + 'and have another officer approve it before issuing an Order of Payment.',
+      };
+    }
+
     const schedule = scheduleInForce(await this.schedules(), isoDate(this.clock()));
     if (schedule === null) {
       // M-08. Quoting a fee from a schedule the LGU has not published, or from
@@ -102,8 +132,16 @@ export class AssessmentService {
     let items: FeeLineItem[];
     let total: Centavos;
     try {
-      const { amounts, bases } = amountsFor(schedule, permitType);
-      items = buildLineItems(amounts, bases);
+      // An excluded line is a zero on the instrument, never a missing one: the
+      // contract requires all six, so an applicant sees that architectural fees
+      // were considered and were nil rather than wondering whether they were
+      // forgotten.
+      items = buildLineItems(
+        Object.fromEntries(approved.lines.map((line) => [
+          line.line, line.included ? line.amountCentavos : 0,
+        ])),
+        Object.fromEntries(approved.lines.map((line) => [line.line, line.basis])),
+      );
       total = assertIssuable(items);
     } catch (error) {
       if (error instanceof FeeScheduleUnavailable || error instanceof AssessmentError) {
@@ -112,7 +150,18 @@ export class AssessmentService {
       throw error;
     }
 
-    return this.insertOrder({ applicationId, officer, items, total, schedule, dueDate: dueDate ?? null });
+    const issued = await this.insertOrder({
+      applicationId, officer, items, total, schedule,
+      dueDate: dueDate ?? approved.dueDate,
+      assessmentId: approved.id,
+    });
+
+    // The assessment is spent once an Order exists. Leaving it Approved would
+    // keep it occupying the one-open-assessment slot, so a corrected assessment
+    // could never be drafted — and would make "approved" mean two different
+    // things: awaiting issue, and already issued.
+    if (issued.ok) await this.workflow.markIssued(approved.id, issued.orderId, this.db);
+    return issued;
   }
 
   /**
@@ -179,6 +228,7 @@ export class AssessmentService {
     schedule: FeeSchedule;
     dueDate: string | null;
     supersedes?: { id: string; reason: string };
+    assessmentId?: string;
   }): Promise<IssueResult> {
     const { applicationId, officer, items, total, schedule, dueDate, supersedes } = options;
 
@@ -207,8 +257,9 @@ export class AssessmentService {
       `insert into orders_of_payment
          (application_id, number, filing_centavos, processing_centavos, architectural_centavos,
           structural_centavos, electrical_centavos, others_centavos, total_centavos,
-          fee_schedule_version, assessed_at, assessed_by, due_date, supersedes_id, superseded_reason)
-       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+          fee_schedule_version, assessed_at, assessed_by, due_date, supersedes_id, superseded_reason,
+          assessment_id)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        returning id`,
       [
         applicationId, number,
@@ -216,6 +267,7 @@ export class AssessmentService {
         by('structural'), by('electrical'), by('others'), total,
         schedule.version, this.clock(), officer.accountId, dueDate,
         supersedes?.id ?? null, supersedes?.reason ?? null,
+        options.assessmentId ?? null,
       ],
     );
 

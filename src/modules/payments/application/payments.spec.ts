@@ -12,12 +12,14 @@ import { buildLineItems } from '../domain/order-of-payment';
 import { AssessmentService } from './assessment.service';
 import { PaymentService } from './payment.service';
 import { reconcile } from './reconciliation';
+import { AssessmentWorkflowService } from './assessment-workflow.service';
 
 const MIGRATIONS_DIR = join(__dirname, '../../../../db/migrations');
 const NOW = new Date('2026-08-19T12:00:00Z');
 
 let db: SqlClient;
 let assessment: AssessmentService;
+let workflow: AssessmentWorkflowService;
 let payments: PaymentService;
 
 const APPLICANT_ACCOUNT = randomUUID();
@@ -27,6 +29,34 @@ const APPLICATION = randomUUID();
 
 const applicant: Caller = { accountId: APPLICANT_ACCOUNT, kind: 'applicant', scopes: APPLICANT_SCOPES };
 const assessor: Caller = { accountId: ASSESSOR_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.assessor };
+const REVIEWER_ACCOUNT = randomUUID();
+const reviewer: Caller = { accountId: REVIEWER_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.assessor };
+
+/**
+ * Since TAB 05 an Order of Payment is issued FROM an approved assessment, so
+ * every test that issues one has to prepare, submit and have a SECOND officer
+ * approve it first. A helper that used one officer would pass only while the
+ * separation of duty was broken.
+ */
+async function approvedAssessment(applicationId: string = APPLICATION): Promise<string> {
+  // Reuses one that is already approved. Several tests issue twice on purpose —
+  // to prove the second is refused — and re-drafting would meet the
+  // one-open-assessment rule instead of the rule under test.
+  const existing = await workflow.approvedFor(applicationId);
+  if (existing !== null) return existing.id;
+
+  const draft = await workflow.draft({ applicationId, officer: assessor });
+  // An Order already in force means there is nothing left to prepare. Several
+  // tests issue a second time deliberately, to prove it is refused — reaching
+  // the rule under test rather than tripping over this fixture on the way.
+  if (!draft.ok && draft.reason === 'already-assessed') return '';
+  if (!draft.ok) throw new Error(`draft: ${draft.detail}`);
+  const submitted = await workflow.submit({ assessmentId: draft.assessment.id, officer: assessor });
+  if (!submitted.ok) throw new Error(`submit: ${submitted.detail}`);
+  const approved = await workflow.approve({ assessmentId: draft.assessment.id, officer: reviewer });
+  if (!approved.ok) throw new Error(`approve: ${approved.detail}`);
+  return draft.assessment.id;
+}
 const cashier: Caller = { accountId: CASHIER_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.cashier };
 
 async function loadSchedule(): Promise<void> {
@@ -51,14 +81,16 @@ beforeEach(async () => {
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(MIGRATIONS_DIR));
   assessment = new AssessmentService(db, () => NOW);
+  workflow = new AssessmentWorkflowService(db, () => NOW, () => assessment.schedules());
   payments = new PaymentService(db, () => NOW);
 
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
      values ($1,'applicant','a@x.ph','a@x.ph','scrypt$1$1$1$a$b'),
             ($2,'staff','assessor@lgu.gov.ph','assessor@lgu.gov.ph','scrypt$1$1$1$a$b'),
-            ($3,'staff','cashier@lgu.gov.ph','cashier@lgu.gov.ph','scrypt$1$1$1$a$b')`,
-    [APPLICANT_ACCOUNT, ASSESSOR_ACCOUNT, CASHIER_ACCOUNT],
+            ($3,'staff','cashier@lgu.gov.ph','cashier@lgu.gov.ph','scrypt$1$1$1$a$b'),
+            ($4,'staff','reviewer@lgu.gov.ph','reviewer@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+    [APPLICANT_ACCOUNT, ASSESSOR_ACCOUNT, CASHIER_ACCOUNT, REVIEWER_ACCOUNT],
   );
   const applicantId = randomUUID();
   await db.query(
@@ -81,7 +113,11 @@ describe('a fee cannot be invented', () => {
   it('refuses to assess when no LGU schedule is loaded', async () => {
     // M-08. A plausible-looking invented figure is worse than none: the
     // applicant would be quoted a fee the LGU never set.
-    const result = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+    //
+    // Asserted on the DRAFT since TAB 05. The refusal moved one step earlier
+    // with the workflow: an officer is now stopped before typing anything,
+    // rather than after preparing an assessment that could never be issued.
+    const result = await workflow.draft({ applicationId: APPLICATION, officer: assessor });
 
     expect(result.ok).toBe(false);
     if (result.ok) return;
@@ -97,7 +133,7 @@ describe('a fee cannot be invented', () => {
        values ('2026.1', 'Demolition', 'filing', 50000, 'Ordinance s.3')`,
     );
 
-    const result = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+    const result = await workflow.draft({ applicationId: APPLICATION, officer: assessor });
     expect(result.ok).toBe(false);
   });
 
@@ -112,7 +148,7 @@ describe('a fee cannot be invented', () => {
        values ('2027.1', 'Fencing', 'filing', 50000, 'Ordinance s.3')`,
     );
 
-    expect((await assessment.issue({ applicationId: APPLICATION, officer: assessor })).ok).toBe(false);
+    expect((await workflow.draft({ applicationId: APPLICATION, officer: assessor })).ok).toBe(false);
   });
 
   it('refuses a non-zero fee line that names no authority', () => {
@@ -137,6 +173,7 @@ describe('issuing an Order of Payment', () => {
   beforeEach(loadSchedule);
 
   it('totals the lines from the schedule in force', async () => {
+    await approvedAssessment();
     const result = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     expect(result.ok).toBe(true);
@@ -152,6 +189,7 @@ describe('issuing an Order of Payment', () => {
   it('records which schedule version it was computed under', async () => {
     // So a historical Order can be explained against the schedule in force
     // when it was made, not the one in force when the question is asked.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const row = await db.query<{ fee_schedule_version: string }>(
@@ -163,6 +201,7 @@ describe('issuing an Order of Payment', () => {
   it('fills every unused line with an explicit zero, not a gap', async () => {
     // An applicant sees that architectural fees were considered and were nil,
     // rather than wondering whether they were forgotten.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const row = await db.query<Record<string, number>>(
@@ -174,8 +213,10 @@ describe('issuing an Order of Payment', () => {
   });
 
   it('refuses a second Order while one is in force', async () => {
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
+    await approvedAssessment();
     const second = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     expect(second.ok).toBe(false);
     if (second.ok) return;
@@ -183,6 +224,7 @@ describe('issuing an Order of Payment', () => {
   });
 
   it('records the statutory basis of every charged line', async () => {
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const audit = await db.query<{ after_state: { line: string; basis: string } }>(
@@ -200,6 +242,7 @@ describe('correcting an Order means superseding it', () => {
   it('refuses to amend one in place', async () => {
     // Enforced by the database. Amending after an applicant has been told what
     // to pay is, from their side, being charged a different amount than quoted.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     await expect(
@@ -208,6 +251,7 @@ describe('correcting an Order means superseding it', () => {
   });
 
   it('produces a supersession chain carrying the reason', async () => {
+    await approvedAssessment();
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
 
@@ -230,6 +274,7 @@ describe('correcting an Order means superseding it', () => {
   });
 
   it('leaves exactly one Order in force', async () => {
+    await approvedAssessment();
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
     await assessment.supersede({
@@ -246,6 +291,7 @@ describe('correcting an Order means superseding it', () => {
   });
 
   it('refuses a supersession with no explanation the applicant can read', async () => {
+    await approvedAssessment();
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
 
@@ -283,6 +329,7 @@ describe('submitting proof of payment', () => {
 
   it('records the proof and leaves it Pending Verification, never Paid', async () => {
     // A client must never be able to declare itself paid.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const result = await payments.submitProof({
@@ -300,6 +347,7 @@ describe('submitting proof of payment', () => {
     // Acceptance criterion. The case is a submission whose response was lost on
     // a dropped connection; a second record would look, to reconciliation, like
     // the applicant paid twice.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     const key = randomUUID();
 
@@ -320,6 +368,7 @@ describe('submitting proof of payment', () => {
   });
 
   it('refuses the same key used for a different request', async () => {
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     const key = randomUUID();
     await payments.submitProof({
@@ -342,6 +391,7 @@ describe('submitting proof of payment', () => {
     // Decision E-8: partial payment is not accepted, and an applicant who paid
     // PHP 6,819.99 against PHP 6,820.00 has made a mistake worth a
     // conversation, not an automatic rejection.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const result = await payments.submitProof({
@@ -355,6 +405,7 @@ describe('submitting proof of payment', () => {
   });
 
   it('reports an overpayment the same way', async () => {
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
 
     const result = await payments.submitProof({
@@ -375,6 +426,7 @@ describe('verification is an officer act', () => {
   beforeEach(loadSchedule);
 
   const submit = async (): Promise<string> => {
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     const result = await payments.submitProof({
       applicationId: APPLICATION,
@@ -399,6 +451,7 @@ describe('verification is an officer act', () => {
   it('refuses an officer verifying their own submission', async () => {
     // Separation of duty. The database enforces it too; this exists so the
     // caller gets an explanation rather than a constraint violation.
+    await approvedAssessment();
     await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     const submitted = await payments.submitProof({
       applicationId: APPLICATION,
@@ -458,6 +511,7 @@ describe('reconciliation', () => {
        values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
       [application, `BP-2026-${receipt}`, applicantRow.rows[0]?.id, APPLICANT_ACCOUNT],
     );
+    await approvedAssessment(application);
     const order = await assessment.issue({ applicationId: application, officer: assessor });
     if (!order.ok) throw new Error('could not assess');
 
@@ -582,6 +636,7 @@ describe('the Order of Payment number', () => {
                  'Submitted',now(),$4)`,
         [application, `BP-2026-EXTRA-${i}`, APPLICATION, APPLICANT_ACCOUNT],
       );
+      await approvedAssessment(application);
       const issued = await assessment.issue({ applicationId: application, officer: assessor });
       if (issued.ok) numbers.push(issued.number);
     }

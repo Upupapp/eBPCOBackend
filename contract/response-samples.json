@@ -688,12 +688,15 @@
         "path": "/staff/applications/00000000-0000-4000-8000-000000000000/order-of-payment",
         "query": null
       },
-      "status": 201,
-      "contentType": "application/json; charset=utf-8",
+      "status": 422,
+      "contentType": "application/problem+json; charset=utf-8",
       "body": {
-        "orderId": "00000000-0000-4000-8000-000000000000",
-        "number": "OP-2026-000001",
-        "totalCentavos": 682000
+        "type": "/problems/unprocessable-entity",
+        "title": "A precondition is unmet",
+        "status": 422,
+        "detail": "No approved assessment exists for this application. Prepare one, submit it, and have another officer approve it before issuing an Order of Payment.",
+        "instance": "/staff/applications/00000000-0000-4000-8000-000000000000/order-of-payment",
+        "correlationId": "00000000-0000-4000-8000-000000000000"
       }
     },
     "staff.payments.queue": {
@@ -727,11 +730,15 @@
         "path": "/staff/applications/00000000-0000-4000-8000-000000000000/onsite-payment",
         "query": null
       },
-      "status": 201,
-      "contentType": "application/json; charset=utf-8",
+      "status": 422,
+      "contentType": "application/problem+json; charset=utf-8",
       "body": {
-        "paymentId": "00000000-0000-4000-8000-000000000000",
-        "replayed": false
+        "type": "/problems/unprocessable-entity",
+        "title": "A precondition is unmet",
+        "status": 422,
+        "detail": "No Order of Payment has been issued for this application, so there is nothing to pay.",
+        "instance": "/staff/applications/00000000-0000-4000-8000-000000000000/onsite-payment",
+        "correlationId": "00000000-0000-4000-8000-000000000000"
       }
     },
     "staff.payments.verify": {
@@ -878,22 +885,7 @@
               "suspendedSince": null
             },
             "payment": {
-              "status": "Paid",
-              "orderOfPayment": {
-                "number": "OP-2026-000001",
-                "assessedAt": "2026-01-01T00:00:00.000Z",
-                "dueDate": null,
-                "feeScheduleVersion": "2026.1",
-                "fees": {
-                  "filing": 50000,
-                  "processing": 120000,
-                  "architectural": 0,
-                  "structural": 512000,
-                  "electrical": 0,
-                  "others": 0
-                },
-                "totalCentavos": 682000
-              }
+              "status": "Not Yet Available"
             }
           },
           {

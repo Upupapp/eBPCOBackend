@@ -5,6 +5,8 @@ import { SqlClient } from '../../persistence/sql-client';
 import { AssessmentService } from './application/assessment.service';
 import { PaymentService } from './application/payment.service';
 import { StaffPaymentsController } from './transport/staff-payments.controller';
+import { AssessmentWorkflowService } from './application/assessment-workflow.service';
+import { StaffAssessmentsController } from './transport/staff-assessments.controller';
 
 /**
  * Orders of Payment, and proof that money arrived.
@@ -19,6 +21,12 @@ import { StaffPaymentsController } from './transport/staff-payments.controller';
 @Module({
   providers: [
     {
+      provide: AssessmentWorkflowService,
+      inject: [SQL_CLIENT, AssessmentService],
+      useFactory: (db: SqlClient, assessments: AssessmentService) =>
+        new AssessmentWorkflowService(db, () => new Date(), () => assessments.schedules()),
+    },
+    {
       provide: AssessmentService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new AssessmentService(db),
@@ -29,7 +37,7 @@ import { StaffPaymentsController } from './transport/staff-payments.controller';
       useFactory: (db: SqlClient) => new PaymentService(db),
     },
   ],
-  controllers: [StaffPaymentsController],
+  controllers: [StaffAssessmentsController, StaffPaymentsController],
   exports: [AssessmentService, PaymentService],
 })
 export class PaymentsModule {}

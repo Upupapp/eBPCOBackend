@@ -21,6 +21,7 @@
     "GET /staff/applications",
     "GET /staff/applications/:applicationId",
     "GET /staff/applications/metrics",
+    "GET /staff/assessments/:assessmentId",
     "GET /staff/businesses",
     "GET /staff/businesses/:businessId",
     "GET /staff/payments",
@@ -47,6 +48,7 @@
     "POST /notifications/:notificationId/read",
     "POST /notifications/:notificationId/resolve",
     "POST /staff/applications",
+    "POST /staff/applications/:applicationId/assessments",
     "POST /staff/applications/:applicationId/evaluations",
     "POST /staff/applications/:applicationId/onsite-payment",
     "POST /staff/applications/:applicationId/order-of-payment",
@@ -55,12 +57,15 @@
     "POST /staff/applications/:applicationId/release-preparation",
     "POST /staff/applications/:applicationId/transitions",
     "POST /staff/applications/archive",
+    "POST /staff/assessments/:assessmentId/approve",
+    "POST /staff/assessments/:assessmentId/submit",
     "POST /staff/payments/:paymentId/reject",
     "POST /staff/payments/:paymentId/verify",
     "POST /staff/users",
     "POST /staff/users/:userId/disable",
     "POST /staff/users/:userId/enable",
     "POST /staff/users/:userId/roles",
-    "PUT /notification-preferences"
+    "PUT /notification-preferences",
+    "PUT /staff/assessments/:assessmentId/lines/:line"
   ]
 }

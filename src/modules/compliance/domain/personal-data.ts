@@ -250,9 +250,41 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     completed_at: none('statutory'),
   },
 
+  /**
+   * The draft an officer builds. Money and authority, not information about a
+   * person -- the applicant is reached only through `application_id`. The five
+   * actor columns name OFFICERS, so they are linkable for the same reason every
+   * other actor column is: accountability for an act.
+   */
+  assessments: {
+    id: structural,
+    application_id: structural,
+    status: none('statutory'),
+    fee_schedule_version: none('statutory'),
+    due_date: none('statutory'),
+    created_by: linkable('audit', ACCOUNTABILITY),
+    created_at: none('statutory'),
+    submitted_by: linkable('audit', ACCOUNTABILITY),
+    submitted_at: none('statutory'),
+    approved_by: linkable('audit', ACCOUNTABILITY),
+    approved_at: none('statutory'),
+    order_of_payment_id: structural,
+    updated_at: none('statutory'),
+  },
+
+  assessment_lines: {
+    assessment_id: structural,
+    line: none('statutory'),
+    computed_centavos: none('statutory'),
+    amount_centavos: none('statutory'),
+    basis: none('statutory'),
+    included: none('statutory'),
+  },
+
   orders_of_payment: {
     id: structural,
     application_id: structural,
+    assessment_id: structural,
     number: none('statutory'),
     filing_centavos: none('statutory'),
     processing_centavos: none('statutory'),
