@@ -9,6 +9,7 @@ import { PRECONDITION_MESSAGE, PROBLEM_TYPE, Refusal } from '../domain/lifecycle
 import { Caller } from '../domain/application';
 import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
+import { SubmissionService } from '../application/submission.service';
 
 /**
  * The officer's surface.
@@ -79,11 +80,44 @@ function callerOf(request: AuthenticatedRequest): Caller {
   return { accountId: claims.sub, kind: claims.kind, scopes: claims.scopes };
 }
 
+const onBehalfShape = z.object({
+  applicant: z.object({
+    firstName: z.string().min(1).max(80),
+    lastName: z.string().min(1).max(80),
+    // Required, and the schema is why: `applicants.account_id` is NOT NULL and
+    // an account needs a unique address. A walk-in with no email cannot be
+    // filed for until that constraint changes — which is a schema decision.
+    email: z.string().email().max(320),
+    mobileNumber: z.string().min(7).max(20).optional(),
+  }).strict(),
+  // One or the other, never both: `business` registers a new one, `businessId`
+  // names an existing one already owned by this applicant.
+  business: z.object({
+    name: z.string().min(1).max(200),
+    category: z.enum(['Retail', 'Food Service', 'Services', 'Manufacturing', 'Wholesale', 'Other']),
+    street: z.string().min(1).max(200),
+    barangay: z.string().min(1).max(120),
+    city: z.string().min(1).max(120),
+    province: z.string().min(1).max(120),
+    registrationNumber: z.string().min(1).max(60),
+    dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+  }).strict().optional(),
+  businessId: z.string().uuid().optional(),
+  permitType: z.string().min(1).max(80),
+  applicationAction: z.enum(['New', 'Renewal', 'Amendment']),
+  location: z.string().max(400).optional(),
+  form: z.record(z.string(), z.unknown()).optional(),
+}).strict().refine((value) => !(value.business !== undefined && value.businessId !== undefined), {
+  message: 'give either business or businessId, not both',
+  path: ['business'],
+});
+
 @Controller('staff/applications')
 export class StaffApplicationsController {
   constructor(
     private readonly queue: StaffQueueService,
     private readonly lifecycle: LifecycleService,
+    private readonly submissions: SubmissionService,
   ) {}
 
   @Get()
@@ -105,6 +139,72 @@ export class StaffApplicationsController {
     });
 
     return { items: page.rows, nextCursor: page.nextCursor };
+  }
+
+  /**
+   * Filing for a walk-in, at the counter.
+   *
+   * `applications:write` and `kind === 'staff'` — the second comes from the
+   * guard, which refuses every `/staff` path to a non-staff token. Held by the
+   * records officer, whose job is maintenance of the record, which is what this
+   * is: the LGU entering a filing it received on paper.
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('applications:write')
+  async fileOnBehalf(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<Record<string, unknown>> {
+    const input = parse(onBehalfShape, body);
+    // Required, as on the self-service path: an officer at a counter whose
+    // response is lost retries, and a second permit application for the same
+    // walk-in is a second reference number the LGU has to explain.
+    const key = parse(z.string().uuid('must be a UUID'), idempotencyKey ?? null);
+
+    const result = await this.submissions.fileOnBehalf({
+      caller: callerOf(request),
+      applicant: {
+        firstName: input.applicant.firstName,
+        lastName: input.applicant.lastName,
+        email: input.applicant.email,
+        mobileNumber: input.applicant.mobileNumber ?? null,
+      },
+      business: input.business ?? null,
+      businessId: input.businessId ?? null,
+      submission: {
+        permitType: input.permitType,
+        applicationAction: input.applicationAction,
+        location: input.location ?? null,
+        form: input.form ?? {},
+      },
+      idempotencyKey: key,
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'key-reused') {
+        throw new ProblemException(
+          ProblemType.conflict, 'That key was used for a different request',
+          HttpStatus.CONFLICT, result.detail,
+        );
+      }
+      throw new ProblemException(
+        ProblemType.unprocessable, 'The filing could not be accepted',
+        HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+      );
+    }
+
+    return {
+      applicationId: result.applicationId,
+      referenceNumber: result.referenceNumber,
+      applicantId: result.applicantId,
+      // Said plainly, because the officer is standing in front of the person it
+      // concerns: nothing has been emailed, and the applicant cannot sign in
+      // until they set a password through account recovery.
+      applicantNextStep:
+        'The applicant sets a password through account recovery before they can track this online.',
+    };
   }
 
   /**

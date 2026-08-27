@@ -3,6 +3,9 @@ import { lookup, remember, requestDigest } from '../../../persistence/idempotenc
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
 import { FormViolation, schemaFor } from '../domain/application-form';
+import { randomUUID } from 'node:crypto';
+import { normaliseEmail } from '../../identity/application/account.repository';
+import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
 
 /**
  * Filing an application, exactly once.
@@ -46,6 +49,23 @@ export interface Submission {
   /** The applicant's answers. Structurally bounded by the transport; semantically checked here if a schema exists. */
   readonly form: Record<string, unknown>;
 }
+
+export interface NewBusiness {
+  readonly name: string;
+  readonly category: string;
+  readonly street: string;
+  readonly barangay: string;
+  readonly city: string;
+  readonly province: string;
+  readonly registrationNumber: string;
+  /** 'YYYY-MM-DD'. */
+  readonly dateRegistered: string;
+}
+
+export type OnBehalfResult =
+  | { readonly ok: true; readonly applicationId: string; readonly referenceNumber: string;
+      readonly applicantId: string; readonly replayed: boolean }
+  | { readonly ok: false; readonly reason: string; readonly detail: string };
 
 export class SubmissionService {
   private readonly audit: AuditService;
@@ -163,36 +183,12 @@ export class SubmissionService {
       }
 
       const now = this.clock();
-
-      // The charter entry in force ON THE FILING DATE, not the latest one. An
-      // application is judged against the pledge that was published when it was
-      // filed; re-reading the current entry later would move a deadline the
-      // applicant was given.
-      const charter = await tx.query<{ id: string; classification: string }>(
-        `select id, classification from charter_entries
-          where permit_type = $1 and effective_from <= $2::date
-            and (effective_to is null or effective_to > $2::date)
-          order by effective_from desc limit 1`,
-        [submission.permitType, now],
-      );
-      const charterEntry = charter.rows[0] ?? null;
-
-      const referenceNumber = await this.nextReference(tx, now);
-      const inserted = await tx.query<{ id: string }>(
-        `insert into applications
-           (reference_number, applicant_id, business_id, permit_type, application_action,
-            location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
-            form, form_validated_against)
-         values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12)
-         returning id`,
-        [
-          referenceNumber, applicantId, submission.businessId, submission.permitType,
-          submission.applicationAction, submission.location,
-          charterEntry?.classification ?? null, charterEntry?.id ?? null, now, caller.accountId,
-          JSON.stringify(submission.form), schema?.version ?? null,
-        ],
-      );
-      const applicationId = inserted.rows[0]?.id ?? '';
+      const { applicationId, referenceNumber } = await this.fileApplication(tx, {
+        applicantId, submission, now,
+        // Self-service: the filer and the applicant are the same account.
+        filedBy: caller.accountId,
+        formValidatedAgainst: schema?.version ?? null,
+      });
 
       if (submission.documentIds.length > 0) {
         await tx.query(
@@ -228,6 +224,224 @@ export class SubmissionService {
    * LGU cannot tell apart, and counting existing rows collides the moment one
    * did not come from the counter.
    */
+  /**
+   * Filing for a walk-in, at the counter.
+   *
+   * ── Why an account always exists ────────────────────────────────────────
+   *
+   * Not a preference — a constraint. `applicants.account_id` is NOT NULL and
+   * UNIQUE, so an applicant record cannot exist without an account, and an
+   * account cannot exist without a unique email address. So the open question
+   * in the Master Command ("does an account exist for that applicant") is
+   * already answered by the schema: it must. What is left is HOW the person
+   * later reaches it, and that is the same answer as for a staff account —
+   * the account is created with a verifier no password produces, and the
+   * applicant claims it through account recovery. An officer who could set that
+   * password could file, pay and collect as the applicant.
+   *
+   * The cost is real and worth stating: an applicant with NO email address
+   * cannot be filed for. Synthesising one would create an account nobody can
+   * ever claim and a contact address every notice is sent to and nobody reads —
+   * a filing the LGU believes it has told someone about. Refusing is the honest
+   * failure; making `account_id` nullable is a schema decision, not one to take
+   * inside a request handler.
+   */
+  async fileOnBehalf(options: {
+    caller: Caller;
+    applicant: { firstName: string; lastName: string; email: string; mobileNumber: string | null };
+    business: NewBusiness | null;
+    businessId: string | null;
+    submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'form'>;
+    idempotencyKey: string;
+  }): Promise<OnBehalfResult> {
+    const { caller, applicant, submission, idempotencyKey } = options;
+    const digest = requestDigest({
+      ...submission, email: normaliseEmail(applicant.email),
+      businessId: options.businessId, business: options.business,
+    });
+
+    return this.db.transaction(async (tx) => {
+      const replay = await lookup<{ applicationId: string; referenceNumber: string; applicantId: string }>(
+        tx, { accountId: caller.accountId, key: idempotencyKey, operation: 'application.on-behalf', digest },
+      );
+      if (replay.kind === 'mismatch') {
+        return {
+          ok: false, reason: 'key-reused',
+          detail: 'This Idempotency-Key was already used for a different filing. Use a new key.',
+        };
+      }
+      if (replay.kind === 'replay') return { ok: true, ...replay.previous.body, replayed: true };
+
+      const normalised = normaliseEmail(applicant.email);
+      const existing = await tx.query<{ id: string; kind: string }>(
+        'select id, kind from accounts where email_normalised = $1', [normalised],
+      );
+      const account = existing.rows[0] ?? null;
+
+      if (account !== null && account.kind === 'staff') {
+        // An officer's own account. Attaching an applicant record to it would
+        // create an identity that can hold a permit but cannot use the mobile
+        // app -- a staff token carries no `applications:write` -- so the person
+        // would be stranded between the two populations.
+        return {
+          ok: false, reason: 'staff-address',
+          detail: 'That address belongs to an LGU staff account. File under the applicant\'s own address.',
+        };
+      }
+
+      let accountId = account?.id ?? null;
+      if (accountId === null) {
+        accountId = randomUUID();
+        await tx.query(
+          `insert into accounts (id, kind, email, email_normalised, password_hash, mobile_number, created_at, created_by)
+           values ($1,'applicant',$2,$3,$4,$5,$6,$7)`,
+          [accountId, applicant.email.trim(), normalised, unusablePasswordHash(),
+           applicant.mobileNumber, this.clock(), caller.accountId],
+        );
+      }
+
+      // A RETURNING walk-in keeps their existing applicant record. Creating a
+      // second one would split their history across two identities, and the
+      // unique constraint on `account_id` refuses it anyway -- better to reuse
+      // deliberately than to meet the constraint as a 500.
+      const found = await tx.query<{ id: string }>(
+        'select id from applicants where account_id = $1', [accountId],
+      );
+      let applicantId = found.rows[0]?.id ?? null;
+      if (applicantId === null) {
+        applicantId = randomUUID();
+        await tx.query(
+          'insert into applicants (id, account_id, first_name, last_name) values ($1,$2,$3,$4)',
+          [applicantId, accountId, applicant.firstName.trim(), applicant.lastName.trim()],
+        );
+      }
+
+      let businessId = options.businessId;
+      if (options.business !== null) {
+        businessId = randomUUID();
+        await tx.query(
+          `insert into businesses (id, owner_applicant_id, name, category, street, barangay, city,
+                                   province, registration_number, date_registered)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
+          [businessId, applicantId, options.business.name, options.business.category,
+           options.business.street, options.business.barangay, options.business.city,
+           options.business.province, options.business.registrationNumber,
+           options.business.dateRegistered],
+        );
+      } else if (businessId !== null) {
+        // Theirs, or nothing -- the same rule the self-service path enforces.
+        // Filing against another applicant's business would put their
+        // registered name and address on this application.
+        const owned = await tx.query(
+          'select 1 from businesses where id = $1 and owner_applicant_id = $2',
+          [businessId, applicantId],
+        );
+        if (owned.rows.length === 0) {
+          return {
+            ok: false, reason: 'business-not-theirs',
+            detail: 'That business is not registered to this applicant.',
+          };
+        }
+      }
+
+      const permitType = await tx.query(
+        'select permit_type from permit_types where permit_type = $1', [submission.permitType],
+      );
+      if (permitType.rows.length === 0) {
+        return {
+          ok: false, reason: 'unknown-permit-type',
+          detail: `The LGU does not issue a "${submission.permitType}" permit.`,
+        };
+      }
+
+      const now = this.clock();
+      const filed = await this.fileApplication(tx, {
+        applicantId, now,
+        submission: { ...submission, businessId },
+        // THE DISTINCTION. `created_by` is the officer who typed it in;
+        // `applicant_id` is whose permit it is. Collapsing them would credit
+        // the applicant with an act they did not perform, and lose the only
+        // record that the LGU filed on their behalf.
+        filedBy: caller.accountId,
+        formValidatedAgainst: schemaFor(submission.permitType)?.version ?? null,
+      });
+
+      await this.audit.append({
+        action: 'application.filed-on-behalf',
+        subjectType: 'application',
+        subjectId: filed.applicationId,
+        outcome: 'allowed',
+        actorAccountId: caller.accountId,
+        actorRole: 'staff',
+        afterState: {
+          referenceNumber: filed.referenceNumber,
+          permitType: submission.permitType,
+          applicantId,
+          accountCreated: account === null,
+        },
+      }, tx);
+
+      const body = { ...filed, applicantId };
+      await remember(tx, {
+        accountId: caller.accountId, key: idempotencyKey,
+        operation: 'application.on-behalf', digest, status: 201, body,
+      });
+      return { ok: true, ...body, replayed: false };
+    });
+  }
+
+  /**
+   * The row itself, written the same way however the filing was initiated.
+   *
+   * Extracted because assisted filing needs it and a second copy would mean two
+   * writers to the reference-number sequence and two readings of the Citizen's
+   * Charter — one of which would eventually stop matching the other. The only
+   * thing that differs between the two callers is `filedBy`, which is exactly
+   * the distinction that has to be recorded.
+   */
+  private async fileApplication(
+    tx: SqlClient,
+    options: {
+      applicantId: string;
+      submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'businessId' | 'form'>;
+      now: Date;
+      filedBy: string;
+      formValidatedAgainst: string | null;
+    },
+  ): Promise<{ applicationId: string; referenceNumber: string }> {
+    const { applicantId, submission, now, filedBy } = options;
+
+    // The charter entry in force ON THE FILING DATE, not the latest one. An
+    // application is judged against the pledge that was published when it was
+    // filed; re-reading the current entry later would move a deadline the
+    // applicant was given.
+    const charter = await tx.query<{ id: string; classification: string }>(
+      `select id, classification from charter_entries
+        where permit_type = $1 and effective_from <= $2::date
+          and (effective_to is null or effective_to > $2::date)
+        order by effective_from desc limit 1`,
+      [submission.permitType, now],
+    );
+    const charterEntry = charter.rows[0] ?? null;
+
+    const referenceNumber = await this.nextReference(tx, now);
+    const inserted = await tx.query<{ id: string }>(
+      `insert into applications
+         (reference_number, applicant_id, business_id, permit_type, application_action,
+          location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
+          form, form_validated_against)
+       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12)
+       returning id`,
+      [
+        referenceNumber, applicantId, submission.businessId, submission.permitType,
+        submission.applicationAction, submission.location,
+        charterEntry?.classification ?? null, charterEntry?.id ?? null, now, filedBy,
+        JSON.stringify(submission.form), options.formValidatedAgainst,
+      ],
+    );
+    return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber };
+  }
+
   private async nextReference(tx: SqlClient, now: Date): Promise<string> {
     const year = now.getUTCFullYear();
     const sequence = await tx.query<{ last_issued: number }>(
