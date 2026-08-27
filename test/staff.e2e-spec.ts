@@ -13,6 +13,7 @@ import { TokenService } from '../src/modules/identity/application/token.service'
 import { IdentityService } from '../src/modules/identity/application/identity.service';
 import { Scope, StaffRole, scopesFor } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
+import { visibleStatusesFor } from '../src/modules/applications/application/staff-queue.service';
 
 /**
  * The staff surface over real HTTP.
@@ -263,17 +264,27 @@ describe('the staff surface is closed by default', () => {
     expect((await app.inject({ method: 'GET', url: '/health' })).statusCode).toBe(200);
   });
 
-  it('gives an applicant nothing, even holding the read scope', async () => {
-    // An applicant's token legitimately carries `applications:read` — it is
-    // how they read their own. The guard therefore lets them through, and the
-    // row filter is what must stop them. This is the test that proves the
-    // second gate exists rather than being covered by the first.
+  it('refuses an applicant at the guard, even holding the read scope', async () => {
+    // An applicant's token legitimately carries `applications:read` — it is how
+    // they read their own — so scope never separated the two populations. It
+    // used to pass the guard and be stopped by the row filter alone; /staff is
+    // now staff-only at the guard, because the row filter is a rule each
+    // service has to remember and `/staff/businesses` was written without it.
     await file('BP-1', 'Submitted');
 
     const response = await get('/staff/applications', await tokenFor('applicant', ['applications:read'] as const, APPLICANT_ACCOUNT));
 
-    expect(response.statusCode).toBe(200);
-    expect(response.json().items).toHaveLength(0);
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('still filters the rows, so the second gate has not quietly become the only one', () => {
+    // The original intent of the test above, preserved. Defence in depth means
+    // BOTH gates hold, and a guard added today is exactly the thing that makes
+    // someone delete the filter tomorrow as redundant. Asserted directly,
+    // because the guard now stops the request before the filter is reached.
+    expect(visibleStatusesFor({
+      accountId: APPLICANT_ACCOUNT, kind: 'applicant', scopes: ['applications:read'],
+    })).toEqual([]);
   });
 });
 

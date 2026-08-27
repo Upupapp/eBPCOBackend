@@ -21,6 +21,8 @@
     "GET /staff/applications",
     "GET /staff/applications/:applicationId",
     "GET /staff/applications/metrics",
+    "GET /staff/businesses",
+    "GET /staff/businesses/:businessId",
     "GET /staff/payments",
     "GET /staff/users",
     "GET /staff/users/:userId",

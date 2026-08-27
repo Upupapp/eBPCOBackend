@@ -105,6 +105,35 @@ export class AuthenticationGuard implements CanActivate {
 
     request.caller = claims;
 
+    // ── /staff/* is staff-only, structurally ──────────────────────────────
+    //
+    // Enforced on the PATH rather than per controller, because the failure this
+    // prevents is somebody forgetting. Scopes alone cannot carry it: an
+    // applicant token holds `applications:read`, `documents:read` and
+    // `payments:read` — the same scopes most staff read routes require — so a
+    // staff route gated only by scope is reachable by every applicant.
+    //
+    // The existing staff routes survived that only because each service happens
+    // to re-check: `visibleStatusesFor` returns nothing for a non-staff caller.
+    // A new staff route written without that check leaks on its first request,
+    // which is precisely what happened when `/staff/businesses` was added — it
+    // answered an applicant with every business in the LGU, owners' addresses
+    // and mobile numbers included.
+    //
+    // A per-controller decorator would have the same hole one controller later.
+    // The prefix is already the convention the route table and the contract are
+    // written against, so this makes the convention load-bearing instead of
+    // documentary.
+    const path = request.url?.split('?')[0] ?? '';
+    if (path.startsWith('/staff/') && claims.kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden,
+        'Not permitted',
+        HttpStatus.FORBIDDEN,
+        'This route serves LGU staff.',
+      );
+    }
+
     const required = this.reflector.getAllAndOverride<string[]>(REQUIRED_SCOPES, [
       context.getHandler(),
       context.getClass(),

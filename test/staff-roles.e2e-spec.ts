@@ -11,7 +11,7 @@ import { loadConfig } from '../src/config/app-config';
 import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
 import {
-  PORTAL_ROLE_LABELS, ROLE_SCOPES, StaffRole, scopesFor,
+  APPLICANT_SCOPES, PORTAL_ROLE_LABELS, ROLE_SCOPES, StaffRole, scopesFor,
 } from '../src/modules/identity/domain/account';
 
 /**
@@ -248,6 +248,32 @@ describe('the role table and the route table agree', () => {
     });
 
     expect(response.statusCode).toBe(200);
+  });
+
+  it('lets NO applicant token reach any /staff route', async () => {
+    // A whole class of bug, closed once. An applicant holds `applications:read`,
+    // `documents:read` and `payments:read` — the same scopes most staff read
+    // routes require — so scope alone never separated the two populations. The
+    // existing staff routes survived only because their services re-checked;
+    // `/staff/businesses` did not, and answered an applicant with every business
+    // in the LGU, owners' addresses and mobile numbers included.
+    const account = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant','applicant-probe@example.ph','applicant-probe@example.ph','scrypt$1$1$1$a$b')`,
+      [account],
+    );
+    const issued = await tokens.issueAccessToken({
+      sub: account, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    });
+
+    const reached: string[] = [];
+    for (const route of routes.filter((r) => r.includes(' /staff/'))) {
+      const status = await probe(route, issued.token);
+      if (status !== 403) reached.push(`${route} -> ${status}`);
+    }
+
+    expect(reached).toEqual([]);
   });
 
   it('refuses the super-admin the four acting scopes, deliberately', () => {

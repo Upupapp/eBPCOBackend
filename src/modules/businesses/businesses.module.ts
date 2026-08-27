@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 
+import { StaffBusinessesController } from './staff-businesses.controller';
 import { BusinessesController } from './businesses.controller';
 
 /**
@@ -9,5 +10,5 @@ import { BusinessesController } from './businesses.controller';
  * ownership, and a service whose only method wraps an INSERT adds a layer
  * without adding a decision.
  */
-@Module({ controllers: [BusinessesController] })
+@Module({ controllers: [BusinessesController, StaffBusinessesController] })
 export class BusinessesModule {}
