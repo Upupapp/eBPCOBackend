@@ -7,6 +7,8 @@ import { PaymentService } from './application/payment.service';
 import { StaffPaymentsController } from './transport/staff-payments.controller';
 import { AssessmentWorkflowService } from './application/assessment-workflow.service';
 import { StaffAssessmentsController } from './transport/staff-assessments.controller';
+import { FeeConfigService } from './application/fee-config.service';
+import { StaffFeeConfigController } from './transport/staff-fee-config.controller';
 
 /**
  * Orders of Payment, and proof that money arrived.
@@ -20,6 +22,11 @@ import { StaffAssessmentsController } from './transport/staff-assessments.contro
  */
 @Module({
   providers: [
+    {
+      provide: FeeConfigService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new FeeConfigService(db),
+    },
     {
       provide: AssessmentWorkflowService,
       inject: [SQL_CLIENT, AssessmentService],
@@ -37,7 +44,7 @@ import { StaffAssessmentsController } from './transport/staff-assessments.contro
       useFactory: (db: SqlClient) => new PaymentService(db),
     },
   ],
-  controllers: [StaffAssessmentsController, StaffPaymentsController],
+  controllers: [StaffAssessmentsController, StaffFeeConfigController, StaffPaymentsController],
   exports: [AssessmentService, PaymentService],
 })
 export class PaymentsModule {}

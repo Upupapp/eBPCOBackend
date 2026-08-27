@@ -29,7 +29,7 @@ export interface PaymentProof {
 
 export type SubmitResult =
   | { readonly ok: true; readonly paymentId: string; readonly replayed: boolean; readonly settlement: SettlementCheck }
-  | { readonly ok: false; readonly reason: 'no-order-of-payment' | 'already-verified' | 'conflict'; readonly detail: string };
+  | { readonly ok: false; readonly reason: 'no-order-of-payment' | 'already-verified' | 'conflict' | 'method-closed'; readonly detail: string };
 
 export type RecordOnsiteResult =
   | { readonly ok: true; readonly paymentId: string; readonly replayed: boolean }
@@ -71,6 +71,19 @@ export class PaymentService {
   }): Promise<SubmitResult> {
     const { applicationId, proof, caller, idempotencyKey } = options;
     const digest = requestDigest({ applicationId, ...proof });
+
+    // Checked here rather than only in the UI. An LGU that closes a method has
+    // closed it — a client with a stale form, or one that never asked, must not
+    // be able to lodge a payment through a channel nobody is watching.
+    const open = await this.db.query<{ active: boolean }>(
+      'select active from payment_methods where method = $1', [proof.method],
+    );
+    if (open.rows[0]?.active !== true) {
+      return {
+        ok: false, reason: 'method-closed',
+        detail: `The LGU is not accepting ${proof.method} payments at the moment.`,
+      };
+    }
 
     const replay = await this.db.query<{ response_body: { paymentId: string }; request_digest: string }>(
       `select response_body, request_digest from idempotency_keys

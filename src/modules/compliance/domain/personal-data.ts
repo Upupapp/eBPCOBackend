@@ -302,6 +302,19 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     superseded_at: none('statutory'),
   },
 
+  /**
+   * Which methods the LGU is offering. Configuration, not information about a
+   * person -- `updated_by` names the officer who changed it.
+   */
+  payment_methods: {
+    method: none('statutory'),
+    label: none('statutory'),
+    active: none('statutory'),
+    instructions: none('statutory'),
+    updated_at: none('statutory'),
+    updated_by: linkable('audit', ACCOUNTABILITY),
+  },
+
   payments: {
     id: structural,
     order_of_payment_id: structural,
