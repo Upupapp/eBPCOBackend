@@ -24,6 +24,8 @@
     "GET /staff/assessments/:assessmentId",
     "GET /staff/businesses",
     "GET /staff/businesses/:businessId",
+    "GET /staff/config/fee-schedules",
+    "GET /staff/config/payment-methods",
     "GET /staff/payments",
     "GET /staff/users",
     "GET /staff/users/:userId",
@@ -59,6 +61,7 @@
     "POST /staff/applications/archive",
     "POST /staff/assessments/:assessmentId/approve",
     "POST /staff/assessments/:assessmentId/submit",
+    "POST /staff/config/fee-schedules",
     "POST /staff/orders-of-payment/:orderId/supersede",
     "POST /staff/payments/:paymentId/receipt",
     "POST /staff/payments/:paymentId/refund",
@@ -71,6 +74,7 @@
     "POST /staff/users/:userId/enable",
     "POST /staff/users/:userId/roles",
     "PUT /notification-preferences",
-    "PUT /staff/assessments/:assessmentId/lines/:line"
+    "PUT /staff/assessments/:assessmentId/lines/:line",
+    "PUT /staff/config/payment-methods/:method"
   ]
 }

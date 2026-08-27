@@ -274,13 +274,6 @@ export class FeeConfigService {
     });
   }
 
-  /** Whether a method may be used to settle a fee right now. */
-  async isOpen(method: string): Promise<boolean> {
-    const result = await this.db.query<{ active: boolean }>(
-      'select active from payment_methods where method = $1', [method],
-    );
-    return result.rows[0]?.active ?? false;
-  }
 }
 
 export { FEE_LINES };
