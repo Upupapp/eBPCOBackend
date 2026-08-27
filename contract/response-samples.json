@@ -191,10 +191,10 @@
       "body": {
         "total": 5,
         "byStatus": {
-          "Submitted": 1,
           "Approved": 1,
-          "Under Evaluation": 2,
-          "Ready for Release": 1
+          "Ready for Release": 1,
+          "Submitted": 1,
+          "Under Evaluation": 2
         },
         "awaitingAction": 5,
         "overduePledge": 0,

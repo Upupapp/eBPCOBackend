@@ -216,7 +216,10 @@ export class StaffQueueService {
     const visible = visibleStatusesFor(caller);
     if (Array.isArray(visible) && visible.length === 0) return { rows: [], nextCursor: null };
 
-    const where: string[] = ["a.lifecycle_status <> 'Draft'"];
+    // Archived applications are out of the working queue by default -- that is
+    // what archiving IS. Without this the act is cosmetic and an officer who
+    // tidied their queue would watch it refill on the next refresh.
+    const where: string[] = ["a.lifecycle_status <> 'Draft'", 'a.archived_at is null'];
     const values: unknown[] = [];
     const bind = (value: unknown): string => {
       values.push(value);
@@ -288,6 +291,10 @@ export class StaffQueueService {
     const clause = visible === 'all' ? '' : ' and a.lifecycle_status = any($2)';
     if (visible !== 'all') values.push(visible);
 
+    // Deliberately NOT filtered by `archived_at`. Archiving takes an
+    // application out of the working QUEUE; it does not take it away from an
+    // officer who follows a link to it, and a record the LGU holds must stay
+    // readable by the people accountable for it. The asymmetry is the point.
     const head = await this.db.query<Record<string, never>>(
       `${QUEUE_SQL} where a.id = $1 and a.lifecycle_status <> 'Draft'${clause}`,
       values,
@@ -401,7 +408,7 @@ export class StaffQueueService {
     const result = await this.db.query<{ lifecycle_status: string; n: string }>(
       `select a.lifecycle_status, count(*) as n
          from applications a
-        where a.lifecycle_status <> 'Draft'${clause}
+        where a.lifecycle_status <> 'Draft' and a.archived_at is null${clause}
         group by a.lifecycle_status`,
       values,
     );

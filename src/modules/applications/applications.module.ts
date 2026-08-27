@@ -11,6 +11,7 @@ import { LifecycleService } from './application/lifecycle.service';
 import { ApplicantQueryService } from './application/applicant-query.service';
 import { InstructionResponseService } from './application/instruction-response.service';
 import { SubmissionService } from './application/submission.service';
+import { RecordsService } from './application/records.service';
 import { StaffQueueService } from './application/staff-queue.service';
 import { StaffActionsController } from './transport/staff-actions.controller';
 import { ApplicantApplicationsController } from './transport/applicant-applications.controller';
@@ -48,6 +49,11 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
       provide: InstructionResponseService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new InstructionResponseService(db),
+    },
+    {
+      provide: RecordsService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new RecordsService(db),
     },
     {
       provide: SubmissionService,

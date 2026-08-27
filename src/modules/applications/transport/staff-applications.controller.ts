@@ -1,4 +1,6 @@
-import { Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req } from '@nestjs/common';
+import {
+  Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req,
+} from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -10,6 +12,7 @@ import { Caller } from '../domain/application';
 import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { SubmissionService } from '../application/submission.service';
+import { EditableFields, RecordsService } from '../application/records.service';
 
 /**
  * The officer's surface.
@@ -112,12 +115,29 @@ const onBehalfShape = z.object({
   path: ['business'],
 });
 
+const patchShape = z.object({
+  location: z.string().max(400).nullable().optional(),
+  permitType: z.string().min(1).max(80).optional(),
+  applicationAction: z.enum(['New', 'Renewal', 'Amendment']).optional(),
+  businessId: z.string().uuid().nullable().optional(),
+  form: z.record(z.string(), z.unknown()).optional(),
+}).strict();
+
+const archiveShape = z.object({
+  applicationIds: z.array(z.string().uuid()).min(1).max(200),
+  // Required, not optional. Remarks are how the next officer learns why a
+  // record was put away, and an archive nobody can explain is indistinguishable
+  // from one made by mistake.
+  remarks: z.string().min(3, 'say why these are being archived').max(2000),
+}).strict();
+
 @Controller('staff/applications')
 export class StaffApplicationsController {
   constructor(
     private readonly queue: StaffQueueService,
     private readonly lifecycle: LifecycleService,
     private readonly submissions: SubmissionService,
+    private readonly records: RecordsService,
   ) {}
 
   @Get()
@@ -205,6 +225,71 @@ export class StaffApplicationsController {
       applicantNextStep:
         'The applicant sets a password through account recovery before they can track this online.',
     };
+  }
+
+  /**
+   * Archiving, which is NOT cancelling.
+   *
+   * Declared before `:applicationId` for the same reason `metrics` is: Nest
+   * matches in declaration order and "archive" is a valid-looking id.
+   */
+  @Post('archive')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async archive(
+    @Req() request: AuthenticatedRequest, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const input = parse(archiveShape, body);
+    const result = await this.records.archive({
+      applicationIds: input.applicationIds, remarks: input.remarks, caller: callerOf(request),
+    });
+    if (!result.ok) {
+      throw new ProblemException(
+        result.reason === 'not-found' ? ProblemType.notFound : ProblemType.unprocessable,
+        result.reason === 'not-found' ? 'No such resource' : 'The archive could not be completed',
+        result.reason === 'not-found' ? HttpStatus.NOT_FOUND : HttpStatus.UNPROCESSABLE_ENTITY,
+        result.detail,
+      );
+    }
+    return { archived: result.archived };
+  }
+
+  /**
+   * Correcting a filed application.
+   *
+   * A named list of fields, never `Partial<the whole row>`: the portal's own
+   * store offers the latter, which would let a client set `lifecycleStatus`
+   * directly and route around the transition table.
+   */
+  @Patch(':applicationId')
+  @RequireScopes('applications:write')
+  async edit(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const parsed = parse(patchShape, body);
+    // Spread only the keys that are present. Under exactOptionalPropertyTypes an
+    // explicit `undefined` is not the same as an absent key, and passing one
+    // through would make "field omitted" indistinguishable from "field cleared".
+    const patch: EditableFields = {
+      ...(parsed.location === undefined ? {} : { location: parsed.location }),
+      ...(parsed.permitType === undefined ? {} : { permitType: parsed.permitType }),
+      ...(parsed.applicationAction === undefined ? {} : { applicationAction: parsed.applicationAction }),
+      ...(parsed.businessId === undefined ? {} : { businessId: parsed.businessId }),
+      ...(parsed.form === undefined ? {} : { form: parsed.form }),
+    };
+    const result = await this.records.edit({
+      applicationId, patch, caller: callerOf(request),
+    });
+    if (!result.ok) {
+      if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
+      throw new ProblemException(
+        ProblemType.unprocessable, 'The edit could not be accepted',
+        HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+      );
+    }
+    return { changed: result.changed };
   }
 
   /**

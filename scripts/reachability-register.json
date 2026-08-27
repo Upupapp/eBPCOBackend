@@ -5,8 +5,6 @@
   "src/common/logging/logger.ts::StructuredLogger.trace": "same \u2014 no caller, kept so the level set is not surprising to a reader",
   "src/common/problem/problem.ts::ProblemException.unprocessable": "RFC 9457 helper for 422; every current validation failure is a 400, so nothing constructs it yet",
   "src/common/scheduling/job-runner.ts::JobRunner.status": "reads the job table for an operator; there is no job-status route, so only the spec calls it (UNWIRED FEATURE)",
-  "src/modules/applications/domain/lifecycle.ts::TERMINAL": "the set behind isTerminal, unreached with it",
-  "src/modules/applications/domain/lifecycle.ts::isTerminal": "asks whether a status ends the application; the engine tests the transition table directly instead",
   "src/modules/applications/domain/lifecycle.ts::pledgeApplies": "whether the RA 11032 clock runs in a status; the pledge clock derives this from suspensions instead",
   "src/modules/applications/domain/lifecycle.ts::rolesGranting": "which roles may make a transition, for a UI that would grey out buttons; no endpoint returns it",
   "src/modules/compliance/application/audit.service.ts::AuditService.historyOf": "reads the audit chain for one subject; there is no audit-history route (UNWIRED FEATURE)",

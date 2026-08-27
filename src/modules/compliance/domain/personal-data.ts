@@ -173,6 +173,11 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     updated_at: none('statutory'),
     created_by: linkable('statutory', ACCOUNTABILITY),
     updated_by: linkable('statutory', ACCOUNTABILITY),
+    // Visibility bookkeeping, not information about the applicant. `archived_by`
+    // names an OFFICER, so it is linkable the way every other actor column is.
+    archived_at: none('statutory'),
+    archived_by: linkable('audit', ACCOUNTABILITY),
+    archive_remarks: none('statutory'),
   },
 
   application_transitions: {
