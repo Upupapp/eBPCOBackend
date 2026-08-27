@@ -178,6 +178,10 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     archived_at: none('statutory'),
     archived_by: linkable('audit', ACCOUNTABILITY),
     archive_remarks: none('statutory'),
+    // The checklist this application was judged against, captured at filing.
+    // A list of document labels the LGU asks everyone for -- it says nothing
+    // about the person, only about the permit type.
+    required_documents: none('statutory'),
   },
 
   application_transitions: {
@@ -306,6 +310,21 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
    * Which methods the LGU is offering. Configuration, not information about a
    * person -- `updated_by` names the officer who changed it.
    */
+  /**
+   * The published checklist. LGU reference data about permit types, not about
+   * any person; `updated_by` names the officer who last changed it.
+   */
+  document_requirements: {
+    permit_type: none('statutory'),
+    code: none('statutory'),
+    label: none('statutory'),
+    description: none('statutory'),
+    required: none('statutory'),
+    position: none('statutory'),
+    updated_at: none('statutory'),
+    updated_by: linkable('audit', ACCOUNTABILITY),
+  },
+
   payment_methods: {
     method: none('statutory'),
     label: none('statutory'),

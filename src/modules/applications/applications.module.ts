@@ -17,6 +17,8 @@ import { StaffActionsController } from './transport/staff-actions.controller';
 import { ApplicantApplicationsController } from './transport/applicant-applications.controller';
 import { ApplicantWriteController } from './transport/applicant-write.controller';
 import { StaffApplicationsController } from './transport/staff-applications.controller';
+import { RequirementsService } from './application/requirements.service';
+import { RequirementsController } from './transport/requirements.controller';
 
 export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
 
@@ -51,6 +53,11 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
       useFactory: (db: SqlClient) => new InstructionResponseService(db),
     },
     {
+      provide: RequirementsService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new RequirementsService(db),
+    },
+    {
       provide: RecordsService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new RecordsService(db),
@@ -79,7 +86,7 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
   ],
   controllers: [
     ApplicantApplicationsController, ApplicantWriteController,
-    StaffApplicationsController, StaffActionsController,
+    StaffApplicationsController, StaffActionsController, RequirementsController,
   ],
   exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })

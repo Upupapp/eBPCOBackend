@@ -18,6 +18,7 @@
     "GET /notification-preferences",
     "GET /notifications",
     "GET /ready",
+    "GET /requirements/:permitType",
     "GET /staff/applications",
     "GET /staff/applications/:applicationId",
     "GET /staff/applications/metrics",
@@ -26,6 +27,7 @@
     "GET /staff/businesses/:businessId",
     "GET /staff/config/fee-schedules",
     "GET /staff/config/payment-methods",
+    "GET /staff/config/requirements/:permitType",
     "GET /staff/payments",
     "GET /staff/users",
     "GET /staff/users/:userId",
@@ -75,6 +77,7 @@
     "POST /staff/users/:userId/roles",
     "PUT /notification-preferences",
     "PUT /staff/assessments/:assessmentId/lines/:line",
-    "PUT /staff/config/payment-methods/:method"
+    "PUT /staff/config/payment-methods/:method",
+    "PUT /staff/config/requirements/:permitType"
   ]
 }

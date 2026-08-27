@@ -6,6 +6,7 @@ import { FormViolation, schemaFor } from '../domain/application-form';
 import { randomUUID } from 'node:crypto';
 import { normaliseEmail } from '../../identity/application/account.repository';
 import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
+import { RequirementsService } from './requirements.service';
 
 /**
  * Filing an application, exactly once.
@@ -70,12 +71,16 @@ export type OnBehalfResult =
 export class SubmissionService {
   private readonly audit: AuditService;
 
+  private readonly requirements: RequirementsService;
+
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    requirements?: RequirementsService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    this.requirements = requirements ?? new RequirementsService(db, clock, this.audit);
   }
 
   async submit(options: {
@@ -424,19 +429,27 @@ export class SubmissionService {
     );
     const charterEntry = charter.rows[0] ?? null;
 
+    // WHAT WAS ASKED OF THIS APPLICATION, captured now. The checklist changes;
+    // a filed application must not. Someone who submitted everything required
+    // in March cannot become non-compliant in April because the LGU added a
+    // document, and an officer looking at this later needs the list it was
+    // actually judged against — not whatever the catalogue says today.
+    const requirements = await this.requirements.forPermitType(submission.permitType, tx);
+
     const referenceNumber = await this.nextReference(tx, now);
     const inserted = await tx.query<{ id: string }>(
       `insert into applications
          (reference_number, applicant_id, business_id, permit_type, application_action,
           location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
-          form, form_validated_against)
-       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12)
+          form, form_validated_against, required_documents)
+       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13)
        returning id`,
       [
         referenceNumber, applicantId, submission.businessId, submission.permitType,
         submission.applicationAction, submission.location,
         charterEntry?.classification ?? null, charterEntry?.id ?? null, now, filedBy,
         JSON.stringify(submission.form), options.formValidatedAgainst,
+        JSON.stringify(requirements),
       ],
     );
     return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber };
