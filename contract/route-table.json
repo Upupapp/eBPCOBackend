@@ -28,6 +28,7 @@
     "GET /staff/config/fee-schedules",
     "GET /staff/config/payment-methods",
     "GET /staff/config/requirements/:permitType",
+    "GET /staff/evaluations",
     "GET /staff/payments",
     "GET /staff/users",
     "GET /staff/users/:userId",

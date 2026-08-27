@@ -19,6 +19,7 @@ import { ApplicantWriteController } from './transport/applicant-write.controller
 import { StaffApplicationsController } from './transport/staff-applications.controller';
 import { RequirementsService } from './application/requirements.service';
 import { RequirementsController } from './transport/requirements.controller';
+import { StaffEvaluationsController } from './transport/staff-evaluations.controller';
 
 export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
 
@@ -87,6 +88,7 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
   controllers: [
     ApplicantApplicationsController, ApplicantWriteController,
     StaffApplicationsController, StaffActionsController, RequirementsController,
+    StaffEvaluationsController,
   ],
   exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })

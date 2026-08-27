@@ -395,3 +395,164 @@ describe('archiving, which is not cancelling', () => {
     expect((await archive([done, randomUUID()])).statusCode).toBe(404);
   });
 });
+
+describe("the evaluator's worklist", () => {
+  const evaluate = async (
+    id: string, stage: string, result: string, token: string, remarks?: string,
+  ) => app.inject({
+    method: 'POST', url: `/staff/applications/${id}/evaluations`,
+    headers: { authorization: `Bearer ${token}`, 'idempotency-key': randomUUID() },
+    payload: { stage, result, ...(remarks === undefined ? {} : { remarks }) },
+  });
+
+  const queue = async (query = '', token = ''): Promise<{
+    items: {
+      applicationId: string; nextStage: string | null; lifecycleStatus: string;
+      requiredDocumentCount: number; attachedDocumentCount: number;
+      evaluations: { stage: string }[];
+    }[];
+    nextCursor: string | null;
+  }> => {
+    const evaluator = token === '' ? (await staffToken('evaluator')).token : token;
+    const response = await app.inject({
+      method: 'GET', url: `/staff/evaluations${query}`,
+      headers: { authorization: `Bearer ${evaluator}` },
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json();
+  };
+
+  it('lists applications in evaluation with the stage each is waiting on', async () => {
+    const id = await file('Under Evaluation');
+
+    const page = await queue();
+
+    const row = page.items.find((item) => item.applicationId === id);
+    expect(row).toBeDefined();
+    expect(row?.nextStage).toBe('Initial');
+  });
+
+  it('keeps an evaluated application visible to someone entitled to see it', async () => {
+    // The `or exists(evaluations)` half of the filter: an application that has
+    // moved past the evaluation statuses is still part of the evaluation
+    // record, and an officer who can see it should find it here.
+    const id = await file('Under Evaluation');
+    const evaluator = await staffToken('evaluator');
+    await evaluate(id, 'Initial', 'Passed', evaluator.token);
+    await db.query("update applications set lifecycle_status = 'Assessed' where id = $1", [id]);
+
+    // A super-admin, which is the role that holds BOTH `applications:read` and
+    // a visibility of 'all'. An `administrator` holds only `staff:administer`
+    // and is refused at the scope guard — administering accounts is not reading
+    // applications, which is the separation TAB 00 settled and this confirms.
+    const page = await queue('', (await staffToken('super-admin')).token);
+
+    const row = page.items.find((item) => item.applicationId === id);
+    expect(row?.lifecycleStatus).toBe('Assessed');
+    expect(row?.evaluations.map((e) => e.stage)).toEqual(['Initial']);
+    expect(row?.nextStage).toBe('Zoning');
+  });
+
+  it('HIDES IT FROM THE EVALUATOR WHO PASSED IT, once it moves beyond their reach', async () => {
+    // My own expectation was wrong here before the test was written: I assumed
+    // an evaluator should keep seeing what they cleared. Scope visibility says
+    // otherwise — `staff:evaluate` stops at Revision Required — and the rule
+    // that decides what an officer may READ is not something a convenience
+    // queue gets to override.
+    const id = await file('Under Evaluation');
+    const evaluator = await staffToken('evaluator');
+    await evaluate(id, 'Initial', 'Passed', evaluator.token);
+    await db.query("update applications set lifecycle_status = 'Assessed' where id = $1", [id]);
+
+    const page = await queue('', evaluator.token);
+
+    expect(page.items.map((i) => i.applicationId)).not.toContain(id);
+  });
+
+  it('filters by the stage an application is waiting on', async () => {
+    const waiting = await file('Under Evaluation');
+    const advanced = await file('Under Evaluation');
+    const evaluator = await staffToken('evaluator');
+    await evaluate(advanced, 'Initial', 'Passed', evaluator.token);
+
+    const page = await queue('?stage=Zoning');
+
+    expect(page.items.map((i) => i.applicationId)).toContain(advanced);
+    expect(page.items.map((i) => i.applicationId)).not.toContain(waiting);
+  });
+
+  it('filters by result', async () => {
+    const passed = await file('Under Evaluation');
+    const returned = await file('Under Evaluation');
+    const evaluator = await staffToken('evaluator');
+    await evaluate(passed, 'Initial', 'Passed', evaluator.token);
+    await evaluate(returned, 'Initial', 'Revision Required', evaluator.token,
+      'Sheet S-3 bears no signature.');
+
+    const page = await queue('?result=Revision%20Required');
+
+    expect(page.items.map((i) => i.applicationId)).toEqual([returned]);
+  });
+
+  it('narrows to what this officer has evaluated', async () => {
+    const mine = await file('Under Evaluation');
+    const theirs = await file('Under Evaluation');
+    const me = await staffToken('evaluator');
+    const other = await staffToken('evaluator');
+    await evaluate(mine, 'Initial', 'Passed', me.token);
+    await evaluate(theirs, 'Initial', 'Passed', other.token);
+
+    const page = await queue('?evaluatedByMe=true', me.token);
+
+    expect(page.items.map((i) => i.applicationId)).toEqual([mine]);
+  });
+
+  it('REPORTS BOTH DOCUMENT COUNTS AND NEVER THE DIFFERENCE', async () => {
+    // Nothing links an uploaded document to the requirement it satisfies —
+    // `documents.label` is free text — so a "missing" count would be a guess
+    // that silently mis-reports whether an applicant has complied.
+    const id = await file('Under Evaluation');
+    await db.query(
+      `update applications set required_documents = $1 where id = $2`,
+      [JSON.stringify([
+        { code: 'lot-plan', label: 'Lot Plan', description: '', required: true },
+        { code: 'photos', label: 'Photos', description: '', required: false },
+      ]), id],
+    );
+
+    const row = (await queue()).items.find((item) => item.applicationId === id);
+
+    // Only the REQUIRED ones are counted, and the optional one is not.
+    expect(row?.requiredDocumentCount).toBe(1);
+    expect(row?.attachedDocumentCount).toBe(0);
+    expect(row).not.toHaveProperty('missingDocumentCount');
+  });
+
+  it('excludes an archived application, like every other queue', async () => {
+    const id = await file('Completed');
+    const evaluator = await staffToken('evaluator');
+    await evaluate(id, 'Initial', 'Passed', evaluator.token).catch(() => undefined);
+    await archive([id]);
+
+    expect((await queue()).items.map((i) => i.applicationId)).not.toContain(id);
+  });
+
+  it('shows a cashier nothing, because scope decides what an officer may read', async () => {
+    const underEvaluation = await file('Under Evaluation');
+    const cashier = await staffToken('cashier');
+
+    const response = await app.inject({
+      method: 'GET', url: '/staff/evaluations',
+      headers: { authorization: `Bearer ${cashier.token}` },
+    });
+
+    // A cashier's visibility starts at Assessed, so an application still under
+    // evaluation is not theirs to read. Asserted on THIS application rather
+    // than on an empty page: this suite shares one database across its tests,
+    // so a global emptiness check would be measuring what earlier tests left
+    // behind rather than the rule.
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ items: { applicationId: string }[] }>().items.map((i) => i.applicationId))
+      .not.toContain(underEvaluation);
+  });
+});

@@ -5,6 +5,7 @@ import { CalendarRepository } from '../../compliance/application/calendar.reposi
 import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } from '../../compliance/domain/pledge-clock';
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
+import { visibleStatusesFor } from '../domain/visibility';
 
 /**
  * What an officer sees, and what an officer is allowed to count.
@@ -97,44 +98,6 @@ export interface QueueMetrics {
   readonly pledgeIndeterminate: number;
 }
 
-/**
- * Least privilege, expressed as a row filter rather than a UI decision.
- *
- * A cashier has no reason to read an application that has not reached
- * assessment, and a releasing officer has no reason to read one that has not
- * been approved. Hiding those rows in the client would still send them; this
- * refuses to select them. Roles that legitimately see the whole pipeline --
- * records, building official, administrator -- are listed explicitly, so
- * granting that breadth to a new role is a visible change here rather than an
- * accident of an omitted case.
- */
-const SCOPE_VISIBILITY: ReadonlyArray<{ scope: string; statuses: readonly LifecycleStatus[] | 'all' }> = [
-  { scope: 'staff:administer', statuses: 'all' },
-  { scope: 'applications:write', statuses: 'all' },
-  { scope: 'staff:approve', statuses: 'all' },
-  { scope: 'staff:evaluate', statuses: ['Submitted', 'Received', 'Document Verification', 'Under Evaluation', 'Revision Required'] },
-  { scope: 'staff:assess', statuses: ['Under Evaluation', 'Assessed'] },
-  { scope: 'staff:verify-payment', statuses: ['Assessed', 'Payment Submitted', 'Payment Under Verification', 'Payment Verified'] },
-  { scope: 'staff:release', statuses: ['Approved', 'Permit Generated', 'Ready for Release', 'Released', 'Completed'] },
-];
-
-/**
- * Which statuses this caller may see at all. Empty means none -- and an empty
- * result is the correct answer for a staff account holding no read-bearing
- * scope, rather than an error, because a role can legitimately exist that only
- * administers accounts.
- */
-export function visibleStatusesFor(caller: Caller): readonly LifecycleStatus[] | 'all' {
-  if (caller.kind !== 'staff') return [];
-  const held = new Set(caller.scopes);
-  const matched = SCOPE_VISIBILITY.filter((rule) => held.has(rule.scope));
-  if (matched.some((rule) => rule.statuses === 'all')) return 'all';
-  const union = new Set<LifecycleStatus>();
-  for (const rule of matched) {
-    if (rule.statuses !== 'all') rule.statuses.forEach((s) => union.add(s));
-  }
-  return [...union];
-}
 
 const parseCount = exactInteger('count');
 const parseCentavos = exactInteger('amount');
@@ -624,3 +587,8 @@ export interface StaffApplicationDetail {
   readonly openInstructions: ReadonlyArray<Record<string, unknown>>;
   readonly timeline: ReadonlyArray<Record<string, unknown>>;
 }
+
+// Re-exported where it used to live. The rule moved to the domain (see
+// `domain/visibility.ts`); callers that reached for it here are not wrong about
+// wanting it, and a move is not a reason to break them.
+export { visibleStatusesFor };
