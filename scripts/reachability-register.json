@@ -30,6 +30,7 @@
   "src/modules/identity/domain/account.ts::PORTAL_ROLE_LABELS": "WP-01 reconciliation: the portal-facing display name for each wire role. Asserted by the role gate and served to the portal at TAB 16; until a client reads it, only the spec does",
   "src/modules/identity/domain/password-hasher.ts::TEST_SCRYPT_COST": "TEST CONSTANT: a deliberately weak scrypt cost so the suite is not dominated by key derivation",
   "src/modules/identity/infrastructure/in-memory-account.repository.ts::InMemoryAccountRepository": "TEST DOUBLE: the modules wire the Postgres adapter; this one keeps identity unit tests off a database",
+  "src/modules/identity/infrastructure/in-memory-account.repository.ts::InMemoryAccountRepository.lastSignInAt": "TEST DOUBLE accessor: reads back what recordSignIn stamped, so the repository contract suite can hold both adapters to the same behaviour",
   "src/modules/identity/infrastructure/in-memory-account.repository.ts::InMemoryAccountRepository.setProfile": "TEST DOUBLE seam for arranging a profile without SQL",
   "src/modules/identity/infrastructure/in-memory-password-reset.repository.ts::InMemoryPasswordResetRepository": "TEST DOUBLE, same reason as the account one",
   "src/modules/identity/infrastructure/in-memory-session.repository.ts::InMemorySessionRepository": "TEST DOUBLE, same reason as the account one",

@@ -76,6 +76,10 @@ export class PostgresAccountRepository implements AccountRepository {
     });
   }
 
+  async recordSignIn(id: string, at: Date): Promise<void> {
+    await this.db.query('update accounts set last_sign_in_at = $1 where id = $2', [at, id]);
+  }
+
   async updatePasswordHash(id: string, passwordHash: string): Promise<void> {
     await this.db.query('update accounts set password_hash = $1, updated_at = now() where id = $2', [
       passwordHash,

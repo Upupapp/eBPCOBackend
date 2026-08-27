@@ -4,6 +4,7 @@
   "routes": [
     "DELETE /devices/:deviceId",
     "DELETE /me",
+    "DELETE /staff/users/:userId/sessions/:sessionId",
     "GET /applications",
     "GET /applications/:applicationId",
     "GET /applications/:applicationId/timeline",
@@ -21,7 +22,11 @@
     "GET /staff/applications/:applicationId",
     "GET /staff/applications/metrics",
     "GET /staff/payments",
+    "GET /staff/users",
+    "GET /staff/users/:userId",
+    "GET /staff/users/:userId/sessions",
     "GET /version",
+    "PATCH /staff/users/:userId",
     "POST /applications",
     "POST /applications/:applicationId/cancel",
     "POST /applications/:applicationId/instructions/:letterId/resubmit",
@@ -47,6 +52,10 @@
     "POST /staff/applications/:applicationId/transitions",
     "POST /staff/payments/:paymentId/reject",
     "POST /staff/payments/:paymentId/verify",
+    "POST /staff/users",
+    "POST /staff/users/:userId/disable",
+    "POST /staff/users/:userId/enable",
+    "POST /staff/users/:userId/roles",
     "PUT /notification-preferences"
   ]
 }

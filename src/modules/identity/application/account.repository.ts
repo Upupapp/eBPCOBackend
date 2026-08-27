@@ -14,6 +14,8 @@ export interface AccountRepository {
   findByEmail(email: string): Promise<Account | null>;
   save(account: Account): Promise<void>;
   updatePasswordHash(id: string, passwordHash: string): Promise<void>;
+  /** Stamped after a sign-in has passed every check, including MFA. */
+  recordSignIn(id: string, at: Date): Promise<void>;
   /**
    * The applicant's own details, if this account is one.
    *

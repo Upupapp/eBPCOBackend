@@ -32,6 +32,24 @@ export class InMemoryAccountRepository implements AccountRepository {
     return Promise.resolve(this.profiles.get(accountId) ?? null);
   }
 
+  private readonly signedInAt = new Map<string, Date>();
+
+  /**
+   * Kept here rather than on `Account`, because nothing reads it through the
+   * port: the staff directory selects it directly, and adding a field to the
+   * account every consumer carries in order to serve one screen is how a
+   * domain type turns into a row.
+   */
+  recordSignIn(id: string, at: Date): Promise<void> {
+    this.signedInAt.set(id, at);
+    return Promise.resolve();
+  }
+
+  /** What `recordSignIn` last stamped, for the contract test. */
+  lastSignInAt(id: string): Date | null {
+    return this.signedInAt.get(id) ?? null;
+  }
+
   updatePasswordHash(id: string, passwordHash: string): Promise<void> {
     const account = this.byId.get(id);
     if (account !== undefined) this.byId.set(id, { ...account, passwordHash });

@@ -1,0 +1,16 @@
+-- When this account last authenticated successfully.
+--
+-- The staff directory distinguishes an account that has been CREATED from one
+-- that has been CLAIMED. An administrator creates an officer with no usable
+-- password; until that officer sets one and signs in, onboarding has not
+-- happened. Reporting such an account as Active tells the administrator that
+-- the work is done when it has not started.
+--
+-- Derived from refresh_tokens instead would be wrong twice over: families
+-- expire and are cleaned up, so a long-serving officer would eventually read
+-- as never having signed in, and a sign-in that issued no refresh token would
+-- not count at all.
+--
+-- One UPDATE per successful sign-in. Sign-ins are rare against the request
+-- volume they authorise, so this is not on any hot path.
+alter table accounts add column last_sign_in_at timestamptz;

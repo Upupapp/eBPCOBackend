@@ -103,6 +103,12 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     mobile_verified_at: none('account-lifetime'),
     totp_secret_encrypted: secret('authentication'),
     disabled_at: none('account-lifetime'),
+    // When this account last authenticated. A bare timestamp identifies nobody
+    // on its own -- the linkage is `id`, classified above -- so it is scored
+    // the way `created_at` and the verification stamps are. It exists so the
+    // staff directory can tell a created account from a claimed one, and it
+    // dies with the account.
+    last_sign_in_at: none('account-lifetime'),
     erased_at: none('account-lifetime'),
     created_at: none('account-lifetime'),
     updated_at: none('account-lifetime'),

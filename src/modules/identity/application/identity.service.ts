@@ -87,6 +87,12 @@ export class IdentityService {
       await this.accounts.updatePasswordHash(account.id, await this.hasher.hash(password));
     }
 
+    // Recorded on the way past, after every check that could refuse. The staff
+    // directory reads it to tell a created account from a claimed one; a
+    // timestamp written before MFA would say an officer signed in when they
+    // presented a password and nothing else.
+    await this.accounts.recordSignIn(account.id, this.clock());
+
     return { ok: true, tokens: await this.issueFor(account) };
   }
 

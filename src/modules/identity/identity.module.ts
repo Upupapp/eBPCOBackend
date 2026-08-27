@@ -20,6 +20,9 @@ import { SqlClient } from '../../persistence/sql-client';
 import { LocalBreachedPasswordScreen } from './infrastructure/breached-password-screen';
 import { AuthController, MeController } from './transport/auth.controller';
 import { AuthenticationGuard } from './transport/guards/authentication.guard';
+import { AuditService } from '../compliance/application/audit.service';
+import { StaffDirectoryService } from './application/staff-directory.service';
+import { StaffDirectoryController } from './transport/staff-directory.controller';
 
 /**
  * Identity, wired.
@@ -32,13 +35,18 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
 @Global()
 @Module({
   imports: [ComplianceModule],
-  controllers: [AuthController, MeController],
+  controllers: [AuthController, MeController, StaffDirectoryController],
   providers: [
     {
       provide: PASSWORD_RESET_REPOSITORY,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient): PasswordResetRepository =>
         new PostgresPasswordResetRepository(db),
+    },
+    {
+      provide: StaffDirectoryService,
+      inject: [SQL_CLIENT, AuditService],
+      useFactory: (db: SqlClient, audit: AuditService) => new StaffDirectoryService(db, audit),
     },
     {
       provide: AccountStatusReader,
