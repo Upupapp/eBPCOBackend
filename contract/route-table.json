@@ -59,6 +59,7 @@
     "POST /staff/applications/archive",
     "POST /staff/assessments/:assessmentId/approve",
     "POST /staff/assessments/:assessmentId/submit",
+    "POST /staff/orders-of-payment/:orderId/supersede",
     "POST /staff/payments/:paymentId/reject",
     "POST /staff/payments/:paymentId/verify",
     "POST /staff/users",

@@ -130,7 +130,7 @@ export class AssessmentWorkflowService {
 
   /** Opens a draft, pre-filled from the schedule in force today. */
   async draft(options: {
-    applicationId: string; officer: Caller; dueDate?: string;
+    applicationId: string; officer: Caller; dueDate?: string; revision?: boolean;
   }): Promise<WorkflowResult> {
     const { applicationId, officer } = options;
 
@@ -173,10 +173,19 @@ export class AssessmentWorkflowService {
         'select id from orders_of_payment where application_id = $1 and superseded_at is null',
         [applicationId],
       );
-      if (issued.rows.length > 0) {
+      if (issued.rows.length > 0 && options.revision !== true) {
         return {
           ok: false, reason: 'already-assessed',
-          detail: 'An Order of Payment is already in force. Supersede it instead.',
+          detail: 'An Order of Payment is already in force. Draft a revision if it needs correcting.',
+        };
+      }
+      if (issued.rows.length === 0 && options.revision === true) {
+        // Asked for explicitly, and refused when there is nothing to revise.
+        // A revision that silently became a first assessment would skip the
+        // reason an applicant is owed for a bill that changed.
+        return {
+          ok: false, reason: 'nothing-to-revise',
+          detail: 'No Order of Payment is in force for this application, so there is nothing to revise.',
         };
       }
 

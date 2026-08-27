@@ -354,6 +354,96 @@ describe('issuing the Order of Payment', () => {
   });
 });
 
+describe('correcting an Order that is already in force', () => {
+  const issued = async (): Promise<string> => {
+    const id = (await draft()).json<{ id: string }>().id;
+    await send('POST', `/staff/assessments/${id}/submit`, preparer.token);
+    await send('POST', `/staff/assessments/${id}/approve`, reviewer.token);
+    const order = await send(
+      'POST', `/staff/applications/${applicationId}/order-of-payment`, preparer.token, {},
+    );
+    expect(order.statusCode).toBe(201);
+    return order.json<{ orderId: string }>().orderId;
+  };
+
+  const revision = async (structural: number): Promise<void> => {
+    const response = await send(
+      'POST', `/staff/applications/${applicationId}/assessments`, preparer.token, { revision: true },
+    );
+    expect(response.statusCode).toBe(201);
+    const id = response.json<{ id: string }>().id;
+    await send('PUT', `/staff/assessments/${id}/lines/structural`, preparer.token, {
+      amountCentavos: structural, basis: 'Recomputed after the revised plan reduced the floor area.',
+    });
+    await send('POST', `/staff/assessments/${id}/submit`, preparer.token);
+    await send('POST', `/staff/assessments/${id}/approve`, reviewer.token);
+  };
+
+  it('REFUSES to supersede without an approved revision', async () => {
+    // The hole routing this would otherwise have opened: `supersede` took its
+    // figures straight from the caller, so one officer could have replaced an
+    // approved bill with any amount they liked.
+    const orderId = await issued();
+
+    const response = await send('POST', `/staff/orders-of-payment/${orderId}/supersede`, preparer.token, {
+      reason: 'The structural fee was computed from the wrong floor area.',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/no approved revision/i);
+  });
+
+  it('replaces it from the approved revision, leaving exactly one in force', async () => {
+    const orderId = await issued();
+    await revision(100_000);
+
+    const response = await send('POST', `/staff/orders-of-payment/${orderId}/supersede`, preparer.token, {
+      reason: 'The structural fee was computed from the wrong floor area.',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const orders = await db.query<{ total_centavos: string; superseded_at: Date | null; supersedes_id: string | null }>(
+      'select total_centavos, superseded_at, supersedes_id from orders_of_payment order by assessed_at',
+    );
+    expect(orders.rows).toHaveLength(2);
+    expect(orders.rows[0]?.superseded_at).not.toBeNull();
+    expect(orders.rows[1]?.superseded_at).toBeNull();
+    expect(orders.rows[1]?.supersedes_id).toBe(orderId);
+    expect(Number(orders.rows[1]?.total_centavos)).toBe(270_000);
+  });
+
+  it('requires a reason the applicant can read', async () => {
+    const orderId = await issued();
+    await revision(100_000);
+
+    const response = await send('POST', `/staff/orders-of-payment/${orderId}/supersede`, preparer.token, {
+      reason: 'fix',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('refuses a revision when nothing is in force to revise', async () => {
+    // A revision that silently became a first assessment would skip the reason
+    // an applicant is owed for a bill that changed.
+    const response = await send(
+      'POST', `/staff/applications/${applicationId}/assessments`, preparer.token, { revision: true },
+    );
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/nothing to revise/i);
+  });
+
+  it('still refuses an ordinary draft while an Order is in force', async () => {
+    await issued();
+
+    const response = await draft();
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/already in force/i);
+  });
+});
+
 describe('the audit trail', () => {
   it('records every step with the officer who took it', async () => {
     const id = (await draft()).json<{ id: string }>().id;

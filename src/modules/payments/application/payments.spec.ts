@@ -33,6 +33,30 @@ const REVIEWER_ACCOUNT = randomUUID();
 const reviewer: Caller = { accountId: REVIEWER_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.assessor };
 
 /**
+ * A revision, approved the same way a first assessment is.
+ *
+ * Superseding takes its figures from this rather than from the caller, so a
+ * correction carries the same second signature as the original — otherwise the
+ * correction would carry MORE authority than the thing it replaces.
+ */
+async function approvedRevision(lines: Partial<Record<string, number>> = { filing: 50_000 }): Promise<void> {
+  const draft = await workflow.draft({ applicationId: APPLICATION, officer: assessor, revision: true });
+  if (!draft.ok) throw new Error(`revision draft: ${draft.detail}`);
+  for (const line of ['filing', 'processing', 'architectural', 'structural', 'electrical', 'others'] as const) {
+    const amount = lines[line] ?? 0;
+    const set = await workflow.setLine({
+      assessmentId: draft.assessment.id, line, officer: assessor,
+      amountCentavos: amount, basis: amount > 0 ? 'City Ordinance 2026-004 s.3(a)' : '',
+    });
+    if (!set.ok) throw new Error(`revision line ${line}: ${set.detail}`);
+  }
+  const submitted = await workflow.submit({ assessmentId: draft.assessment.id, officer: assessor });
+  if (!submitted.ok) throw new Error(`revision submit: ${submitted.detail}`);
+  const approved = await workflow.approve({ assessmentId: draft.assessment.id, officer: reviewer });
+  if (!approved.ok) throw new Error(`revision approve: ${approved.detail}`);
+}
+
+/**
  * Since TAB 05 an Order of Payment is issued FROM an approved assessment, so
  * every test that issues one has to prepare, submit and have a SECOND officer
  * approve it first. A helper that used one officer would pass only while the
@@ -255,11 +279,11 @@ describe('correcting an Order means superseding it', () => {
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
 
+    await approvedRevision();
     const corrected = await assessment.supersede({
       orderId: original.orderId,
       reason: 'Structural fee recomputed after the revised plan reduced the floor area.',
       officer: assessor,
-      items: buildLineItems({ filing: 50_000 }, { filing: 'City Ordinance 2026-004 s.3(a)' }),
     });
 
     expect(corrected.ok).toBe(true);
@@ -277,13 +301,37 @@ describe('correcting an Order means superseding it', () => {
     await approvedAssessment();
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
+    await approvedRevision();
     await assessment.supersede({
       orderId: original.orderId,
       reason: 'Structural fee recomputed after the revised plan reduced the floor area.',
       officer: assessor,
-      items: buildLineItems({ filing: 50_000 }, { filing: 'Ordinance s.3(a)' }),
     });
 
+    const inForce = await db.query<{ count: number }>(
+      'select count(*)::int as count from orders_of_payment where superseded_at is null',
+    );
+    expect(inForce.rows[0]?.count).toBe(1);
+  });
+
+  it('REFUSES to supersede without an approved revision behind it', async () => {
+    // The hole this would otherwise open. `supersede` used to take its figures
+    // straight from the caller, so routing it as written would have let one
+    // officer replace an approved bill with any amount they liked — a
+    // correction carrying more authority than the original.
+    await approvedAssessment();
+    const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+    if (!original.ok) return;
+
+    const result = await assessment.supersede({
+      orderId: original.orderId,
+      reason: 'Structural fee recomputed after the revised plan reduced the floor area.',
+      officer: assessor,
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-approved');
     const inForce = await db.query<{ count: number }>(
       'select count(*)::int as count from orders_of_payment where superseded_at is null',
     );
@@ -295,9 +343,9 @@ describe('correcting an Order means superseding it', () => {
     const original = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
     if (!original.ok) return;
 
+    await approvedRevision();
     const result = await assessment.supersede({
       orderId: original.orderId, reason: 'fix', officer: assessor,
-      items: buildLineItems({ filing: 50_000 }, { filing: 'Ordinance s.3(a)' }),
     });
     expect(result.ok).toBe(false);
   });

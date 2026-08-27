@@ -34,7 +34,6 @@
   "src/modules/identity/infrastructure/in-memory-session.repository.ts::InMemorySessionRepository": "TEST DOUBLE, same reason as the account one",
   "src/modules/notifications/domain/catalog.ts::SERVER_CATALOG": "SPECIFICATION CONSTANT: names what the server may actually send, and is what the catalog emitter gate counts against so the filter is not written twice",
   "src/modules/notifications/domain/catalog.ts::isInCatalog": "membership test for a wire name; every caller needs the entry itself and uses entryFor",
-  "src/modules/payments/application/assessment.service.ts::AssessmentService.supersede": "replaces an assessment with a corrected one; there is no route that supersedes (UNWIRED FEATURE)",
   "src/modules/payments/application/reconciliation.ts::CollectionRecord": "one line of the treasury's collection file, unreached with reconcile",
   "src/modules/payments/application/reconciliation.ts::Discrepancy": "a mismatch reconcile reports, unreached with it",
   "src/modules/payments/application/reconciliation.ts::ReconciliationReport": "the report reconcile returns, unreached with it",

@@ -175,9 +175,8 @@ export class AssessmentService {
     orderId: string;
     reason: string;
     officer: Caller;
-    items: readonly FeeLineItem[];
   }): Promise<IssueResult> {
-    const { orderId, reason, officer, items } = options;
+    const { orderId, reason, officer } = options;
 
     if (reason.trim().length < 10) {
       return {
@@ -196,8 +195,35 @@ export class AssessmentService {
       return { ok: false, reason: 'invalid', detail: 'no Order of Payment in force with that id' };
     }
 
+    // ── THE SAME SECOND SIGNATURE ───────────────────────────────────────
+    //
+    // The figures come from an approved REVISION, not from the caller. This
+    // method used to take `items` straight from its caller, which would have
+    // been a hole straight through TAB 05 the moment it was routed: an officer
+    // could replace an approved bill with any figures they liked, alone, and
+    // the correction would carry more authority than the original.
+    //
+    // A revision is drafted the same way a first assessment is, and approved by
+    // someone other than whoever prepared it.
+    const revision = await this.workflow.approvedFor(row.application_id);
+    if (revision === null) {
+      return {
+        ok: false,
+        reason: 'not-approved',
+        detail: 'No approved revision exists for this application. Draft one, submit it, and have '
+          + 'another officer approve it before superseding the Order of Payment.',
+      };
+    }
+
+    let items: FeeLineItem[];
     let total: Centavos;
     try {
+      items = buildLineItems(
+        Object.fromEntries(revision.lines.map((line) => [
+          line.line, line.included ? line.amountCentavos : 0,
+        ])),
+        Object.fromEntries(revision.lines.map((line) => [line.line, line.basis])),
+      );
       total = assertIssuable(items);
     } catch (error) {
       return { ok: false, reason: 'invalid', detail: (error as Error).message };
@@ -208,15 +234,22 @@ export class AssessmentService {
         'update orders_of_payment set superseded_at = $1 where id = $2',
         [this.clock(), orderId],
       );
-      return new AssessmentService(tx, this.clock).insertOrder({
+      const replacement = await new AssessmentService(tx, this.clock).insertOrder({
         applicationId: row.application_id,
         officer,
         items,
         total,
-        schedule: { version: row.fee_schedule_version, effectiveFrom: '', effectiveTo: null, entries: [] },
-        dueDate: null,
+        // The version the REVISION was computed under, not the superseded
+        // Order's. They are usually the same and need not be: a schedule can be
+        // republished between the original assessment and its correction, and
+        // the replacement has to be explainable against the one it used.
+        schedule: { version: revision.feeScheduleVersion, effectiveFrom: '', effectiveTo: null, entries: [] },
+        dueDate: revision.dueDate,
         supersedes: { id: orderId, reason },
+        assessmentId: revision.id,
       });
+      if (replacement.ok) await this.workflow.markIssued(revision.id, replacement.orderId, tx);
+      return replacement;
     });
   }
 

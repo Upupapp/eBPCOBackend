@@ -7,6 +7,7 @@ import type { AuthenticatedRequest } from '../../identity/transport/guards/authe
 import { Caller } from '../../applications/domain/application';
 import { FEE_LINES, FeeLine } from '../domain/order-of-payment';
 import { AssessmentWorkflowService, WorkflowResult } from '../application/assessment-workflow.service';
+import { AssessmentService } from '../application/assessment.service';
 
 /**
  * Preparing an assessment, and having a second officer approve it.
@@ -21,6 +22,14 @@ import { AssessmentWorkflowService, WorkflowResult } from '../application/assess
 
 const draftShape = z.object({
   dueDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').optional(),
+  // Asked for explicitly. A revision that a client could start by accident is a
+  // second bill for the same permit; refusing unless it is stated makes the
+  // dangerous case the deliberate one.
+  revision: z.boolean().optional(),
+}).strict();
+
+const supersedeShape = z.object({
+  reason: z.string().min(10, 'state a reason the applicant can read').max(2000),
 }).strict();
 
 const lineShape = z.object({
@@ -71,7 +80,10 @@ function answer(result: WorkflowResult): Record<string, unknown> {
 
 @Controller('staff')
 export class StaffAssessmentsController {
-  constructor(private readonly workflow: AssessmentWorkflowService) {}
+  constructor(
+    private readonly workflow: AssessmentWorkflowService,
+    private readonly assessments: AssessmentService,
+  ) {}
 
   /** Opens a draft, pre-filled from the schedule in force today. */
   @Post('applications/:applicationId/assessments')
@@ -86,6 +98,7 @@ export class StaffAssessmentsController {
     return answer(await this.workflow.draft({
       applicationId, officer: callerOf(request),
       ...(input.dueDate === undefined ? {} : { dueDate: input.dueDate }),
+      ...(input.revision === undefined ? {} : { revision: input.revision }),
     }));
   }
 
@@ -132,6 +145,40 @@ export class StaffAssessmentsController {
     @Req() request: AuthenticatedRequest, @Param('assessmentId') assessmentId: string,
   ): Promise<Record<string, unknown>> {
     return answer(await this.workflow.submit({ assessmentId, officer: callerOf(request) }));
+  }
+
+  /**
+   * Replaces an Order of Payment in force with one issued from an approved
+   * REVISION.
+   *
+   * The Order is what is superseded, so it is what the path names. The Master
+   * Command wrote this as `/staff/assessments/:id/supersede`, which names the
+   * wrong resource: an assessment is never superseded, it is issued or it is
+   * not, and the thing an applicant is holding is the Order.
+   *
+   * A correction is a new Order, never an edit. The reason is required because
+   * an applicant whose bill changed is owed an explanation, and the reason
+   * recorded against the replacement is the only place it can live.
+   */
+  @Post('orders-of-payment/:orderId/supersede')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('staff:assess')
+  async supersede(
+    @Req() request: AuthenticatedRequest,
+    @Param('orderId') orderId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const input = parse(supersedeShape, body);
+    const result = await this.assessments.supersede({
+      orderId, reason: input.reason, officer: callerOf(request),
+    });
+    if (!result.ok) {
+      throw new ProblemException(
+        ProblemType.unprocessable, 'The Order of Payment could not be superseded',
+        HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+      );
+    }
+    return { orderId: result.orderId, number: result.number, totalCentavos: result.total };
   }
 
   @Post('assessments/:assessmentId/approve')
