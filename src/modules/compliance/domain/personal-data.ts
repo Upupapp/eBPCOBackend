@@ -317,6 +317,12 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     verified_at: none('statutory'),
     verified_by: linkable('statutory', ACCOUNTABILITY),
     official_receipt_number: none('statutory'),
+    // Why a payment was undone, and who undid it. The reason is written by an
+    // officer about a transaction, not about a person; `exception_by` names the
+    // officer, so it is linkable the way every other actor column is.
+    exception_reason: none('statutory'),
+    exception_at: none('statutory'),
+    exception_by: linkable('audit', ACCOUNTABILITY),
   },
 
   generated_permits: {

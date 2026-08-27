@@ -24,6 +24,15 @@ const verifyShape = z.object({
   officialReceiptNumber: z.string().min(1).max(60),
 });
 
+const undoShape = z.object({
+  reason: z.string().min(10, 'state a reason an applicant can be told').max(2000),
+}).strict();
+
+const receiptShape = z.object({
+  officialReceiptNumber: z.string().min(1).max(60),
+  reason: z.string().min(10, 'state why the number is being corrected').max(2000),
+}).strict();
+
 const rejectShape = z.object({
   reason: z.string().min(10, 'state a reason the applicant can act on').max(2000),
 });
@@ -133,6 +142,82 @@ export class StaffPaymentsController {
         ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail,
       );
     }
+    if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
+    throw new ProblemException(
+      ProblemType.conflict, 'The resource is not in a state that permits this',
+      HttpStatus.CONFLICT, result.detail,
+    );
+  }
+
+  /**
+   * The three ways a payment is undone, and one correction.
+   *
+   * Separate routes rather than one carrying a `kind`, because they are not
+   * variations of one act: a void says the record was a mistake, a reversal
+   * says the money never came, a refund says it came and is going back. A
+   * client that could get the enum wrong would be asserting the opposite of
+   * what it meant about who is out of pocket.
+   */
+  @Post(':paymentId/void')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:verify-payment')
+  async void(
+    @Req() request: AuthenticatedRequest, @Param('paymentId') paymentId: string, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    return this.undo(request, paymentId, body, 'Voided');
+  }
+
+  @Post(':paymentId/reverse')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:verify-payment')
+  async reverse(
+    @Req() request: AuthenticatedRequest, @Param('paymentId') paymentId: string, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    return this.undo(request, paymentId, body, 'Reversed');
+  }
+
+  @Post(':paymentId/refund')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:verify-payment')
+  async refund(
+    @Req() request: AuthenticatedRequest, @Param('paymentId') paymentId: string, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    return this.undo(request, paymentId, body, 'Refunded');
+  }
+
+  private async undo(
+    request: AuthenticatedRequest, paymentId: string, body: unknown,
+    kind: 'Voided' | 'Reversed' | 'Refunded',
+  ): Promise<Record<string, unknown>> {
+    const input = parse(undoShape, body);
+    const result = await this.payments.undo({
+      paymentId, kind, officer: callerOf(request), reason: input.reason,
+    });
+    if (result.ok) return { paymentId: result.paymentId, status: kind };
+    if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
+    if (result.reason === 'not-permitted') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail,
+      );
+    }
+    throw new ProblemException(
+      ProblemType.conflict, 'The resource is not in a state that permits this',
+      HttpStatus.CONFLICT, result.detail,
+    );
+  }
+
+  @Post(':paymentId/receipt')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:verify-payment')
+  async receipt(
+    @Req() request: AuthenticatedRequest, @Param('paymentId') paymentId: string, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const input = parse(receiptShape, body);
+    const result = await this.payments.correctReceipt({
+      paymentId, officer: callerOf(request),
+      officialReceiptNumber: input.officialReceiptNumber, reason: input.reason,
+    });
+    if (result.ok) return { paymentId: result.paymentId, officialReceiptNumber: input.officialReceiptNumber };
     if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
     throw new ProblemException(
       ProblemType.conflict, 'The resource is not in a state that permits this',

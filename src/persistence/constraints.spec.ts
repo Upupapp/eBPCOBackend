@@ -246,7 +246,28 @@ describe('money', () => {
          values ($1, $2, 'REF-1', 170000, 'Bank Transfer', $3, 'Paid')`,
         [order.rows[0]?.id, APPLICATION, CITIZEN],
       ),
-    ).rejects.toThrow(/paid_requires_verification/);
+    ).rejects.toThrow(/settled_requires_verification/);
+  });
+
+  it('refuses a REVERSED or REFUNDED payment with no verification either', async () => {
+    // The constraint widened with TAB 07. A reversed payment WAS verified — the
+    // verifier and receipt number are the evidence the money once appeared to
+    // move — so arriving at that status without them is as impossible as
+    // arriving at Paid without them.
+    await issueOrder();
+    const order = await db.query<{ id: string }>('select id from orders_of_payment limit 1');
+
+    for (const status of ['Reversed', 'Refunded']) {
+      await expect(
+        db.query(
+          `insert into payments (order_of_payment_id, application_id, reference_number,
+                                 amount_centavos, method, submitted_by, status,
+                                 exception_reason, exception_at, exception_by)
+           values ($1, $2, 'REF-2', 170000, 'Bank Transfer', $3, $4, 'because', now(), $3)`,
+          [order.rows[0]?.id, APPLICATION, CITIZEN, status],
+        ),
+      ).rejects.toThrow(/settled_requires_verification/);
+    }
   });
 
   it('refuses to let the submitter of a payment also verify it', async () => {

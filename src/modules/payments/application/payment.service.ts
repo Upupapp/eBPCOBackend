@@ -42,7 +42,7 @@ export type RecordOnsiteResult =
 
 export type VerifyResult =
   | { readonly ok: true; readonly paymentId: string }
-  | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified'; readonly detail: string };
+  | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified' | 'invalid' | 'not-permitted'; readonly detail: string };
 
 export class PaymentService {
   private readonly audit: AuditService;
@@ -326,6 +326,193 @@ export class PaymentService {
    * rejected" with no explanation leaves them unable to fix it, and the money
    * may genuinely have left their account.
    */
+  /**
+   * Undoing a payment, in one of three ways that mean different things.
+   *
+   * ── Which one, and why it matters ───────────────────────────────────────
+   *
+   * VOID is for a record that should never have existed — entered against the
+   * wrong application, or twice. Nothing was confirmed, so nothing about money
+   * is being asserted. Only a payment that has NOT been verified can be voided:
+   * once an officer has confirmed money arrived, saying the record was a
+   * clerical slip is a different claim, and a false one.
+   *
+   * REVERSE is for a payment confirmed as Paid whose money never actually
+   * arrived — a bounced cheque, a transfer that failed after the officer saw
+   * the proof. The LGU holds nothing and is still owed the fee.
+   *
+   * REFUND is for money that DID arrive and is being returned: a superseded
+   * assessment reduced the fee, the application was withdrawn. The LGU held it
+   * and no longer should.
+   *
+   * Reverse and refund look alike in a list and mean opposite things about who
+   * is out of pocket, which is why they are separate acts with separate names
+   * rather than one flag.
+   *
+   * ── What this does NOT do ───────────────────────────────────────────────
+   *
+   * It does not move the application. Reversing a payment on an application
+   * sitting at Payment Verified leaves it there, and an officer has to move it
+   * back through the transition table — which is the only thing that knows
+   * which moves are legal from where. Driving a transition from here would be a
+   * second lifecycle engine written by someone thinking about money.
+   *
+   * A permit already generated is refused outright. Money for an instrument the
+   * applicant is holding is a different problem, and one this route quietly
+   * resolving would be worse than one it declines.
+   */
+  async undo(options: {
+    paymentId: string;
+    kind: 'Voided' | 'Reversed' | 'Refunded';
+    officer: Caller;
+    reason: string;
+  }): Promise<VerifyResult> {
+    const { paymentId, kind, officer, reason } = options;
+
+    if (reason.trim().length < 10) {
+      return {
+        ok: false, reason: 'invalid',
+        detail: 'Undoing a payment requires a stated reason an applicant can be told.',
+      };
+    }
+    if (!/^[0-9a-fA-F-]{36}$/.test(paymentId)) {
+      return { ok: false, reason: 'not-found', detail: 'No such payment.' };
+    }
+
+    return this.db.transaction(async (tx) => {
+      const found = await tx.query<{
+        id: string; status: string; application_id: string; verified_by: string | null;
+        has_permit: boolean;
+      }>(
+        `select p.id, p.status, p.application_id, p.verified_by,
+                exists (select 1 from generated_permits g where g.application_id = p.application_id)
+                  as has_permit
+           from payments p where p.id = $1 for update`,
+        [paymentId],
+      );
+      const payment = found.rows[0];
+      if (payment === undefined) {
+        return { ok: false, reason: 'not-found', detail: 'No such payment.' };
+      }
+
+      if (payment.has_permit) {
+        return {
+          ok: false, reason: 'invalid',
+          detail: 'A permit has already been generated from this application. Undoing its payment '
+            + 'here would leave an issued instrument with no settled fee behind it.',
+        };
+      }
+
+      const settled = payment.status === 'Paid';
+      if (kind === 'Voided' && settled) {
+        return {
+          ok: false, reason: 'invalid',
+          detail: 'This payment has been verified as Paid, so it cannot be voided as a clerical '
+            + 'error. Reverse it if the money never arrived, or refund it if it did.',
+        };
+      }
+      if (kind !== 'Voided' && !settled) {
+        return {
+          ok: false, reason: 'invalid',
+          detail: `This payment is ${payment.status}, not Paid. Void it instead — there is no `
+            + 'settlement to reverse or refund.',
+        };
+      }
+      if (kind !== 'Voided' && payment.verified_by === officer.accountId) {
+        // The officer who confirmed the money arrived may not be the one who
+        // says it did not, or who sends it back. Undoing your own confirmation
+        // alone is the same weakness the verifier/submitter rule already
+        // refuses one step earlier.
+        return {
+          ok: false, reason: 'not-permitted',
+          detail: 'An officer may not reverse or refund a payment they verified. '
+            + 'Ask another officer.',
+        };
+      }
+
+      await tx.query(
+        `update payments set status = $1, exception_reason = $2, exception_at = $3, exception_by = $4
+          where id = $5`,
+        [kind, reason.trim(), this.clock(), officer.accountId, paymentId],
+      );
+
+      await this.audit.append({
+        action: `payment.${kind.toLowerCase()}`,
+        subjectType: 'payment',
+        subjectId: paymentId,
+        outcome: 'allowed',
+        actorAccountId: officer.accountId,
+        beforeState: { status: payment.status, verifiedBy: payment.verified_by },
+        afterState: { status: kind, reason: reason.trim() },
+      }, tx);
+
+      return { ok: true, paymentId };
+    });
+  }
+
+  /**
+   * Corrects the Official Receipt number on a settled payment.
+   *
+   * Not a second way to verify: the payment is already Paid and already carries
+   * a number, because `settled_requires_verification` refuses a settled payment
+   * without one. This is for the number being WRONG — transposed at a counter,
+   * read off the wrong stub — which is a correction to the LGU's own record of
+   * a receipt the applicant is holding, so it needs a reason and an audit entry
+   * naming the officer, exactly as any other correction does.
+   */
+  async correctReceipt(options: {
+    paymentId: string; officer: Caller; officialReceiptNumber: string; reason: string;
+  }): Promise<VerifyResult> {
+    const { paymentId, officer, officialReceiptNumber, reason } = options;
+
+    if (reason.trim().length < 10) {
+      return {
+        ok: false, reason: 'invalid',
+        detail: 'Correcting a receipt number requires a stated reason.',
+      };
+    }
+    if (!/^[0-9a-fA-F-]{36}$/.test(paymentId)) {
+      return { ok: false, reason: 'not-found', detail: 'No such payment.' };
+    }
+
+    return this.db.transaction(async (tx) => {
+      const found = await tx.query<{ status: string; official_receipt_number: string | null }>(
+        'select status, official_receipt_number from payments where id = $1 for update',
+        [paymentId],
+      );
+      const payment = found.rows[0];
+      if (payment === undefined) {
+        return { ok: false, reason: 'not-found', detail: 'No such payment.' };
+      }
+      if (payment.status !== 'Paid') {
+        return {
+          ok: false, reason: 'invalid',
+          detail: `This payment is ${payment.status}. A receipt number belongs to a settled payment; `
+            + 'verify it first.',
+        };
+      }
+      if (payment.official_receipt_number === officialReceiptNumber.trim()) {
+        return { ok: true, paymentId };
+      }
+
+      await tx.query(
+        'update payments set official_receipt_number = $1 where id = $2',
+        [officialReceiptNumber.trim(), paymentId],
+      );
+      await this.audit.append({
+        action: 'payment.receipt-corrected',
+        subjectType: 'payment',
+        subjectId: paymentId,
+        outcome: 'allowed',
+        actorAccountId: officer.accountId,
+        beforeState: { officialReceiptNumber: payment.official_receipt_number },
+        afterState: { officialReceiptNumber: officialReceiptNumber.trim(), reason: reason.trim() },
+      }, tx);
+
+      return { ok: true, paymentId };
+    });
+  }
+
   async reject(options: { paymentId: string; officer: Caller; reason: string }): Promise<VerifyResult> {
     const { paymentId, officer, reason } = options;
     if (reason.trim().length < 10) {

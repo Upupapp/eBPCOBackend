@@ -476,3 +476,184 @@ describe('the audit trail', () => {
     expect(Number(audit.rows[0]?.n)).toBe(0);
   });
 });
+
+describe('undoing a payment, three ways that mean different things', () => {
+  let cashier: { id: string; token: string };
+  let otherCashier: { id: string; token: string };
+  let paymentId: string;
+
+  /** An application with an Order in force and a payment against it. */
+  const settled = async (verify: boolean): Promise<string> => {
+    const id = (await draft()).json<{ id: string }>().id;
+    await send('POST', `/staff/assessments/${id}/submit`, preparer.token);
+    await send('POST', `/staff/assessments/${id}/approve`, reviewer.token);
+    const order = await send(
+      'POST', `/staff/applications/${applicationId}/order-of-payment`, preparer.token, {},
+    );
+    const orderId = order.json<{ orderId: string }>().orderId;
+
+    const payment = randomUUID();
+    const applicant = await db.query<{ account_id: string }>(
+      `select acc.id as account_id from applications a
+         join applicants ap on ap.id = a.applicant_id
+         join accounts acc on acc.id = ap.account_id where a.id = $1`,
+      [applicationId],
+    );
+    await db.query(
+      `insert into payments (id, order_of_payment_id, application_id, reference_number,
+                             amount_centavos, method, status, submitted_by)
+       values ($1,$2,$3,'REF-0001',682000,'Onsite','Pending Verification',$4)`,
+      [payment, orderId, applicationId, applicant.rows[0]?.account_id],
+    );
+    if (verify) {
+      await db.query(
+        `update payments set status = 'Paid', verified_at = now(), verified_by = $1,
+            official_receipt_number = 'OR-12345' where id = $2`,
+        [cashier.id, payment],
+      );
+    }
+    return payment;
+  };
+
+  beforeEach(async () => {
+    cashier = await staff('cashier');
+    otherCashier = await staff('cashier');
+  });
+
+  it('voids an unverified record entered by mistake', async () => {
+    paymentId = await settled(false);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/void`, cashier.token, {
+      reason: 'Entered against the wrong application at the counter.',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const row = await db.query<{ status: string; exception_by: string }>(
+      'select status, exception_by from payments where id = $1', [paymentId],
+    );
+    expect(row.rows[0]?.status).toBe('Voided');
+    expect(row.rows[0]?.exception_by).toBe(cashier.id);
+  });
+
+  it('REFUSES to void one already verified as Paid', async () => {
+    // Calling a confirmed payment a clerical slip is a different claim, and a
+    // false one. Reverse it or refund it.
+    paymentId = await settled(true);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/void`, otherCashier.token, {
+      reason: 'Entered against the wrong application at the counter.',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ detail: string }>().detail).toMatch(/reverse it|refund it/i);
+  });
+
+  it('reverses a settled payment whose money never arrived', async () => {
+    paymentId = await settled(true);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/reverse`, otherCashier.token, {
+      reason: 'The bank transfer was returned unpaid five days after verification.',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const row = await db.query<{ status: string; official_receipt_number: string; verified_by: string }>(
+      'select status, official_receipt_number, verified_by from payments where id = $1', [paymentId],
+    );
+    expect(row.rows[0]?.status).toBe('Reversed');
+    // The verification history SURVIVES: it is the evidence the money once
+    // appeared to move, and dropping it would leave the reversal unexplainable.
+    expect(row.rows[0]?.official_receipt_number).toBe('OR-12345');
+    expect(row.rows[0]?.verified_by).toBe(cashier.id);
+  });
+
+  it('refunds money that did arrive and is going back', async () => {
+    paymentId = await settled(true);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/refund`, otherCashier.token, {
+      reason: 'The superseded assessment reduced the fee; the difference is being returned.',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect((await db.query<{ status: string }>(
+      'select status from payments where id = $1', [paymentId],
+    )).rows[0]?.status).toBe('Refunded');
+  });
+
+  it('REFUSES the officer who verified it', async () => {
+    // Undoing your own confirmation alone is the same weakness the
+    // verifier/submitter rule already refuses one step earlier.
+    paymentId = await settled(true);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/reverse`, cashier.token, {
+      reason: 'The bank transfer was returned unpaid five days after verification.',
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect((await db.query<{ status: string }>(
+      'select status from payments where id = $1', [paymentId],
+    )).rows[0]?.status).toBe('Paid');
+  });
+
+  it('refuses to reverse an unverified payment, because there is no settlement to undo', async () => {
+    paymentId = await settled(false);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/reverse`, cashier.token, {
+      reason: 'The bank transfer was returned unpaid five days after verification.',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ detail: string }>().detail).toMatch(/void it instead/i);
+  });
+
+  it('requires a reason an applicant can be told', async () => {
+    paymentId = await settled(false);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/void`, cashier.token, {
+      reason: 'oops',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('refuses once a permit has been generated from the application', async () => {
+    paymentId = await settled(true);
+    await db.query(
+      `insert into generated_permits (application_id, permit_number, issued_date, generated_by)
+       values ($1,'FP-2026-000001', now(), $2)`,
+      [applicationId, preparer.id],
+    );
+
+    const response = await send('POST', `/staff/payments/${paymentId}/refund`, otherCashier.token, {
+      reason: 'The superseded assessment reduced the fee; the difference is being returned.',
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ detail: string }>().detail).toMatch(/permit has already been generated/i);
+  });
+
+  it('corrects a transposed receipt number, with a reason', async () => {
+    paymentId = await settled(true);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/receipt`, cashier.token, {
+      officialReceiptNumber: 'OR-13245',
+      reason: 'The number was transposed when it was read off the stub.',
+    });
+
+    expect(response.statusCode).toBe(200);
+    const audit = await db.query<{ before_state: { officialReceiptNumber: string } }>(
+      `select before_state from audit_events where action = 'payment.receipt-corrected'
+        order by sequence desc limit 1`,
+    );
+    expect(audit.rows[0]?.before_state.officialReceiptNumber).toBe('OR-12345');
+  });
+
+  it('refuses a receipt number on a payment that is not settled', async () => {
+    paymentId = await settled(false);
+
+    const response = await send('POST', `/staff/payments/${paymentId}/receipt`, cashier.token, {
+      officialReceiptNumber: 'OR-99999', reason: 'The number was transposed on the stub.',
+    });
+
+    expect(response.statusCode).toBe(409);
+  });
+});
