@@ -28,3 +28,8 @@ docs/READINESS-REVIEW.md
 # owner's call, not a default.
 docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.html
 docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.pdf
+docs/CERTIFICATION-WEB-PORTAL-BACKEND.html
+docs/CERTIFICATION-WEB-PORTAL-BACKEND.pdf
+
+# Uploaded bytes from the development server. Never a deliverable.
+.dev-objects/

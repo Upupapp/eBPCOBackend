@@ -19,7 +19,8 @@
     "emit:catalog": "ts-node --transpile-only scripts/emit-notification-catalog.ts",
     "emit:samples": "ts-node --transpile-only scripts/emit-response-samples.ts",
     "audit:reachability": "ts-node --transpile-only scripts/reachability.ts",
-    "audit:samples": "ts-node --transpile-only scripts/sample-coverage.ts"
+    "audit:samples": "ts-node --transpile-only scripts/sample-coverage.ts",
+    "dev:server": "ts-node --transpile-only scripts/dev-server.ts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",
