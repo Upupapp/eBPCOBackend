@@ -20,8 +20,13 @@ import { StaffApplicationsController } from './transport/staff-applications.cont
 import { RequirementsService } from './application/requirements.service';
 import { RequirementsController } from './transport/requirements.controller';
 import { StaffEvaluationsController } from './transport/staff-evaluations.controller';
+import { ReportsController } from '../compliance/transport/reports.controller';
+import { CALENDAR_REPOSITORY } from '../compliance/application/calendar.repository';
 
-export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
+// Re-exported where it used to be declared, so callers that reach for it here
+// keep working. It now lives beside the port -- see calendar.repository.ts for
+// why a token in a module is a cycle waiting to resolve to undefined.
+export { CALENDAR_REPOSITORY };
 
 /**
  * The application lifecycle, and the officer's view of it.
@@ -89,6 +94,11 @@ export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
     ApplicantApplicationsController, ApplicantWriteController,
     StaffApplicationsController, StaffActionsController, RequirementsController,
     StaffEvaluationsController,
+    // Compliance code, registered here because the calendar token it needs is
+    // provided by this module. Moving the token would mean ComplianceModule
+    // importing ApplicationsModule, and ComplianceModule is @Global and already
+    // imported by identity — a cycle for the sake of tidier filing.
+    ReportsController,
   ],
   exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
 })

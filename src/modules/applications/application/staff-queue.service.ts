@@ -69,6 +69,26 @@ export interface QueuePage {
  * visible breakdown -- which a client-side count over a paginated list cannot
  * guarantee and will silently get wrong.
  */
+/** Last thirty days against the thirty before. Raw counts, never a percentage. */
+export interface TrendPair {
+  readonly recent: number;
+  readonly previous: number;
+}
+
+export interface QueueTrend {
+  readonly total: TrendPair;
+  readonly pendingUnderReview: TrendPair;
+  readonly paymentsAwaitingVerification: TrendPair;
+  readonly approved: TrendPair;
+  readonly readyForRelease: TrendPair;
+}
+
+const ZERO: TrendPair = { recent: 0, previous: 0 };
+const EMPTY_TREND: QueueTrend = {
+  total: ZERO, pendingUnderReview: ZERO, paymentsAwaitingVerification: ZERO,
+  approved: ZERO, readyForRelease: ZERO,
+};
+
 export interface QueueMetrics {
   readonly total: number;
   readonly byStatus: Readonly<Record<string, number>>;
@@ -96,6 +116,8 @@ export interface QueueMetrics {
    * should look at anyway.
    */
   readonly pledgeIndeterminate: number;
+  /** Movement, for the dashboard's month-over-month cards. */
+  readonly trend: QueueTrend;
 }
 
 
@@ -361,7 +383,10 @@ export class StaffQueueService {
   async metrics(caller: Caller): Promise<QueueMetrics> {
     const visible = visibleStatusesFor(caller);
     if (Array.isArray(visible) && visible.length === 0) {
-      return { total: 0, byStatus: {}, awaitingAction: 0, overduePledge: 0, pledgeIndeterminate: 0 };
+      return {
+        total: 0, byStatus: {}, awaitingAction: 0, overduePledge: 0, pledgeIndeterminate: 0,
+        trend: EMPTY_TREND,
+      };
     }
 
     const values: unknown[] = [];
@@ -397,8 +422,9 @@ export class StaffQueueService {
     const awaitingAction = WAITING_ON_STAFF.reduce((sum, s) => sum + (byStatus[s] ?? 0), 0);
 
     const { overdue, indeterminate } = await this.overdue(visible);
+    const trend = await this.trend(visible);
 
-    return { total, byStatus, awaitingAction, overduePledge: overdue, pledgeIndeterminate: indeterminate };
+    return { total, byStatus, awaitingAction, overduePledge: overdue, pledgeIndeterminate: indeterminate, trend };
   }
 
   /**
@@ -411,6 +437,61 @@ export class StaffQueueService {
    * happen. Bounded to the open set, this is tens or hundreds of rows, not the
    * whole table.
    */
+  /**
+   * The last thirty days against the thirty before, per headline figure.
+   *
+   * RAW COUNTS, never a percentage. The portal's own store is explicit about
+   * why: a card needs to tell "no change" from "no baseline to compare
+   * against", and one number cannot say both. A server that helpfully computed
+   * +0% would erase the difference between a quiet month and a first month.
+   *
+   * Counted on `submitted_at`, which is when the LGU received the application —
+   * the same date the portal's store measures from. Counting on `updated_at`
+   * would make a figure move because someone opened a record.
+   *
+   * The status predicates are the portal's, verbatim, because they are the
+   * definitions its cards already carry. `paymentsAwaitingVerification` is the
+   * single status 'Payment Under Verification', not the pair that sounds like
+   * it: a payment merely submitted is waiting on nobody at the LGU yet.
+   */
+  private async trend(visible: readonly LifecycleStatus[] | 'all'): Promise<QueueTrend> {
+    const now = this.clock();
+    const day = 24 * 60 * 60 * 1000;
+    const values: unknown[] = [new Date(now.getTime() - 60 * day), new Date(now.getTime() - 30 * day), now];
+    const clause = visible === 'all' ? '' : ' and a.lifecycle_status = any($4)';
+    if (visible !== 'all') values.push(visible);
+
+    const rows = await this.db.query<{ lifecycle_status: string; bucket: string; n: string }>(
+      `select a.lifecycle_status,
+              -- Named bucket, not window: WINDOW is a reserved word in SQL,
+              -- and the parse error names the token rather than the column.
+              case when a.submitted_at >= $2 then 'recent' else 'previous' end as bucket,
+              count(*) as n
+         from applications a
+        where a.lifecycle_status <> 'Draft' and a.archived_at is null
+          and a.submitted_at >= $1 and a.submitted_at < $3${clause}
+        group by a.lifecycle_status, bucket`,
+      values,
+    );
+
+    const count = (statuses: readonly string[], window: string): number => rows.rows
+      .filter((row) => row.bucket === window && statuses.includes(row.lifecycle_status))
+      .reduce((sum, row) => sum + parseCount(row.n), 0);
+    const all = rows.rows.map((row) => row.lifecycle_status);
+    const pair = (statuses: readonly string[]): { recent: number; previous: number } => ({
+      recent: count(statuses, 'recent'),
+      previous: count(statuses, 'previous'),
+    });
+
+    return {
+      total: { recent: count(all, 'recent'), previous: count(all, 'previous') },
+      pendingUnderReview: pair(['Submitted', 'Received', 'Document Verification', 'Under Evaluation']),
+      paymentsAwaitingVerification: pair(['Payment Under Verification']),
+      approved: pair(['Approved', 'Permit Generated', 'Ready for Release', 'Released', 'Completed']),
+      readyForRelease: pair(['Ready for Release']),
+    };
+  }
+
   private async overdue(
     visible: readonly LifecycleStatus[] | 'all',
   ): Promise<{ overdue: number; indeterminate: number }> {

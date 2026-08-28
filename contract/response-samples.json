@@ -198,7 +198,29 @@
         },
         "awaitingAction": 5,
         "overduePledge": 0,
-        "pledgeIndeterminate": 4
+        "pledgeIndeterminate": 4,
+        "trend": {
+          "total": {
+            "recent": 3,
+            "previous": 2
+          },
+          "pendingUnderReview": {
+            "recent": 3,
+            "previous": 0
+          },
+          "paymentsAwaitingVerification": {
+            "recent": 0,
+            "previous": 0
+          },
+          "approved": {
+            "recent": 0,
+            "previous": 2
+          },
+          "readyForRelease": {
+            "recent": 0,
+            "previous": 1
+          }
+        }
       }
     },
     "staff.applications.detail": {

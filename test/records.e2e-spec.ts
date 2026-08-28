@@ -556,3 +556,122 @@ describe("the evaluator's worklist", () => {
       .not.toContain(underEvaluation);
   });
 });
+
+describe('the dashboard, over time', () => {
+  const metrics = async (token: string) => {
+    const response = await app.inject({
+      method: 'GET', url: '/staff/applications/metrics',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json<{
+      total: number;
+      trend: Record<string, { recent: number; previous: number }>;
+    }>();
+  };
+
+  it('returns RAW COUNTS for each headline, not a percentage', async () => {
+    // A card has to tell "no change" from "no baseline to compare against", and
+    // one number cannot say both. A helpfully computed +0% would erase the
+    // difference between a quiet month and a first month.
+    const officer = await staffToken('super-admin');
+
+    const body = await metrics(officer.token);
+
+    expect(Object.keys(body.trend).sort()).toEqual([
+      'approved', 'paymentsAwaitingVerification', 'pendingUnderReview', 'readyForRelease', 'total',
+    ]);
+    for (const pair of Object.values(body.trend)) {
+      expect(typeof pair.recent).toBe('number');
+      expect(typeof pair.previous).toBe('number');
+    }
+  });
+
+  it('counts the last thirty days apart from the thirty before', async () => {
+    const officer = await staffToken('super-admin');
+    const recent = await file('Submitted');
+    const older = await file('Submitted');
+    await db.query(
+      "update applications set submitted_at = now() - interval '45 days' where id = $1", [older],
+    );
+
+    const body = await metrics(officer.token);
+
+    // Both windows have at least the one this test put there. Asserted as a
+    // floor rather than an equality: this suite shares a database, so an exact
+    // count would be measuring what earlier tests left behind.
+    expect(body.trend.total?.recent).toBeGreaterThanOrEqual(1);
+    expect(body.trend.total?.previous).toBeGreaterThanOrEqual(1);
+    expect(recent).toBeDefined();
+  });
+
+  it('leaves an application older than sixty days out of BOTH windows', async () => {
+    const officer = await staffToken('super-admin');
+    const before = await metrics(officer.token);
+    const ancient = await file('Submitted');
+    await db.query(
+      "update applications set submitted_at = now() - interval '400 days' where id = $1", [ancient],
+    );
+
+    const after = await metrics(officer.token);
+
+    expect(after.trend.total?.recent).toBe(before.trend.total?.recent);
+    expect(after.trend.total?.previous).toBe(before.trend.total?.previous);
+  });
+
+  it('gives a cashier a trend narrowed to what they may see', async () => {
+    const cashier = await staffToken('cashier');
+    await file('Under Evaluation');
+
+    const body = await metrics(cashier.token);
+
+    // Under Evaluation is outside a cashier's visibility, so it contributes to
+    // neither their total nor their pending figure.
+    expect(body.trend.pendingUnderReview?.recent).toBe(0);
+  });
+});
+
+describe('processing times against the Citizen’s Charter', () => {
+  const report = async (query: string, token: string) => app.inject({
+    method: 'GET', url: `/staff/reports/processing-times${query}`,
+    headers: { authorization: `Bearer ${token}` },
+  });
+
+  it('answers for a stated period', async () => {
+    const officer = await staffToken('super-admin');
+
+    const response = await report('?from=2026-01-01&to=2027-01-01', officer.token);
+
+    expect(response.statusCode).toBe(200);
+    const body = response.json<{ from: string; to: string; rows: unknown[]; unclassified: number }>();
+    expect(body.from).toBe('2026-01-01');
+    expect(typeof body.unclassified).toBe('number');
+  });
+
+  it('REQUIRES the period rather than defaulting it', async () => {
+    // A compliance figure with no stated period is a number nobody can check,
+    // and "this year so far" means something different every day it is read.
+    const officer = await staffToken('super-admin');
+
+    expect((await report('', officer.token)).statusCode).toBe(400);
+  });
+
+  it('refuses a range that runs backwards', async () => {
+    const officer = await staffToken('super-admin');
+
+    expect((await report('?from=2027-01-01&to=2026-01-01', officer.token)).statusCode).toBe(400);
+  });
+
+  it('counts an application with no charter entry as unclassified, never as missed', async () => {
+    // No charter entry means no promise, and a promise nobody made cannot be
+    // broken. Putting it in the "missed" column would be the worst error this
+    // report could make.
+    const officer = await staffToken('super-admin');
+    await file('Submitted');
+
+    const body = (await report('?from=2020-01-01&to=2030-01-01', officer.token))
+      .json<{ unclassified: number; rows: unknown[] }>();
+
+    expect(body.unclassified).toBeGreaterThan(0);
+  });
+});

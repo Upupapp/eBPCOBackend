@@ -2,6 +2,19 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { HolidayCalendar } from '../domain/pledge-clock';
 
 /**
+ * Injection token, declared beside the port rather than in the module that
+ * binds it.
+ *
+ * It lived in `applications.module.ts`, which meant a consumer had to import
+ * that module to name the token — and the module imports its consumers. The
+ * compliance report's controller closed that loop and the token arrived
+ * `undefined` at construction time, exactly as the account repository's own
+ * comment warns. Same defect, same fix, second occurrence.
+ */
+export const CALENDAR_REPOSITORY = Symbol('EBPCO_CALENDAR_REPOSITORY');
+
+
+/**
  * The proclaimed calendar, loaded once.
  *
  * The pledge clock takes a calendar rather than reading one, so it stays pure
