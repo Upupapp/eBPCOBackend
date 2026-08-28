@@ -22,6 +22,7 @@ import { RequirementsController } from './transport/requirements.controller';
 import { StaffEvaluationsController } from './transport/staff-evaluations.controller';
 import { ReportsController } from '../compliance/transport/reports.controller';
 import { CALENDAR_REPOSITORY } from '../compliance/application/calendar.repository';
+import { WorkflowController } from './transport/workflow.controller';
 
 // Re-exported where it used to be declared, so callers that reach for it here
 // keep working. It now lives beside the port -- see calendar.repository.ts for
@@ -94,6 +95,7 @@ export { CALENDAR_REPOSITORY };
     ApplicantApplicationsController, ApplicantWriteController,
     StaffApplicationsController, StaffActionsController, RequirementsController,
     StaffEvaluationsController,
+    WorkflowController,
     // Compliance code, registered here because the calendar token it needs is
     // provided by this module. Moving the token would mean ComplianceModule
     // importing ApplicationsModule, and ComplianceModule is @Global and already

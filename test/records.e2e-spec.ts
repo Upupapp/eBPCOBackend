@@ -777,3 +777,100 @@ describe('reading the audit trail', () => {
     expect(response.json<{ detail: string }>().detail).toMatch(/kinds recorded are/i);
   });
 });
+
+describe('the lifecycle, as the server enforces it', () => {
+  const workflow = async (token: string) => {
+    const response = await app.inject({
+      method: 'GET', url: '/staff/config/workflow',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    expect(response.statusCode).toBe(200);
+    return response.json<{
+      statuses: { status: string; applicantStatus: string; terminal: boolean; pledgeRuns: boolean }[];
+      transitions: {
+        from: string; to: string; actors: string[]; requiresScope: string;
+        roles: string[]; preconditions: string[]; notifies: string | null;
+      }[];
+    }>();
+  };
+
+  it('serves every status and every legal move', async () => {
+    const body = await workflow(officerToken);
+
+    expect(body.statuses).toHaveLength(19);
+    expect(body.transitions.length).toBeGreaterThan(20);
+    expect(body.transitions.some((t) => t.from === 'Submitted' && t.to === 'Received')).toBe(true);
+  });
+
+  it('is THE SAME TABLE the server refuses moves with', async () => {
+    // The point of serving it. A picture drawn from a second copy is true until
+    // someone edits one of them.
+    const body = await workflow(officerToken);
+    const id = await file('Submitted');
+
+    const illegal = body.transitions.some((t) => t.from === 'Submitted' && t.to === 'Released');
+    expect(illegal).toBe(false);
+
+    const attempt = await app.inject({
+      method: 'POST', url: `/staff/applications/${id}/transitions`,
+      headers: { authorization: `Bearer ${officerToken}`, 'idempotency-key': randomUUID() },
+      payload: { to: 'Released' },
+    });
+    expect(attempt.statusCode).not.toBe(200);
+  });
+
+  it('names the ROLES that can make each move, not only the scope', async () => {
+    // A client that knows only the scope has to map scopes to roles itself,
+    // which is the drift TAB 00 removed.
+    const body = await workflow(officerToken);
+
+    const received = body.transitions.find((t) => t.from === 'Submitted' && t.to === 'Received');
+    expect(received?.requiresScope).toBe('applications:read');
+    expect(received?.roles.length).toBeGreaterThan(0);
+    expect(received?.roles).toContain('evaluator');
+  });
+
+  it('says which statuses are terminal and where a pledge clock runs', async () => {
+    const body = await workflow(officerToken);
+    const byStatus = new Map(body.statuses.map((s) => [s.status, s]));
+
+    expect(byStatus.get('Completed')?.terminal).toBe(true);
+    expect(byStatus.get('Under Evaluation')?.terminal).toBe(false);
+    // A flow chart showing a pledge clock on a terminal status tells an officer
+    // the LGU still owes an act.
+    expect(byStatus.get('Completed')?.pledgeRuns).toBe(false);
+    expect(byStatus.get('Under Evaluation')?.pledgeRuns).toBe(true);
+  });
+
+  it('projects the nineteen internal statuses onto what an applicant is shown', async () => {
+    const body = await workflow(officerToken);
+    const shown = new Set(body.statuses.map((s) => s.applicantStatus));
+
+    expect(shown.size).toBeLessThan(body.statuses.length);
+    expect(body.statuses.find((s) => s.status === 'Cancelled')?.applicantStatus).toBe('Rejected');
+  });
+
+  it('says NULL for a move that notifies nobody, rather than omitting it', async () => {
+    // Eight moves genuinely carry no notice — a recorded gap in the catalogue.
+    // Omitting the field would make "tells the applicant nothing" look like
+    // "we forgot to ask".
+    const body = await workflow(officerToken);
+
+    expect(body.transitions.every((t) => 'notifies' in t)).toBe(true);
+    expect(body.transitions.some((t) => t.notifies === null)).toBe(true);
+    expect(body.transitions.some((t) => t.notifies === 'received-by-obo')).toBe(true);
+  });
+
+  it('offers no way to change it', async () => {
+    // Read-only is the half that needs no decision. An LGU that could edit the
+    // table could strand applications in a status no transition leaves.
+    for (const method of ['PUT', 'POST', 'PATCH', 'DELETE'] as const) {
+      const response = await app.inject({
+        method, url: '/staff/config/workflow',
+        headers: { authorization: `Bearer ${officerToken}` },
+        ...(method === 'DELETE' ? {} : { payload: {} }),
+      });
+      expect(response.statusCode).toBe(404);
+    }
+  });
+});

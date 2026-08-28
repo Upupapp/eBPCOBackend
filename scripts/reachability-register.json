@@ -5,8 +5,6 @@
   "src/common/logging/logger.ts::StructuredLogger.trace": "same \u2014 no caller, kept so the level set is not surprising to a reader",
   "src/common/problem/problem.ts::ProblemException.unprocessable": "RFC 9457 helper for 422; every current validation failure is a 400, so nothing constructs it yet",
   "src/common/scheduling/job-runner.ts::JobRunner.status": "reads the job table for an operator; there is no job-status route, so only the spec calls it (UNWIRED FEATURE)",
-  "src/modules/applications/domain/lifecycle.ts::pledgeApplies": "whether the RA 11032 clock runs in a status; the pledge clock derives this from suspensions instead",
-  "src/modules/applications/domain/lifecycle.ts::rolesGranting": "which roles may make a transition, for a UI that would grey out buttons; no endpoint returns it",
   "src/modules/compliance/application/calendar.repository.ts::EMPTY_CALENDAR": "the no-holidays-loaded calendar, so every pledge computed against it is flagged approximate; the repository builds its own from the table",
   "src/modules/compliance/application/data-export.service.ts::EXPORT_SECTIONS": "SPECIFICATION CONSTANT: the spec asserts the export's keys equal this list, which is how a silently dropped section fails a test rather than shipping",
   "src/modules/compliance/domain/personal-data.ts::accountLifetimeColumns": "SPECIFICATION CONSTANT: the columns erasure must clear, asserted against the erasure service by the spec",

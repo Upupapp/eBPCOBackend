@@ -30,6 +30,7 @@
     "GET /staff/config/fee-schedules",
     "GET /staff/config/payment-methods",
     "GET /staff/config/requirements/:permitType",
+    "GET /staff/config/workflow",
     "GET /staff/evaluations",
     "GET /staff/payments",
     "GET /staff/reports/processing-times",
