@@ -32,6 +32,7 @@ const env: NodeJS.ProcessEnv = {
   MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
   JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
   PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
+  TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
   RATE_LIMIT_MAX: '10000',
 };
 

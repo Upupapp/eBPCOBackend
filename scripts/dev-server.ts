@@ -22,7 +22,7 @@
  * guard.
  */
 
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 
 import { createApp } from '../src/bootstrap';
@@ -36,8 +36,16 @@ import { StaffRole } from '../src/modules/identity/domain/account';
 
 const say = (line = ''): void => void process.stdout.write(`${line}\n`);
 
-/** Published on purpose. See the environment guard above. */
-const PASSWORD = 'dev-password-not-for-anywhere-real';
+/**
+ * Generated per run, printed once, and never written down.
+ *
+ * It was a constant in this file until the secret scanner saw it — correctly:
+ * a password literal in tracked source is a password in every clone and every
+ * fork of a public repository, whatever the comment beside it says. Random per
+ * run is strictly better and costs a line: nothing can hardcode it, and a
+ * screenshot of a terminal is the worst it can leak into.
+ */
+const PASSWORD = randomBytes(9).toString('base64url');
 
 const STAFF: ReadonlyArray<{ email: string; role: StaffRole }> = [
   { email: 'super@lgu.gov.ph', role: 'super-admin' },
@@ -135,6 +143,7 @@ async function main(): Promise<void> {
     MALWARE_SCANNER_URL: 'http://scanner.invalid:3310',
     JWT_SIGNING_KEY: 'a-development-signing-key-of-at-least-32-chars',
     PASSWORD_PEPPER: 'a-development-pepper-of-at-least-32-characters',
+    TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
     RATE_LIMIT_MAX: '10000',
     PORT: process.env.PORT ?? '3000',
     // The real environment wins, and the guard below REFUSES anything that is

@@ -220,6 +220,25 @@ describe('multi-factor for staff', () => {
     expect((await identity.authenticate('a@b.ph', GOOD_PASSWORD)).ok).toBe(true);
   });
 
+  it('REFUSES EVERY CODE when the enrolment service is absent', async () => {
+    // The fail-closed default, which nothing exercised until it was broken
+    // deliberately and no test noticed. `build()` constructs IdentityService
+    // without a TotpService — the shape the unit specs have always used — and a
+    // missing collaborator must refuse rather than wave a code through.
+    //
+    // Changing that `return false` to `return true` passed the entire e2e suite,
+    // because those tests always inject one. This is the test that would have
+    // caught it.
+    const { identity, accounts, hasher } = build();
+    await seedStaff(accounts, hasher, ['cashier'], '123456');
+
+    // Even the code the account was seeded with.
+    expect(await identity.authenticate('officer@lgu.gov.ph', GOOD_PASSWORD, '123456')).toEqual({
+      ok: false,
+      reason: 'rejected',
+    });
+  });
+
   it('rejects a wrong second factor', async () => {
     const { identity, accounts, hasher } = build();
     await seedStaff(accounts, hasher, ['cashier'], '123456');

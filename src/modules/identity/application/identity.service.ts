@@ -1,4 +1,4 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 
 import { Account, Scope, requiresMfa, scopesFor } from '../domain/account';
 import { PasswordHasher } from '../domain/password-hasher';
@@ -6,6 +6,7 @@ import { PasswordResetRepository, resetTokenDigest } from './password-reset.repo
 import { PasswordPolicy, PasswordRejection } from '../domain/password-policy';
 import { AccountRepository, normaliseEmail } from './account.repository';
 import { TokenService } from './token.service';
+import { TotpService } from './totp.service';
 
 /**
  * Sign-in, registration, recovery and revocation.
@@ -59,6 +60,12 @@ export class IdentityService {
     private readonly policy: PasswordPolicy,
     private readonly resetTickets: PasswordResetRepository,
     private readonly clock: () => Date = () => new Date(),
+    /**
+     * Absent only in the unit specs that predate enrolment. When it is missing
+     * the placeholder below still refuses everything, so a missing collaborator
+     * fails closed rather than letting a second factor through unchecked.
+     */
+    private readonly totp?: TotpService,
   ) {}
 
   async authenticate(email: string, password: string, totp?: string): Promise<AuthenticationOutcome> {
@@ -78,7 +85,7 @@ export class IdentityService {
 
     if (requiresMfa(account)) {
       if (totp === undefined) return { ok: false, reason: 'mfa-required' };
-      if (!this.verifyTotp(account, totp)) return { ok: false, reason: 'rejected' };
+      if (!await this.verifyTotp(account, totp)) return { ok: false, reason: 'rejected' };
     }
 
     // Upgrade the stored verifier if policy has moved on since it was written.
@@ -251,14 +258,24 @@ export class IdentityService {
     await this.hasher.verify(password, this.decoyHash);
   }
 
-  private verifyTotp(account: Account, presented: string): boolean {
-    // Placeholder shape only: TOTP verification arrives with staff
-    // provisioning. It is constant-time even so, because a timing difference
-    // here would leak the code one digit at a time.
+  /**
+   * A real RFC 6238 check, at last.
+   *
+   * This was a placeholder that compared the stored secret to the presented
+   * code — which is not TOTP, and which no authenticator app could ever
+   * satisfy. Combined with `requiresMfa`, it meant six of nine staff roles
+   * could not sign in at all: assessors, cashiers, building officials,
+   * releasing officers, administrators and super-admins. Nothing caught it
+   * because every test mints its tokens directly rather than signing in.
+   *
+   * Still fails closed when no secret is enrolled, and now also when the
+   * enrolment service is absent — a missing collaborator must not become an
+   * accepted code.
+   */
+  private async verifyTotp(account: Account, presented: string): Promise<boolean> {
     if (account.totpSecret === null) return false;
-    const expected = Buffer.from(account.totpSecret, 'utf8');
-    const candidate = Buffer.from(presented, 'utf8');
-    if (expected.length !== candidate.length) return false;
-    return timingSafeEqual(expected, candidate);
+    if (this.totp === undefined) return false;
+    return this.totp.verifyAtSignIn({ accountId: account.id, code: presented });
   }
+
 }

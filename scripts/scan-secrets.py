@@ -63,18 +63,34 @@ PATTERNS: list[tuple[str, re.Pattern[str]]] = [
 ]
 
 
-def tracked_files() -> list[Path]:
-    result = subprocess.run(
+def scannable_files() -> list[Path]:
+    """Everything git would carry: tracked, plus untracked and not ignored.
+
+    Tracked alone was the original list, and it had a hole exactly where it
+    matters: a NEW file is invisible until it has been committed. A clean scan
+    run before committing therefore said nothing about the very file being
+    added, and a secret in it was only reported on the next run — after it was
+    already in history and pushed. That happened.
+
+    `--others --exclude-standard` adds the files git is about to take and leaves
+    out the ones .gitignore covers, so the scan sees what a commit would.
+    """
+    tracked = subprocess.run(
         ["git", "ls-files"], cwd=ROOT, capture_output=True, text=True, check=True
     )
-    return [ROOT / line for line in result.stdout.splitlines() if line]
+    untracked = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=ROOT, capture_output=True, text=True, check=True
+    )
+    lines = tracked.stdout.splitlines() + untracked.stdout.splitlines()
+    return [ROOT / line for line in lines if line]
 
 
 def main() -> None:
     findings: list[str] = []
     scanned = 0
 
-    for path in tracked_files():
+    for path in scannable_files():
         relative = path.relative_to(ROOT).as_posix()
         if relative in ALLOWED or not path.is_file():
             continue
@@ -91,7 +107,7 @@ def main() -> None:
                     findings.append(f"{relative}:{line_number}  {label}")
 
     # An environment file must never be tracked, whatever it contains.
-    for path in tracked_files():
+    for path in scannable_files():
         name = path.name
         if name.startswith(".env") and name != ".env.example":
             findings.append(f"{path.relative_to(ROOT).as_posix()}  a real environment file is tracked")
@@ -102,7 +118,7 @@ def main() -> None:
             print(f"  {finding}", file=sys.stderr)
         sys.exit(1)
 
-    print(f"  ok   secret scan: {scanned} tracked text files, nothing that looks like a credential")
+    print(f"  ok   secret scan: {scanned} files git would carry, nothing that looks like a credential")
 
 
 if __name__ == "__main__":

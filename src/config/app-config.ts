@@ -65,6 +65,13 @@ const schema = z
     // development has no secret manager; required outside it, below.
     PASSWORD_PEPPER: z.string().optional().transform((v) => v ?? ''),
 
+    // Encrypts the TOTP secrets at rest. A SEPARATE key from the signing key,
+    // not a derivation of it: rotating a signing key is a routine act, and if
+    // the two shared material that rotation would make every officer's second
+    // factor undecryptable at once. Optional in development, required outside
+    // it, below.
+    TOTP_ENCRYPTION_KEY: z.string().optional().transform((v) => v ?? ''),
+
     // Request handling. Bounded by construction: an unbounded body or an
     // unbounded request lifetime is a denial-of-service surface.
     REQUEST_TIMEOUT_MS: intFromEnv(1_000, 120_000, 20_000),
@@ -179,6 +186,16 @@ const schema = z
     // An invariant, not a preference. Serving the contract as live documentation
     // in production publishes the shape of every endpoint, including the ones a
     // caller is not authorised to reach, to anyone who asks.
+    if (config.EBPCO_ENVIRONMENT !== 'development' && config.TOTP_ENCRYPTION_KEY.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['TOTP_ENCRYPTION_KEY'],
+        message:
+          'required outside development — without it a leaked database yields every officer\'s '
+          + 'second factor, which is the one thing standing between a stolen password and an approval',
+      });
+    }
+
     if (config.EBPCO_ENVIRONMENT !== 'development' && config.PASSWORD_PEPPER.length < 32) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

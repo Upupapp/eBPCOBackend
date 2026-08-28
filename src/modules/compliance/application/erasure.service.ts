@@ -85,8 +85,10 @@ export type ErasureResult =
 const IDENTIFIER = /^[a-z][a-z0-9_]*$/;
 
 export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = [
-  // An outstanding challenge is a live credential for a channel this person is
-  // erasing. Deleted first, and before the state row it belongs to.
+  // Live credentials first. A pending TOTP enrolment and an outstanding contact
+  // challenge are both secrets belonging to somebody who has just asked to be
+  // forgotten; leaving either behind is the worst thing an erasure can do.
+  { table: 'totp_enrolments', column: 'account_id' },
   { table: 'contact_verification_challenges', column: 'account_id' },
   { table: 'contact_verifications', column: 'account_id' },
   { table: 'notification_deliveries', column: 'notification_id' },

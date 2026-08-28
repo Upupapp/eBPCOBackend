@@ -109,6 +109,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // staff directory can tell a created account from a claimed one, and it
     // dies with the account.
     last_sign_in_at: none('account-lifetime'),
+    // Which TOTP step was last spent. A counter, not information about a
+    // person, and useless without the secret.
+    totp_last_step: none('account-lifetime'),
     erased_at: none('account-lifetime'),
     created_at: none('account-lifetime'),
     updated_at: none('account-lifetime'),
@@ -216,6 +219,18 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     expires_on: none('statutory'),
     uploaded_at: none('statutory'),
     deleted_at: none('statutory'),
+    // ── Added by migration 027 (document review) ──────────────────────
+    // Classified here because the gate refuses an unclassified column, and an
+    // unclassified column is one nobody has decided the erasure rule for.
+    review_status: none('statutory'),
+    review_reason_code: none('statutory'),
+    // Free text an officer writes to THIS applicant about THIS document —
+    // "the lot plan is unsigned", which can name a person. The same class as
+    // an evaluator's remarks, and for the same reason.
+    review_remark: content('statutory', PERMIT_RECORD),
+    reviewed_at: none('statutory'),
+    reviewed_by: linkable('statutory', ACCOUNTABILITY),
+    supersedes_document_id: structural,
   },
 
   evaluations: {
@@ -317,6 +332,19 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
    * The published checklist. LGU reference data about permit types, not about
    * any person; `updated_by` names the officer who last changed it.
    */
+  /**
+   * The standard reasons an officer can turn a document back. LGU reference
+   * data about the process, not about any applicant.
+   */
+  document_review_reasons: {
+    code: none('statutory'),
+    label: none('statutory'),
+    description: none('statutory'),
+    active: none('statutory'),
+    position: none('statutory'),
+    updated_at: none('statutory'),
+  },
+
   document_requirements: {
     permit_type: none('statutory'),
     code: none('statutory'),
@@ -333,6 +361,17 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
    * account row and is classified there; this table holds only the state of
    * proving it.
    */
+  /**
+   * A second factor part-way through being enrolled. The secret is a
+   * credential — classified exactly as the account's own is.
+   */
+  totp_enrolments: {
+    account_id: linkable('account-lifetime', SERVICE_DELIVERY),
+    secret_encrypted: secret('authentication'),
+    started_at: none('account-lifetime'),
+    expires_at: none('account-lifetime'),
+  },
+
   contact_verifications: {
     account_id: linkable('account-lifetime', SERVICE_DELIVERY),
     channel: none('account-lifetime'),

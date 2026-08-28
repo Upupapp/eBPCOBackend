@@ -25,6 +25,9 @@ import { StaffDirectoryService } from './application/staff-directory.service';
 import { StaffDirectoryController } from './transport/staff-directory.controller';
 import { ContactVerificationService } from './application/contact-verification.service';
 import { ContactsController } from './transport/contacts.controller';
+import { MfaController } from './transport/mfa.controller';
+import { SecretBox } from './domain/secret-box';
+import { TotpService } from './application/totp.service';
 
 /**
  * Identity, wired.
@@ -37,13 +40,26 @@ import { ContactsController } from './transport/contacts.controller';
 @Global()
 @Module({
   imports: [ComplianceModule],
-  controllers: [AuthController, MeController, StaffDirectoryController, ContactsController],
+  controllers: [AuthController, MeController, StaffDirectoryController, ContactsController,
+    MfaController],
   providers: [
     {
       provide: PASSWORD_RESET_REPOSITORY,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient): PasswordResetRepository =>
         new PostgresPasswordResetRepository(db),
+    },
+    {
+      provide: TotpService,
+      inject: [SQL_CLIENT, CONFIG],
+      useFactory: (db: SqlClient, config: AppConfig) => new TotpService(
+        db,
+        // In development the key may be empty; the box turns whatever it is
+        // given into 32 bytes, and the config refuses an empty one outside
+        // development.
+        new SecretBox(config.TOTP_ENCRYPTION_KEY || 'development-only-totp-key'),
+        `eBPCO ${config.EBPCO_ENVIRONMENT === 'production' ? '' : config.EBPCO_ENVIRONMENT}`.trim(),
+      ),
     },
     {
       provide: ContactVerificationService,
@@ -107,14 +123,16 @@ import { ContactsController } from './transport/contacts.controller';
     },
     {
       provide: IdentityService,
-      inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy, PASSWORD_RESET_REPOSITORY],
+      inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy,
+        PASSWORD_RESET_REPOSITORY, TotpService],
       useFactory: (
         accounts: AccountRepository,
         tokens: TokenService,
         hasher: PasswordHasher,
         policy: PasswordPolicy,
         resetTickets: PasswordResetRepository,
-      ) => new IdentityService(accounts, tokens, hasher, policy, resetTickets),
+        totp: TotpService,
+      ) => new IdentityService(accounts, tokens, hasher, policy, resetTickets, () => new Date(), totp),
     },
 
     // Registered globally: a new controller is protected the moment it exists,
