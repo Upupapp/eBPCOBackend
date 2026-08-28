@@ -675,3 +675,105 @@ describe('processing times against the Citizen’s Charter', () => {
     expect(body.unclassified).toBeGreaterThan(0);
   });
 });
+
+describe('reading the audit trail', () => {
+  const get = (url: string, token: string) =>
+    app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${token}` } });
+
+  it('serves the activity stream to an AUDITOR, the role the scope was created for', async () => {
+    // `audit:read` was added in TAB 00 for a read-everything, change-nothing
+    // role and no route required it until now, which made the role a name
+    // without a screen.
+    const auditor = await staffToken('auditor');
+    const id = await file();
+    await patch(id, { location: '77 Audit Street' });
+
+    const response = await get('/staff/audit', auditor.token);
+
+    expect(response.statusCode).toBe(200);
+    const entries = response.json<{ entries: { action: string; subjectId: string }[] }>().entries;
+    expect(entries.some((e) => e.action === 'application.edited' && e.subjectId === id)).toBe(true);
+  });
+
+  it('NEVER RETURNS the before or after state', async () => {
+    // Those columns carry whatever the act changed — this edit's holds a street
+    // address. The point of an audit trail is that it can be read by someone not
+    // entitled to everything it records.
+    const auditor = await staffToken('auditor');
+    const id = await file();
+    await patch(id, { location: '99 Confidential Lane' });
+
+    const stream = await get('/staff/audit', auditor.token);
+    const history = await get(`/staff/audit/application/${id}`, auditor.token);
+
+    expect(stream.body).not.toContain('Confidential Lane');
+    expect(history.body).not.toContain('Confidential Lane');
+    expect(stream.body).not.toContain('beforeState');
+    expect(history.body).not.toContain('afterState');
+  });
+
+  it('returns one subject’s history in the order it happened', async () => {
+    const auditor = await staffToken('auditor');
+    const id = await file();
+    await patch(id, { location: 'First change' });
+    await patch(id, { location: 'Second change' });
+
+    const response = await get(`/staff/audit/application/${id}`, auditor.token);
+
+    const entries = response.json<{ entries: { sequence: number }[] }>().entries;
+    expect(entries.length).toBeGreaterThanOrEqual(2);
+    expect(entries.map((e) => e.sequence)).toEqual([...entries.map((e) => e.sequence)].sort((a, b) => a - b));
+  });
+
+  it('filters by action and by actor', async () => {
+    const auditor = await staffToken('auditor');
+    const id = await file();
+    await patch(id, { location: 'Filtered' });
+
+    const byAction = await get('/staff/audit?action=application.edited', auditor.token);
+    expect(byAction.json<{ entries: { action: string }[] }>().entries
+      .every((e) => e.action === 'application.edited')).toBe(true);
+
+    const byActor = await get(`/staff/audit?actorAccountId=${officerId}`, auditor.token);
+    expect(byActor.json<{ entries: { actorAccountId: string }[] }>().entries
+      .every((e) => e.actorAccountId === officerId)).toBe(true);
+  });
+
+  it('pages on the chain’s own sequence, not on a timestamp', async () => {
+    // Two events in the same millisecond share a timestamp; `sequence` is what
+    // this table was given to make their order defined.
+    const auditor = await staffToken('auditor');
+    const id = await file();
+    await patch(id, { location: 'Paged one' });
+    await patch(id, { location: 'Paged two' });
+
+    const firstPage = await get('/staff/audit?limit=1', auditor.token);
+    const body = firstPage.json<{ entries: { sequence: number }[]; nextCursor: number | null }>();
+
+    expect(body.entries).toHaveLength(1);
+    expect(body.nextCursor).not.toBeNull();
+    const second = await get(`/staff/audit?limit=1&before=${body.nextCursor}`, auditor.token);
+    expect(second.json<{ entries: { sequence: number }[] }>().entries[0]?.sequence)
+      .toBeLessThan(body.entries[0]!.sequence);
+  });
+
+  it('REFUSES an officer whose acts it records', async () => {
+    // An officer who could read the whole trail could also see who has been
+    // looking at what.
+    const id = await file();
+
+    expect((await get('/staff/audit', officerToken)).statusCode).toBe(403);
+    expect((await get(`/staff/audit/application/${id}`, officerToken)).statusCode).toBe(403);
+  });
+
+  it('names an unknown subject kind instead of answering with an empty list', async () => {
+    // "No entries" and "there is no such kind of thing" are different answers,
+    // and an auditor told the first when the second is true stops looking.
+    const auditor = await staffToken('auditor');
+
+    const response = await get(`/staff/audit/invoices/${randomUUID()}`, auditor.token);
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ detail: string }>().detail).toMatch(/kinds recorded are/i);
+  });
+});

@@ -7,6 +7,7 @@ import { ErasureService } from './application/erasure.service';
 import { DataExportService } from './application/data-export.service';
 import { OBJECT_STORE } from '../documents/documents.module';
 import { ObjectStore } from '../documents/domain/object-store';
+import { AuditController } from './transport/audit.controller';
 
 /**
  * The chained audit trail, and the data-subject rights that read and write it.
@@ -21,6 +22,7 @@ import { ObjectStore } from '../documents/domain/object-store';
  * dependency of the things it is meant to hold to account.
  */
 @Module({
+  controllers: [AuditController],
   providers: [
     {
       provide: AuditService,

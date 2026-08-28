@@ -259,6 +259,13 @@ describe('downloading a document', () => {
     const upload = await post('/documents', maria, {
       fileName: 'lot-plan.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
     });
+    // Checked here, not left to surface three lines later. An upload that fails
+    // leaves `documentId` undefined and the failure then arrives as a 404 on
+    // `/documents/undefined/content`, which names the wrong step: it reads as a
+    // broken download route rather than an upload that never happened.
+    if (upload.statusCode !== 201) {
+      throw new Error(`upload failed: ${upload.statusCode} ${upload.body}`);
+    }
     const documentId = upload.json<{ documentId: string }>().documentId;
     const link = await get(`/documents/${documentId}/content`, maria);
     if (link.statusCode !== 200) {

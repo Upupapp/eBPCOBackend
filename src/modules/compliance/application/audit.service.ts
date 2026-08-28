@@ -143,6 +143,87 @@ export class AuditService {
    * their permit took three weeks needs to be able to answer, and an answer
    * that requires a ticket to the IT unit is not one.
    */
+  /**
+   * The activity stream: what happened, across every subject.
+   *
+   * ── Metadata only, deliberately ─────────────────────────────────────────
+   *
+   * Like `historyOf`, this selects the WHO, WHAT and WHEN and never
+   * `before_state` or `after_state`. Those columns carry whatever the act
+   * changed — an application edit's before/after holds a street address, a
+   * role change holds an officer's permissions — and an activity feed is the
+   * wrong place to hand that out in bulk. Someone investigating one entry can
+   * open the subject it names, where the existing authorisation applies.
+   *
+   * The protection is in the SELECT, not only in the mapping: a column that is
+   * never fetched cannot be returned by a later edit that spreads the row.
+   *
+   * ── Paged on `sequence` ─────────────────────────────────────────────────
+   *
+   * The chain already has a strictly increasing key, which is what makes it a
+   * chain. Paging on a timestamp would need a tiebreak for two events in the
+   * same millisecond — the case this table was given `sequence` to solve.
+   */
+  async stream(filters: {
+    action?: string;
+    subjectType?: string;
+    actorAccountId?: string;
+    from?: Date;
+    to?: Date;
+    limit?: number;
+    before?: number;
+  } = {}): Promise<{
+    entries: ReadonlyArray<{
+      sequence: number; occurredAt: Date; action: string; outcome: AuditOutcome;
+      subjectType: string; subjectId: string | null;
+      actorAccountId: string | null; actorRole: string | null;
+    }>;
+    nextCursor: number | null;
+  }> {
+    const limit = Math.min(Math.max(filters.limit ?? 50, 1), 200);
+    const values: unknown[] = [];
+    const bind = (value: unknown): string => {
+      values.push(value);
+      return `$${values.length}`;
+    };
+
+    const where: string[] = [];
+    if (filters.action !== undefined) where.push(`action = ${bind(filters.action)}`);
+    if (filters.subjectType !== undefined) where.push(`subject_type = ${bind(filters.subjectType)}`);
+    if (filters.actorAccountId !== undefined) {
+      where.push(`actor_account_id = ${bind(filters.actorAccountId)}`);
+    }
+    if (filters.from !== undefined) where.push(`occurred_at >= ${bind(filters.from)}`);
+    if (filters.to !== undefined) where.push(`occurred_at < ${bind(filters.to)}`);
+    if (filters.before !== undefined) where.push(`sequence < ${bind(filters.before)}`);
+
+    const rows = await this.db.query<AuditRow & { subject_type: string; subject_id: string | null }>(
+      `select sequence, occurred_at, action, outcome, subject_type, subject_id,
+              actor_account_id, actor_role
+         from audit_events
+        ${where.length > 0 ? `where ${where.join(' and ')}` : ''}
+        order by sequence desc
+        limit ${bind(limit + 1)}`,
+      values,
+    );
+
+    const page = rows.rows.slice(0, limit);
+    const last = page[page.length - 1];
+    return {
+      entries: page.map((row) => ({
+        sequence: Number(row.sequence),
+        occurredAt: row.occurred_at,
+        action: row.action,
+        outcome: row.outcome,
+        subjectType: row.subject_type,
+        subjectId: row.subject_id,
+        actorAccountId: row.actor_account_id,
+        actorRole: row.actor_role,
+      })),
+      nextCursor: rows.rows.length > limit && last !== undefined ? Number(last.sequence) : null,
+    };
+  }
+
   async historyOf(subjectType: string, subjectId: string): Promise<ReadonlyArray<{
     sequence: number; occurredAt: Date; action: string; outcome: AuditOutcome;
     actorAccountId: string | null; actorRole: string | null;

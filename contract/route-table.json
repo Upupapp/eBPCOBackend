@@ -23,6 +23,8 @@
     "GET /staff/applications/:applicationId",
     "GET /staff/applications/metrics",
     "GET /staff/assessments/:assessmentId",
+    "GET /staff/audit",
+    "GET /staff/audit/:subjectType/:subjectId",
     "GET /staff/businesses",
     "GET /staff/businesses/:businessId",
     "GET /staff/config/fee-schedules",
