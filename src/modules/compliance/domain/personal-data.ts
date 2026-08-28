@@ -328,6 +328,35 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     updated_by: linkable('audit', ACCOUNTABILITY),
   },
 
+  /**
+   * Whether a contact channel has been proved. The channel VALUE lives on the
+   * account row and is classified there; this table holds only the state of
+   * proving it.
+   */
+  contact_verifications: {
+    account_id: linkable('account-lifetime', SERVICE_DELIVERY),
+    channel: none('account-lifetime'),
+    status: none('account-lifetime'),
+    method: none('account-lifetime'),
+    verified_at: none('account-lifetime'),
+    last_requested_at: none('account-lifetime'),
+  },
+
+  /**
+   * The outstanding challenge. `code_digest` is a credential on its way to the
+   * applicant, classified as a secret for the same reason a password hash is.
+   */
+  contact_verification_challenges: {
+    id: structural,
+    account_id: linkable('account-lifetime', SERVICE_DELIVERY),
+    channel: none('account-lifetime'),
+    code_digest: secret('authentication'),
+    issued_at: none('account-lifetime'),
+    expires_at: none('account-lifetime'),
+    consumed_at: none('account-lifetime'),
+    attempts: none('account-lifetime'),
+  },
+
   payment_methods: {
     method: none('statutory'),
     label: none('statutory'),

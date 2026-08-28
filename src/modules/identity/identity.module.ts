@@ -23,6 +23,8 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
 import { AuditService } from '../compliance/application/audit.service';
 import { StaffDirectoryService } from './application/staff-directory.service';
 import { StaffDirectoryController } from './transport/staff-directory.controller';
+import { ContactVerificationService } from './application/contact-verification.service';
+import { ContactsController } from './transport/contacts.controller';
 
 /**
  * Identity, wired.
@@ -35,13 +37,18 @@ import { StaffDirectoryController } from './transport/staff-directory.controller
 @Global()
 @Module({
   imports: [ComplianceModule],
-  controllers: [AuthController, MeController, StaffDirectoryController],
+  controllers: [AuthController, MeController, StaffDirectoryController, ContactsController],
   providers: [
     {
       provide: PASSWORD_RESET_REPOSITORY,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient): PasswordResetRepository =>
         new PostgresPasswordResetRepository(db),
+    },
+    {
+      provide: ContactVerificationService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new ContactVerificationService(db),
     },
     {
       provide: StaffDirectoryService,

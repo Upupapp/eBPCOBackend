@@ -85,6 +85,10 @@ export type ErasureResult =
 const IDENTIFIER = /^[a-z][a-z0-9_]*$/;
 
 export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = [
+  // An outstanding challenge is a live credential for a channel this person is
+  // erasing. Deleted first, and before the state row it belongs to.
+  { table: 'contact_verification_challenges', column: 'account_id' },
+  { table: 'contact_verifications', column: 'account_id' },
   { table: 'notification_deliveries', column: 'notification_id' },
   { table: 'notifications', column: 'account_id' },
   { table: 'notification_preferences', column: 'account_id' },
