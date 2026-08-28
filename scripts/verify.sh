@@ -23,6 +23,11 @@ echo "── reachability ──────────────────
 # to nothing — so it is a gate rather than an exercise.
 npm run --silent audit:reachability | tail -3
 
+echo "── recorded responses ────────────────────────────────────────────"
+# A route with no recorded response has its shape described only by the code
+# that produces it. The floor cannot fall.
+npm run --silent audit:samples | tail -2
+
 echo "── secrets ──────────────────────────────────────────────────────"
 python3 scripts/scan-secrets.py
 

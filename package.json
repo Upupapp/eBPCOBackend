@@ -18,7 +18,8 @@
     "verify": "npm run typecheck && npm run lint && npm run test",
     "emit:catalog": "ts-node --transpile-only scripts/emit-notification-catalog.ts",
     "emit:samples": "ts-node --transpile-only scripts/emit-response-samples.ts",
-    "audit:reachability": "ts-node --transpile-only scripts/reachability.ts"
+    "audit:reachability": "ts-node --transpile-only scripts/reachability.ts",
+    "audit:samples": "ts-node --transpile-only scripts/sample-coverage.ts"
   },
   "dependencies": {
     "@fastify/helmet": "^13.0.2",

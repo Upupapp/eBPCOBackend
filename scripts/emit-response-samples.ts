@@ -359,10 +359,16 @@ async function main(): Promise<void> {
   const cashierToken = await tokenFor('cashier', seeded.cashier);
   const releasingToken = await tokenFor('releasing-officer', seeded.releasing);
 
+  // The administration and audit surfaces need scopes no operational role
+  // holds -- `staff:administer` and `audit:read`. Minted from the same seeded
+  // account rather than a new one: what is being recorded is the RESPONSE
+  // shape, and which officer asked does not change it.
+  const adminToken = await tokenFor('super-admin', seeded.official);
+
   const samples: Record<string, unknown> = {};
 
   async function record(
-    name: string, method: 'GET' | 'POST' | 'DELETE', url: string, token: string,
+    name: string, method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, token: string,
     payload?: Record<string, unknown>, idempotencyKey?: string,
   ): Promise<void> {
     const response = await app.inject({
@@ -507,6 +513,32 @@ async function main(): Promise<void> {
 
   // The RA 10173 §18 portability right. Recorded before erasure, because that
   // disables the account.
+  // ── The surfaces this programme added (TABs 00-15) ────────────────────
+  //
+  // Reads only. A recorded sample is REAL SERVER BYTES, so every one of these
+  // is the shape a client will actually receive — which is the whole point of
+  // recording them rather than writing examples by hand. The write endpoints
+  // are not recorded here: each needs state built up in a particular order, and
+  // a sample produced from a half-built fixture would document a response the
+  // system never really sends.
+  await record('staff.config.workflow', 'GET', '/staff/config/workflow', officialToken);
+  await record('staff.config.feeSchedules', 'GET', '/staff/config/fee-schedules', officialToken);
+  await record('staff.config.paymentMethods', 'GET', '/staff/config/payment-methods', officialToken);
+  await record('staff.config.requirements', 'GET', '/staff/config/requirements/Fencing', officialToken);
+  await record('requirements.applicant', 'GET', '/requirements/Fencing', applicantToken);
+  await record('staff.businesses.list', 'GET', '/staff/businesses', officialToken);
+  await record('staff.evaluations.queue', 'GET', '/staff/evaluations', evaluatorToken);
+  await record('staff.users.list', 'GET', '/staff/users', adminToken);
+  await record('staff.audit.stream', 'GET', '/staff/audit?limit=5', adminToken);
+  await record('staff.reports.processingTimes', 'GET',
+    '/staff/reports/processing-times?from=2026-01-01&to=2027-01-01', officialToken);
+
+  // The unauthenticated three. Recorded because an operator reads them at three
+  // in the morning and their shape is as much a contract as any other.
+  await record('health', 'GET', '/health', applicantToken);
+  await record('ready', 'GET', '/ready', applicantToken);
+  await record('version', 'GET', '/version', applicantToken);
+
   await record('me.export.request', 'POST', '/me/export', applicantToken);
   const exportRequestId = (samples['me.export.request'] as { body: { requestId: string } })
     .body.requestId;

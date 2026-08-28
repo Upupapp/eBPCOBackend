@@ -1250,6 +1250,1039 @@
         ]
       }
     },
+    "staff.config.workflow": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/config/workflow",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "statuses": [
+          {
+            "status": "Draft",
+            "applicantStatus": "Draft",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": false
+          },
+          {
+            "status": "Submitted",
+            "applicantStatus": "Submitted",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Received",
+            "applicantStatus": "Submitted",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Document Verification",
+            "applicantStatus": "Under Review",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Under Evaluation",
+            "applicantStatus": "Under Review",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Revision Required",
+            "applicantStatus": "Under Review",
+            "terminal": false,
+            "awaitingApplicant": true,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Assessed",
+            "applicantStatus": "Payment Verification",
+            "terminal": false,
+            "awaitingApplicant": true,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Payment Submitted",
+            "applicantStatus": "Payment Verification",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Payment Under Verification",
+            "applicantStatus": "Payment Verification",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Payment Verified",
+            "applicantStatus": "Payment Verification",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "For Approval",
+            "applicantStatus": "Payment Verification",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Approved",
+            "applicantStatus": "Approved",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Permit Generated",
+            "applicantStatus": "Approved",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Ready for Release",
+            "applicantStatus": "Ready for Release",
+            "terminal": false,
+            "awaitingApplicant": true,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Released",
+            "applicantStatus": "Ready for Release",
+            "terminal": false,
+            "awaitingApplicant": false,
+            "pledgeRuns": true
+          },
+          {
+            "status": "Completed",
+            "applicantStatus": "Ready for Release",
+            "terminal": true,
+            "awaitingApplicant": false,
+            "pledgeRuns": false
+          },
+          {
+            "status": "Rejected",
+            "applicantStatus": "Rejected",
+            "terminal": true,
+            "awaitingApplicant": false,
+            "pledgeRuns": false
+          },
+          {
+            "status": "Cancelled",
+            "applicantStatus": "Rejected",
+            "terminal": true,
+            "awaitingApplicant": false,
+            "pledgeRuns": false
+          },
+          {
+            "status": "Expired",
+            "applicantStatus": "Rejected",
+            "terminal": true,
+            "awaitingApplicant": false,
+            "pledgeRuns": false
+          }
+        ],
+        "transitions": [
+          {
+            "from": "Draft",
+            "to": "Submitted",
+            "actors": [
+              "applicant"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [
+              "identity-document-verified",
+              "required-documents-present"
+            ],
+            "notifies": "application-submitted"
+          },
+          {
+            "from": "Draft",
+            "to": "Cancelled",
+            "actors": [
+              "applicant"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Submitted",
+            "to": "Received",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "applications:read",
+            "roles": [
+              "receiving-officer",
+              "records-officer",
+              "evaluator",
+              "assessor",
+              "cashier",
+              "building-official",
+              "releasing-officer",
+              "auditor",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": "received-by-obo"
+          },
+          {
+            "from": "Submitted",
+            "to": "Cancelled",
+            "actors": [
+              "applicant",
+              "staff"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Received",
+            "to": "Document Verification",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "documents:read",
+            "roles": [
+              "receiving-officer",
+              "records-officer",
+              "evaluator",
+              "building-official",
+              "auditor",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": "document-verification-started"
+          },
+          {
+            "from": "Received",
+            "to": "Cancelled",
+            "actors": [
+              "applicant",
+              "staff"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Document Verification",
+            "to": "Under Evaluation",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:evaluate",
+            "roles": [
+              "evaluator"
+            ],
+            "preconditions": [
+              "identity-document-verified",
+              "required-documents-present"
+            ],
+            "notifies": null
+          },
+          {
+            "from": "Document Verification",
+            "to": "Revision Required",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:evaluate",
+            "roles": [
+              "evaluator"
+            ],
+            "preconditions": [],
+            "notifies": "revision-required"
+          },
+          {
+            "from": "Document Verification",
+            "to": "Rejected",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [],
+            "notifies": "rejected"
+          },
+          {
+            "from": "Under Evaluation",
+            "to": "Assessed",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:assess",
+            "roles": [
+              "assessor"
+            ],
+            "preconditions": [
+              "evaluations-complete",
+              "order-of-payment-issued"
+            ],
+            "notifies": "order-of-payment-issued"
+          },
+          {
+            "from": "Under Evaluation",
+            "to": "Revision Required",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:evaluate",
+            "roles": [
+              "evaluator"
+            ],
+            "preconditions": [],
+            "notifies": "revision-required"
+          },
+          {
+            "from": "Under Evaluation",
+            "to": "Rejected",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [],
+            "notifies": "rejected"
+          },
+          {
+            "from": "Revision Required",
+            "to": "Under Evaluation",
+            "actors": [
+              "applicant"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [
+              "all-instructions-resolved"
+            ],
+            "notifies": null
+          },
+          {
+            "from": "Revision Required",
+            "to": "Cancelled",
+            "actors": [
+              "applicant",
+              "staff"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Revision Required",
+            "to": "Expired",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "applications:write",
+            "roles": [
+              "records-officer",
+              "super-admin"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Assessed",
+            "to": "Payment Submitted",
+            "actors": [
+              "applicant"
+            ],
+            "requiresScope": "payments:write",
+            "roles": [],
+            "preconditions": [
+              "order-of-payment-issued",
+              "payment-proof-submitted"
+            ],
+            "notifies": "payment-received"
+          },
+          {
+            "from": "Assessed",
+            "to": "Cancelled",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:assess",
+            "roles": [
+              "assessor"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Assessed",
+            "to": "Expired",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:assess",
+            "roles": [
+              "assessor"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Payment Submitted",
+            "to": "Payment Under Verification",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:verify-payment",
+            "roles": [
+              "cashier"
+            ],
+            "preconditions": [
+              "payment-proof-submitted"
+            ],
+            "notifies": null
+          },
+          {
+            "from": "Payment Under Verification",
+            "to": "Payment Verified",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:verify-payment",
+            "roles": [
+              "cashier"
+            ],
+            "preconditions": [
+              "payment-verified"
+            ],
+            "notifies": "payment-verified"
+          },
+          {
+            "from": "Payment Under Verification",
+            "to": "Payment Submitted",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:verify-payment",
+            "roles": [
+              "cashier"
+            ],
+            "preconditions": [],
+            "notifies": null
+          },
+          {
+            "from": "Payment Verified",
+            "to": "For Approval",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:verify-payment",
+            "roles": [
+              "cashier"
+            ],
+            "preconditions": [
+              "payment-verified"
+            ],
+            "notifies": null
+          },
+          {
+            "from": "For Approval",
+            "to": "Approved",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [
+              "payment-verified",
+              "evaluations-complete"
+            ],
+            "notifies": "approved"
+          },
+          {
+            "from": "For Approval",
+            "to": "Revision Required",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [],
+            "notifies": "revision-required"
+          },
+          {
+            "from": "For Approval",
+            "to": "Rejected",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [],
+            "notifies": "rejected"
+          },
+          {
+            "from": "Approved",
+            "to": "Permit Generated",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:approve",
+            "roles": [
+              "building-official"
+            ],
+            "preconditions": [
+              "permit-generated"
+            ],
+            "notifies": "permit-generated"
+          },
+          {
+            "from": "Permit Generated",
+            "to": "Ready for Release",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:release",
+            "roles": [
+              "releasing-officer"
+            ],
+            "preconditions": [
+              "permit-generated"
+            ],
+            "notifies": "ready-for-release"
+          },
+          {
+            "from": "Ready for Release",
+            "to": "Released",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:release",
+            "roles": [
+              "releasing-officer"
+            ],
+            "preconditions": [
+              "permit-generated"
+            ],
+            "notifies": "released"
+          },
+          {
+            "from": "Released",
+            "to": "Completed",
+            "actors": [
+              "staff"
+            ],
+            "requiresScope": "staff:release",
+            "roles": [
+              "releasing-officer"
+            ],
+            "preconditions": [],
+            "notifies": null
+          }
+        ]
+      }
+    },
+    "staff.config.feeSchedules": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/config/fee-schedules",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "data": [
+          {
+            "version": "2026.1",
+            "effectiveFrom": "2026-01-01",
+            "effectiveTo": null,
+            "publishedBy": "City Ordinance 2026-004",
+            "status": "In force",
+            "entries": [
+              {
+                "permitType": "Fencing",
+                "line": "filing",
+                "amountCentavos": 50000,
+                "basis": "City Ordinance 2026-004 s.3"
+              },
+              {
+                "permitType": "Fencing",
+                "line": "processing",
+                "amountCentavos": 120000,
+                "basis": "City Ordinance 2026-004 s.3"
+              },
+              {
+                "permitType": "Fencing",
+                "line": "structural",
+                "amountCentavos": 512000,
+                "basis": "City Ordinance 2026-004 s.3"
+              }
+            ]
+          }
+        ]
+      }
+    },
+    "staff.config.paymentMethods": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/config/payment-methods",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "data": [
+          {
+            "method": "Bank Transfer",
+            "label": "Bank Transfer",
+            "active": true,
+            "instructions": ""
+          },
+          {
+            "method": "Onsite",
+            "label": "Onsite (cashier)",
+            "active": true,
+            "instructions": ""
+          }
+        ]
+      }
+    },
+    "staff.config.requirements": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/config/requirements/Fencing",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "permitType": "Fencing",
+        "documents": []
+      }
+    },
+    "requirements.applicant": {
+      "request": {
+        "method": "GET",
+        "path": "/requirements/Fencing",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "permitType": "Fencing",
+        "documents": []
+      }
+    },
+    "staff.businesses.list": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/businesses",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "data": [
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "name": "Aling Nena Sari-Sari Store",
+            "category": "Retail",
+            "street": "12 Rizal Street",
+            "barangay": "Poblacion Uno",
+            "city": "Cabuyao",
+            "province": "Laguna",
+            "registrationNumber": "DTI-2024-004417",
+            "dateRegistered": "2024-01-15",
+            "status": "Active",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "owner": {
+              "applicantId": "00000000-0000-4000-8000-000000000000",
+              "name": "Maria Santos",
+              "email": "maria.santos@example.ph",
+              "mobileNumber": null
+            },
+            "applicationCount": 4
+          }
+        ]
+      }
+    },
+    "staff.evaluations.queue": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/evaluations",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "items": [
+          {
+            "applicationId": "00000000-0000-4000-8000-000000000000",
+            "referenceNumber": "BP-2026-000044",
+            "permitType": "Fencing",
+            "lifecycleStatus": "Under Evaluation",
+            "applicantName": "Maria Santos",
+            "businessId": "00000000-0000-4000-8000-000000000000",
+            "businessName": "Aling Nena Sari-Sari Store",
+            "submittedAt": "2026-01-01T00:00:00.000Z",
+            "evaluations": [
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Initial",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Zoning",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Fire Safety",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "OBO",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Final Approval",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              }
+            ],
+            "nextStage": null,
+            "requiredDocumentCount": 0,
+            "attachedDocumentCount": 0
+          },
+          {
+            "applicationId": "00000000-0000-4000-8000-000000000000",
+            "referenceNumber": "BP-2026-000041",
+            "permitType": "Fencing",
+            "lifecycleStatus": "Under Evaluation",
+            "applicantName": "Maria Santos",
+            "businessId": "00000000-0000-4000-8000-000000000000",
+            "businessName": "Aling Nena Sari-Sari Store",
+            "submittedAt": "2026-01-01T00:00:00.000Z",
+            "evaluations": [
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Initial",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Zoning",
+                "result": "Passed",
+                "remarks": "Setbacks conform to the zoning ordinance.",
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              },
+              {
+                "id": "00000000-0000-4000-8000-000000000000",
+                "stage": "Fire Safety",
+                "result": "Passed",
+                "remarks": null,
+                "evaluatedAt": "2026-01-01T00:00:00.000Z"
+              }
+            ],
+            "nextStage": "OBO",
+            "requiredDocumentCount": 0,
+            "attachedDocumentCount": 1
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    "staff.users.list": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/users",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "data": [
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "assessor@cabuyao.gov.ph",
+            "roles": [
+              "assessor"
+            ],
+            "status": "Pending",
+            "mfaRequired": true,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "building-official@cabuyao.gov.ph",
+            "roles": [
+              "building-official"
+            ],
+            "status": "Pending",
+            "mfaRequired": true,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "cashier@cabuyao.gov.ph",
+            "roles": [
+              "cashier"
+            ],
+            "status": "Pending",
+            "mfaRequired": true,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "evaluator@cabuyao.gov.ph",
+            "roles": [
+              "evaluator"
+            ],
+            "status": "Pending",
+            "mfaRequired": false,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "records-officer@cabuyao.gov.ph",
+            "roles": [
+              "records-officer"
+            ],
+            "status": "Pending",
+            "mfaRequired": false,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "email": "releasing-officer@cabuyao.gov.ph",
+            "roles": [
+              "releasing-officer"
+            ],
+            "status": "Pending",
+            "mfaRequired": true,
+            "mfaEnrolled": false,
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "lastSignInAt": null
+          }
+        ]
+      }
+    },
+    "staff.audit.stream": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/audit",
+        "query": "limit=5"
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "entries": [
+          {
+            "sequence": 5,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "application.submitted",
+            "outcome": "allowed",
+            "subjectType": "application",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": null
+          },
+          {
+            "sequence": 4,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "permit.release-prepared",
+            "outcome": "allowed",
+            "subjectType": "application",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": null
+          },
+          {
+            "sequence": 3,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "permit.generated",
+            "outcome": "allowed",
+            "subjectType": "application",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": null
+          },
+          {
+            "sequence": 2,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "evaluation.recorded",
+            "outcome": "allowed",
+            "subjectType": "application",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": null
+          },
+          {
+            "sequence": 1,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "application.transitioned",
+            "outcome": "allowed",
+            "subjectType": "application",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": "staff"
+          }
+        ],
+        "nextCursor": null
+      }
+    },
+    "staff.reports.processingTimes": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/reports/processing-times",
+        "query": "from=2026-01-01&to=2027-01-01"
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "from": "2026-01-01",
+        "to": "2027-01-01",
+        "rows": [
+          {
+            "permitType": "Fencing",
+            "classification": "Simple",
+            "pledgedWorkingDays": 7,
+            "total": 6,
+            "withinPledge": 0,
+            "beyondPledge": 0,
+            "indeterminate": 6,
+            "complianceRate": null
+          }
+        ],
+        "totalMeasured": 0,
+        "unclassified": 0,
+        "overallComplianceRate": null
+      }
+    },
+    "health": {
+      "request": {
+        "method": "GET",
+        "path": "/health",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "status": "ok"
+      }
+    },
+    "ready": {
+      "request": {
+        "method": "GET",
+        "path": "/ready",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "status": "ready",
+        "checks": [
+          {
+            "name": "objectStore",
+            "status": "up",
+            "detail": null
+          },
+          {
+            "name": "malwareScanner",
+            "status": "up",
+            "detail": null
+          },
+          {
+            "name": "database",
+            "status": "up",
+            "detail": null
+          }
+        ]
+      }
+    },
+    "version": {
+      "request": {
+        "method": "GET",
+        "path": "/version",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "version": "0.1.0-dev",
+        "commit": "unknown",
+        "builtAt": "2026-01-01T00:00:00.000Z",
+        "environment": "staging",
+        "contractVersion": "0.1.0"
+      }
+    },
     "me.export.request": {
       "request": {
         "method": "POST",
