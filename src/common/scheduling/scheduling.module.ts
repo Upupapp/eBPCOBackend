@@ -16,7 +16,7 @@ import { Job, JobRunner } from './job-runner';
 import { Scheduler } from './scheduler';
 import {
   auditVerificationJob, dataExportExpiryJob, dataExportJob,
-  notificationDispatchJob, operationalPurgeJob, retentionJob,
+  notificationDispatchJob, operationalPurgeJob, overdueAssessmentJob, retentionJob,
 } from './jobs';
 
 export const JOB_RUNNER = Symbol('EBPCO_JOB_RUNNER');
@@ -63,6 +63,7 @@ export const SCHEDULER = Symbol('EBPCO_SCHEDULER');
           operationalPurgeJob(db),
           dataExportJob(dataExports, db),
           dataExportExpiryJob(dataExports),
+          overdueAssessmentJob(db),
         ];
         return new Scheduler(runner, jobs, logger, drain, config.SCHEDULER_TICK_SECONDS);
       },

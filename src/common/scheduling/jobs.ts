@@ -5,6 +5,7 @@ import { AuditService } from '../../modules/compliance/application/audit.service
 import { DocumentService } from '../../modules/documents/application/document.service';
 import { NotificationService } from '../../modules/notifications/application/notification.service';
 import { DataExportService } from '../../modules/compliance/application/data-export.service';
+import { deepLinkFor, entryFor } from '../../modules/notifications/domain/catalog';
 
 /**
  * The four jobs, and what each is allowed to claim about itself.
@@ -137,6 +138,101 @@ export function operationalPurgeJob(db: SqlClient, clock: () => Date = () => new
 
       return `idempotency keys ${keys.rowCount}, refresh tokens ${tokens.rowCount}, `
         + `reset tickets ${tickets.rowCount}, session revocations ${revocations.rowCount}`;
+    },
+  };
+}
+
+/**
+ * Tells an applicant their Order of Payment has fallen due.
+ *
+ * ── What "overdue" attaches to ──────────────────────────────────────────
+ *
+ * The Order, not the payment. A `payments` row exists only once somebody has
+ * submitted proof, so the applicant who worries the LGU most — the one who has
+ * paid nothing at all — has no payment row to mark. Sweeping payments would
+ * find every case except the one that matters.
+ *
+ * So the sweep reads Orders in force whose `due_date` has passed with nothing
+ * verified against them, and it also moves any payment still sitting unverified
+ * on such an Order to 'Overdue', because a proof submitted and never confirmed
+ * is not a settled fee.
+ *
+ * ── It does not move the application ────────────────────────────────────
+ *
+ * `Assessed -> Expired` is a legal transition and this job does not make it.
+ * Expiring an application ends it, and ending someone's application because a
+ * date passed while nobody looked is a decision the LGU takes, not a
+ * consequence of a cron entry. The transition table is also the only thing that
+ * knows which moves are legal from where — the same boundary the payment
+ * exceptions in TAB 07 respect.
+ *
+ * ── Once per Order ──────────────────────────────────────────────────────
+ *
+ * `payment-overdue` is a statutory notice: it starts a clock the applicant can
+ * miss. Sending it again every time the job runs would train them to ignore it,
+ * so an Order that has already produced one is skipped. The check is against
+ * the notification rows rather than a flag, because the notification IS the
+ * record of having told them.
+ */
+export function overdueAssessmentJob(db: SqlClient, clock: () => Date = () => new Date()): Job {
+  return {
+    name: 'overdue-assessments',
+    leaseSeconds: 300,
+    async run(): Promise<string> {
+      const now = clock();
+
+      const due = await db.query<{
+        id: string; application_id: string; account_id: string; number: string;
+      }>(
+        `select o.id, o.application_id, acc.id as account_id, o.number
+           from orders_of_payment o
+           join applications a on a.id = o.application_id
+           join applicants ap on ap.id = a.applicant_id
+           join accounts acc on acc.id = ap.account_id
+          where o.superseded_at is null
+            and o.due_date is not null
+            and o.due_date < $1::date
+            and a.archived_at is null
+            -- Nothing settled against it. A verified payment means the fee was
+            -- paid, whenever it was paid.
+            and not exists (
+              select 1 from payments p
+               where p.order_of_payment_id = o.id and p.status = 'Paid')
+            -- And they have not already been told about this Order.
+            and not exists (
+              select 1 from notifications n
+               where n.application_id = o.application_id and n.type = 'payment-overdue')`,
+        [now],
+      );
+
+      if (due.rows.length === 0) return 'nothing overdue';
+
+      const entry = entryFor('payment-overdue');
+      for (const order of due.rows) {
+        await db.transaction(async (tx) => {
+          // Unverified proof against an overdue Order is not a settled fee. A
+          // payment already Voided, Reversed or Refunded is left alone: those
+          // say something specific about what happened to the money, and
+          // overwriting them with 'Overdue' would lose it.
+          await tx.query(
+            `update payments set status = 'Overdue'
+              where order_of_payment_id = $1
+                and status in ('Not Yet Available', 'Pending Verification')`,
+            [order.id],
+          );
+
+          if (entry !== undefined) {
+            await tx.query(
+              `insert into notifications (account_id, type, application_id, title, body, deep_link)
+               values ($1, $2, $3, $4, $5, $6)`,
+              [order.account_id, entry.type, order.application_id, entry.title, entry.body,
+               deepLinkFor(entry, order.application_id)],
+            );
+          }
+        });
+      }
+
+      return `${due.rows.length} Order(s) of Payment overdue; applicants notified`;
     },
   };
 }

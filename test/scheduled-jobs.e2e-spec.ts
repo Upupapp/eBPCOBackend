@@ -9,7 +9,8 @@ import { DrainState } from '../src/common/lifecycle/shutdown';
 import { JobRunner } from '../src/common/scheduling/job-runner';
 import { Scheduler } from '../src/common/scheduling/scheduler';
 import {
-  auditVerificationJob, notificationDispatchJob, operationalPurgeJob, retentionJob,
+  auditVerificationJob, notificationDispatchJob, operationalPurgeJob, overdueAssessmentJob,
+  retentionJob,
 } from '../src/common/scheduling/jobs';
 import { AuditService } from '../src/modules/compliance/application/audit.service';
 import { NotificationService } from '../src/modules/notifications/application/notification.service';
@@ -298,6 +299,7 @@ describe('every seeded job has something to run it', () => {
       operationalPurgeJob(db, () => now),
       dataExportJob(new DataExportService(db, store, () => now), db),
       dataExportExpiryJob(new DataExportService(db, store, () => now)),
+      overdueAssessmentJob(db, () => now),
     ].map((job) => job.name).sort();
 
     expect(registered).toEqual(seeded);
@@ -363,5 +365,158 @@ describe('data exports', () => {
 
     expect(objects.size).toBe(0);
     expect((await jobRow('data-export-expiry')).last_detail).toContain('1 export(s) expired');
+  });
+});
+
+describe('the overdue Order of Payment sweep', () => {
+  const overdue = async (dueDaysAgo: number, options: {
+    paid?: boolean; superseded?: boolean; withProof?: boolean;
+  } = {}): Promise<{ applicationId: string; orderId: string; accountId: string }> => {
+    const accountId = randomUUID();
+    const applicantId = randomUUID();
+    const applicationId = randomUUID();
+    const orderId = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant',$2,$2,'scrypt$1$1$1$a$b')`,
+      [accountId, `overdue-${accountId.slice(0, 8)}@example.ph`],
+    );
+    await db.query(
+      `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Maria','Santos')`,
+      [applicantId, accountId],
+    );
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                                 lifecycle_status, submitted_at, created_by)
+       values ($1,$2,$3,'Fencing','New','Submitted', now(), $4)`,
+      [applicationId, `E-BPCO-2026-${randomUUID().slice(0, 6)}`, applicantId, accountId],
+    );
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                      architectural_centavos, structural_centavos, electrical_centavos,
+                                      others_centavos, total_centavos, fee_schedule_version,
+                                      assessed_at, assessed_by, due_date, superseded_at)
+       values ($1,$2,$3,1000,1000,0,0,0,0,2000,'2026.1', now(), $4,
+               $5::date, $6)`,
+      [orderId, applicationId, `OP-${randomUUID().slice(0, 8)}`, accountId,
+       // Derived from the PINNED clock, not the database's. Every job here runs
+       // against `now`, and a due date computed from `now()` sits eight days in
+       // the future relative to it — so the sweep correctly found nothing and
+       // the test was measuring its own fixture.
+       new Date(now.getTime() - dueDaysAgo * 86_400_000).toISOString().slice(0, 10),
+       options.superseded === true ? new Date() : null],
+    );
+    if (options.paid === true || options.withProof === true) {
+      // A separate officer: `verifier_is_not_the_submitter` refuses a payment
+      // confirmed by the person who submitted it.
+      const officerId = randomUUID();
+      await db.query(
+        `insert into accounts (id, kind, email, email_normalised, password_hash)
+         values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+        [officerId, `cashier-${officerId.slice(0, 8)}@lgu.gov.ph`],
+      );
+      await db.query(
+        `insert into payments (id, order_of_payment_id, application_id, reference_number,
+                               amount_centavos, method, status, submitted_by, verified_at,
+                               verified_by, official_receipt_number)
+         values ($1,$2,$3,'REF-1',2000,'Onsite',$4,$5,$6,$7,$8)`,
+        [randomUUID(), orderId, applicationId,
+         options.paid === true ? 'Paid' : 'Pending Verification', accountId,
+         options.paid === true ? new Date() : null,
+         options.paid === true ? officerId : null,
+         options.paid === true ? 'OR-1' : null],
+      );
+    }
+    return { applicationId, orderId, accountId };
+  };
+
+  const notices = async (applicationId: string): Promise<number> =>
+    Number((await db.query<{ n: string }>(
+      `select count(*) as n from notifications
+        where application_id = $1 and type = 'payment-overdue'`,
+      [applicationId],
+    )).rows[0]?.n ?? 0);
+
+  it('notifies the applicant when the due date has passed with nothing settled', async () => {
+    const { applicationId } = await overdue(3);
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    expect(await notices(applicationId)).toBe(1);
+  });
+
+  it('SENDS IT ONCE, however often the job runs', async () => {
+    // A statutory notice repeated every five minutes trains an applicant to
+    // ignore it. The check is against the notification rows, because the
+    // notification IS the record of having told them.
+    const { applicationId } = await overdue(3);
+
+    // The clock has to MOVE between runs. `runIfDue` honours the job's
+    // interval, so three calls at one instant are one run and two skips — this
+    // test passed with the once-only guard deleted until that was noticed,
+    // which is a test asserting something it never exercised.
+    for (let i = 0; i < 3; i += 1) {
+      await runner().runIfDue(overdueAssessmentJob(db, () => now));
+      now = new Date(now.getTime() + 7 * 3_600_000);
+    }
+
+    expect(await notices(applicationId)).toBe(1);
+  });
+
+  it('says nothing when the fee has been paid, whenever it was paid', async () => {
+    const { applicationId } = await overdue(30, { paid: true });
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    expect(await notices(applicationId)).toBe(0);
+  });
+
+  it('ignores an Order that has been superseded', async () => {
+    // A corrected Order carries its own due date; the one it replaced is not a
+    // debt anybody owes.
+    const { applicationId } = await overdue(30, { superseded: true });
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    expect(await notices(applicationId)).toBe(0);
+  });
+
+  it('says nothing before the due date', async () => {
+    const { applicationId } = await overdue(-5);
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    expect(await notices(applicationId)).toBe(0);
+  });
+
+  it('marks unverified proof Overdue, because it is not a settled fee', async () => {
+    const { orderId } = await overdue(3, { withProof: true });
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    const status = await db.query<{ status: string }>(
+      'select status from payments where order_of_payment_id = $1', [orderId],
+    );
+    expect(status.rows[0]?.status).toBe('Overdue');
+  });
+
+  it('LEAVES THE APPLICATION WHERE IT IS', async () => {
+    // Assessed -> Expired is a legal transition and this job does not make it.
+    // Ending someone's application because a date passed while nobody looked is
+    // a decision the LGU takes, not a consequence of a cron entry.
+    const { applicationId } = await overdue(3);
+
+    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    const status = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    expect(status.rows[0]?.lifecycle_status).toBe('Submitted');
+  });
+
+  it('reports nothing to do rather than pretending it swept', async () => {
+    const result = await runner().runIfDue(overdueAssessmentJob(db, () => now));
+
+    expect(JSON.stringify(result)).toMatch(/nothing overdue|Order/);
   });
 });

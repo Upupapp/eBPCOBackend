@@ -124,8 +124,6 @@ describe('every notice in the catalog has something that sends it', () => {
       'nothing ISSUES a letter of instruction — the only path is respond(), and there is no create route',
     'fsec-cleared':
       'fire safety is recorded as an evaluation stage; there is no separate FSEC record or clearance route',
-    'payment-overdue':
-      'assessments carry a due_date, but no scheduled job compares it to the clock',
     'inspection-scheduled':
       'the inspections table exists (migration 005) and nothing inserts into it',
     'appointment-reminder':
@@ -180,7 +178,7 @@ describe('every notice in the catalog has something that sends it', () => {
     // Recorded rather than asserted at a threshold: the number should move in
     // one direction, and a threshold would let it sit still.
     const emitted = serverGenerated.length - unemitted.length;
-    expect(emitted).toBe(13);
+    expect(emitted).toBe(14);
     expect(serverGenerated).toHaveLength(23);
   });
 });
