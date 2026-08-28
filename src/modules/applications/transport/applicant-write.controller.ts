@@ -26,6 +26,8 @@ import { PaymentService } from '../../payments/application/payment.service';
 const submissionShape = z.object({
   permitType: z.string().min(1).max(80),
   applicationAction: z.enum(['New', 'Renewal', 'Amendment']),
+  /** The permit this renews, as printed on the applicant's copy. */
+  renewsPermitNumber: z.string().min(1).max(60).nullable().optional(),
   businessId: z.string().uuid().nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   documentIds: z.array(z.string().uuid()).max(60).optional(),
@@ -146,6 +148,7 @@ export class ApplicantWriteController {
         applicationAction: input.applicationAction,
         businessId: input.businessId ?? null,
         location: input.location ?? null,
+        renewsPermitNumber: input.renewsPermitNumber ?? null,
         documentIds: input.documentIds ?? [],
         form,
       },

@@ -35,7 +35,8 @@ export type SubmitResult =
   | {
       readonly ok: false;
       readonly reason: 'no-applicant-record' | 'unknown-permit-type' | 'business-not-yours'
-        | 'documents-not-yours' | 'key-reused' | 'form-rejected';
+        | 'documents-not-yours' | 'key-reused' | 'form-rejected'
+        | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found';
       readonly detail: string;
       /** Present for `form-rejected`, so a client can point at the field. */
       readonly violations?: readonly FormViolation[];
@@ -46,6 +47,13 @@ export interface Submission {
   readonly applicationAction: 'New' | 'Renewal' | 'Amendment';
   readonly businessId: string | null;
   readonly location: string | null;
+  /**
+   * The permit a Renewal or Amendment is about, as printed on the applicant's
+   * copy. Null for a New application, and required for the other two — a
+   * renewal that names nothing leaves an officer searching for the original by
+   * the applicant's name.
+   */
+  readonly renewsPermitNumber?: string | null;
   readonly documentIds: readonly string[];
   /** The applicant's answers. Structurally bounded by the transport; semantically checked here if a schema exists. */
   readonly form: Record<string, unknown>;
@@ -187,9 +195,16 @@ export class SubmissionService {
         }
       }
 
+      const renewal = await this.resolveRenewal(tx, {
+        action: submission.applicationAction,
+        permitNumber: submission.renewsPermitNumber ?? null,
+        applicantId,
+      });
+      if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
+
       const now = this.clock();
       const { applicationId, referenceNumber } = await this.fileApplication(tx, {
-        applicantId, submission, now,
+        applicantId, submission, now, renewsPermitId: renewal.permitId,
         // Self-service: the filer and the applicant are the same account.
         filedBy: caller.accountId,
         formValidatedAgainst: schema?.version ?? null,
@@ -257,6 +272,7 @@ export class SubmissionService {
     business: NewBusiness | null;
     businessId: string | null;
     submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'form'>;
+    renewsPermitNumber?: string | null;
     idempotencyKey: string;
   }): Promise<OnBehalfResult> {
     const { caller, applicant, submission, idempotencyKey } = options;
@@ -359,9 +375,16 @@ export class SubmissionService {
         };
       }
 
+      const renewal = await this.resolveRenewal(tx, {
+        action: submission.applicationAction,
+        permitNumber: options.renewsPermitNumber ?? null,
+        applicantId,
+      });
+      if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
+
       const now = this.clock();
       const filed = await this.fileApplication(tx, {
-        applicantId, now,
+        applicantId, now, renewsPermitId: renewal.permitId,
         submission: { ...submission, businessId },
         // THE DISTINCTION. `created_by` is the officer who typed it in;
         // `applicant_id` is whose permit it is. Collapsing them would credit
@@ -396,6 +419,64 @@ export class SubmissionService {
   }
 
   /**
+   * The permit a Renewal or Amendment is about.
+   *
+   * Theirs, or nothing. Renewing someone else's permit would put their
+   * particulars on this applicant's filing, and it is the same rule the
+   * business check enforces one field away — an applicant may only build on
+   * records that are already theirs.
+   *
+   * Resolved from the permit NUMBER the applicant quotes, because that is what
+   * is printed on the instrument in their hand; the column stores the key.
+   */
+  private async resolveRenewal(
+    tx: SqlClient,
+    options: { action: string; permitNumber: string | null; applicantId: string },
+  ): Promise<
+    | { ok: true; permitId: string | null }
+    | { ok: false; reason: 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found'; detail: string }
+  > {
+    const { action, permitNumber, applicantId } = options;
+
+    if (action === 'New') {
+      if (permitNumber !== null) {
+        return {
+          ok: false, reason: 'not-a-renewal',
+          detail: 'A New application does not renew a permit. Choose Renewal or Amendment, or omit it.',
+        };
+      }
+      return { ok: true, permitId: null };
+    }
+
+    if (permitNumber === null) {
+      // The defect the whole column exists to prevent: an officer opening a
+      // renewal and having to find the original by searching a name.
+      return {
+        ok: false, reason: 'renewal-needs-a-permit',
+        detail: `A ${action} has to say which permit it is about. Quote the permit number.`,
+      };
+    }
+
+    const found = await tx.query<{ application_id: string }>(
+      `select g.application_id
+         from generated_permits g
+         join applications a on a.id = g.application_id
+        where g.permit_number = $1 and a.applicant_id = $2`,
+      [permitNumber, applicantId],
+    );
+    const permitId = found.rows[0]?.application_id;
+    if (permitId === undefined) {
+      // One answer for "no such permit" and "not yours", deliberately. Telling
+      // them apart would let anyone test whether a permit number exists.
+      return {
+        ok: false, reason: 'permit-not-found',
+        detail: `No permit numbered "${permitNumber}" is registered to this applicant.`,
+      };
+    }
+    return { ok: true, permitId };
+  }
+
+  /**
    * The row itself, written the same way however the filing was initiated.
    *
    * Extracted because assisted filing needs it and a second copy would mean two
@@ -412,6 +493,7 @@ export class SubmissionService {
       now: Date;
       filedBy: string;
       formValidatedAgainst: string | null;
+      renewsPermitId: string | null;
     },
   ): Promise<{ applicationId: string; referenceNumber: string }> {
     const { applicantId, submission, now, filedBy } = options;
@@ -441,15 +523,15 @@ export class SubmissionService {
       `insert into applications
          (reference_number, applicant_id, business_id, permit_type, application_action,
           location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
-          form, form_validated_against, required_documents)
-       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13)
+          form, form_validated_against, required_documents, renews_permit_id)
+       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13,$14)
        returning id`,
       [
         referenceNumber, applicantId, submission.businessId, submission.permitType,
         submission.applicationAction, submission.location,
         charterEntry?.classification ?? null, charterEntry?.id ?? null, now, filedBy,
         JSON.stringify(submission.form), options.formValidatedAgainst,
-        JSON.stringify(requirements),
+        JSON.stringify(requirements), options.renewsPermitId,
       ],
     );
     return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber };

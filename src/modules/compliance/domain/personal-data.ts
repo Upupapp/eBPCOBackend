@@ -182,6 +182,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // A list of document labels the LGU asks everyone for -- it says nothing
     // about the person, only about the permit type.
     required_documents: none('statutory'),
+    // Which permit this renewal is about. A link between two applications
+    // of the same applicant, not information about them.
+    renews_permit_id: structural,
   },
 
   application_transitions: {

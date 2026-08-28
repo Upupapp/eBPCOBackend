@@ -348,3 +348,108 @@ describe('idempotency', () => {
     expect(response.statusCode).toBe(400);
   });
 });
+
+describe('what a renewal renews', () => {
+  /** An issued permit belonging to the walk-in this suite files for. */
+  const permitFor = async (email: string, permitNumber: string): Promise<string> => {
+    const filed = await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+    expect(filed.statusCode).toBe(201);
+    const applicationId = filed.json<{ applicationId: string }>().applicationId;
+    await db.query(
+      `insert into generated_permits (application_id, permit_number, issued_date, generated_by)
+       values ($1,$2, now(), $3)`,
+      [applicationId, permitNumber, officerId],
+    );
+    return applicationId;
+  };
+
+  it('REFUSES a Renewal that names no permit', async () => {
+    // The defect the column exists to prevent: an officer opening a renewal and
+    // having to find the original by searching the applicant's name.
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'renewal.nameless@example.ph' },
+      applicationAction: 'Renewal',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/which permit/i);
+  });
+
+  it('links a Renewal to the permit it names', async () => {
+    await permitFor('renewal.owner@example.ph', 'FP-2026-000501');
+
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'renewal.owner@example.ph' },
+      applicationAction: 'Renewal',
+      renewsPermitNumber: 'FP-2026-000501',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const linked = await db.query<{ permit_number: string }>(
+      `select g.permit_number from applications a
+         join generated_permits g on g.application_id = a.renews_permit_id
+        where a.id = $1`,
+      [response.json<{ applicationId: string }>().applicationId],
+    );
+    expect(linked.rows[0]?.permit_number).toBe('FP-2026-000501');
+  });
+
+  it("REFUSES a permit that is not this applicant's", async () => {
+    // Renewing someone else's permit would put their particulars on this
+    // filing. The same rule the business check enforces one field away.
+    await permitFor('renewal.stranger@example.ph', 'FP-2026-000502');
+
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'renewal.thief@example.ph' },
+      applicationAction: 'Renewal',
+      renewsPermitNumber: 'FP-2026-000502',
+    });
+
+    expect(response.statusCode).toBe(422);
+    // One answer for "no such permit" and "not yours": telling them apart
+    // would let anyone test whether a permit number exists.
+    expect(response.json<{ detail: string }>().detail).toMatch(/registered to this applicant/i);
+  });
+
+  it('answers an unknown permit number the same way as one that is not theirs', async () => {
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'renewal.unknown@example.ph' },
+      applicationAction: 'Renewal',
+      renewsPermitNumber: 'FP-9999-999999',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/registered to this applicant/i);
+  });
+
+  it('refuses a New application that claims to renew something', async () => {
+    await permitFor('renewal.confused@example.ph', 'FP-2026-000503');
+
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'renewal.confused@example.ph' },
+      applicationAction: 'New',
+      renewsPermitNumber: 'FP-2026-000503',
+    });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json<{ detail: string }>().detail).toMatch(/does not renew/i);
+  });
+
+  it('is refused by the database too, not only by the service', async () => {
+    // A row that says Renewal and names nothing is wrong however it was
+    // written, so the constraint holds independently of the code path.
+    const applicant = await db.query<{ id: string }>('select id from applicants limit 1');
+
+    await expect(db.query(
+      `insert into applications (reference_number, applicant_id, permit_type, application_action,
+                                 lifecycle_status, submitted_at, created_by)
+       values ('E-BPCO-2026-999999', $1, 'Fencing', 'Renewal', 'Submitted', now(), $2)`,
+      [applicant.rows[0]?.id, officerId],
+    )).rejects.toThrow(/renewal_names_what_it_renews/);
+  });
+});
