@@ -356,6 +356,137 @@ describe('other things the database will not allow', () => {
     ).rejects.toThrow(/approved_requires_scan/);
   });
 
+  // ── The officer's verdict on one document ───────────────────────────────
+  //
+  // Owner decision 2026-08-28: a document is turned back on its own record,
+  // with a standard reusable reason AND custom feedback. These prove the
+  // database enforces the part that matters — an adverse verdict must say why.
+
+  /** Files a document and returns its id. Scan-cleared, so it is reviewable. */
+  async function fileDocument(key: string): Promise<string> {
+    const inserted = await db.query<{ id: string }>(
+      `insert into documents (application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared)
+       values ($1, $2, 'TCT', 'tct.pdf', 'application/pdf', 100, $3, $4, 'Pending', true)
+       returning id`,
+      [APPLICATION, CITIZEN, 'b'.repeat(64), key],
+    );
+    return inserted.rows[0]!.id;
+  }
+
+  it('refuses a rejected document that says nothing about why', async () => {
+    // The sibling of "refuses an adverse evaluation with no remarks". A
+    // rejection with no reason leaves the applicant to guess, and guessing is
+    // another trip to the office.
+    const id = await fileDocument('k/review-1');
+    await expect(
+      db.query(
+        `update documents set review_status = 'Rejected', reviewed_at = now() where id = $1`,
+        [id],
+      ),
+    ).rejects.toThrow(/adverse_review_has_reason/);
+  });
+
+  it('accepts a standard reason on its own', async () => {
+    const id = await fileDocument('k/review-2');
+    await db.query(
+      `update documents set review_status = 'Revision Required',
+                            review_reason_code = 'illegible', reviewed_at = now()
+       where id = $1`,
+      [id],
+    );
+    const row = await db.query<{ review_reason_code: string }>(
+      `select review_reason_code from documents where id = $1`, [id],
+    );
+    expect(row.rows[0]!.review_reason_code).toBe('illegible');
+  });
+
+  it('accepts custom feedback on its own', async () => {
+    const id = await fileDocument('k/review-3');
+    await db.query(
+      `update documents set review_status = 'Rejected',
+                            review_remark = 'Page 3 is missing.', reviewed_at = now()
+       where id = $1`,
+      [id],
+    );
+    const row = await db.query<{ review_remark: string }>(
+      `select review_remark from documents where id = $1`, [id],
+    );
+    expect(row.rows[0]!.review_remark).toBe('Page 3 is missing.');
+  });
+
+  it("refuses 'Other' with no custom feedback, because it means nothing alone", async () => {
+    const id = await fileDocument('k/review-4');
+    await expect(
+      db.query(
+        `update documents set review_status = 'Rejected',
+                              review_reason_code = 'other', reviewed_at = now()
+         where id = $1`,
+        [id],
+      ),
+    ).rejects.toThrow(/other_reason_needs_remark/);
+  });
+
+  it('refuses a verdict with no moment attached', async () => {
+    const id = await fileDocument('k/review-5');
+    await expect(
+      db.query(
+        `update documents set review_status = 'Accepted' where id = $1`,
+        [id],
+      ),
+    ).rejects.toThrow(/reviewed_together/);
+  });
+
+  it('refuses an unknown review status', async () => {
+    // The vocabulary is the portal's eight, verbatim. 'Approved' is the SCAN
+    // column's word and must not leak into the officer's.
+    const id = await fileDocument('k/review-6');
+    await expect(
+      db.query(
+        `update documents set review_status = 'Approved', reviewed_at = now() where id = $1`,
+        [id],
+      ),
+    ).rejects.toThrow(/review_status/);
+  });
+
+  it('refuses two documents replacing the same one', async () => {
+    // An ambiguity nothing downstream could resolve: which one did the office
+    // actually receive?
+    const original = await fileDocument('k/super-0');
+    const first = await fileDocument('k/super-1');
+    await db.query(
+      `update documents set supersedes_document_id = $1 where id = $2`, [original, first],
+    );
+    const second = await fileDocument('k/super-2');
+    await expect(
+      db.query(
+        `update documents set supersedes_document_id = $1 where id = $2`, [original, second],
+      ),
+    ).rejects.toThrow(/documents_supersedes_unique/);
+  });
+
+  it('refuses a document that replaces itself', async () => {
+    const id = await fileDocument('k/super-self');
+    await expect(
+      db.query(
+        `update documents set supersedes_document_id = $1 where id = $1`, [id],
+      ),
+    ).rejects.toThrow(/supersedes_not_self/);
+  });
+
+  it('keeps a retired reason resolvable on documents that cite it', async () => {
+    // Retired rather than deleted: a reason cited last year must still render.
+    const id = await fileDocument('k/retired');
+    await db.query(
+      `update documents set review_status = 'Rejected',
+                            review_reason_code = 'expired', reviewed_at = now()
+       where id = $1`, [id],
+    );
+    await expect(
+      db.query(`delete from document_review_reasons where code = 'expired'`),
+    ).rejects.toThrow();
+  });
+
   it('refuses a checksum that is not a SHA-256', async () => {
     await expect(
       db.query(
