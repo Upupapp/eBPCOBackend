@@ -531,6 +531,10 @@ async function main(): Promise<void> {
   await record('staff.evaluations.queue', 'GET', '/staff/evaluations', evaluatorToken);
   await record('staff.users.list', 'GET', '/staff/users', adminToken);
   await record('staff.audit.stream', 'GET', '/staff/audit?limit=5', adminToken);
+  // The officer's worklist. Recorded from the evaluator, because the routing is
+  // the feature: a sample taken from an account nothing routes to would document
+  // an empty envelope and prove nothing about who gets told.
+  await record('staff.notifications', 'GET', '/staff/notifications', evaluatorToken);
   await record('staff.reports.processingTimes', 'GET',
     '/staff/reports/processing-times?from=2026-01-01&to=2027-01-01', officialToken);
 

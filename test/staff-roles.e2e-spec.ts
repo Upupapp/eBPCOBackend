@@ -157,6 +157,23 @@ describe('the role table and the route table agree', () => {
    */
   const ENGINE_AUTHORISED = new Set(['POST /staff/applications/:applicationId/transitions']);
 
+  /**
+   * Routes that write only to the CALLER'S OWN view of their own inbox.
+   *
+   * Marking a notification read changes no application, no permit, and no
+   * record the auditor oversees -- it changes whether one row in that auditor's
+   * own list is bold. The alternative was refusing it, which is worse than it
+   * sounds: a workflow change is announced to every member of staff, auditors
+   * included, and a role that receives notices and can never dismiss one
+   * accumulates an inbox forever.
+   *
+   * Exempt from the PROBE, not from the question. The probe uses a random id
+   * and can only see the guard; the real claim -- an auditor may clear their
+   * own notice and may not touch anyone else's -- is asserted below against
+   * real rows, which is the only honest way to ask it.
+   */
+  const OWN_INBOX_ONLY = new Set(['POST /staff/notifications/:notificationId/read']);
+
   it('refuses the auditor every staff route whose guard can answer', async () => {
     // Oversight without authority. If this ever passes something, the role has
     // stopped being read-only and the portal's Auditor screen is a lie.
@@ -166,13 +183,56 @@ describe('the role table and the route table agree', () => {
     for (const route of routes.filter((r) => r.includes(' /staff/'))) {
       const [method] = route.split(' ');
       if (method === 'GET' || ENGINE_AUTHORISED.has(route)) continue;
+      if (OWN_INBOX_ONLY.has(route)) continue;
       if (await probe(route, auditor) !== 403) allowed.push(route);
     }
 
     expect(allowed).toEqual([]);
-    // The exemption list must not quietly grow to cover everything.
+    // The exemption lists must not quietly grow to cover everything.
     expect(ENGINE_AUTHORISED.size).toBeLessThan(3);
+    expect(OWN_INBOX_ONLY.size).toBeLessThan(2);
   });
+
+  it('lets the auditor clear their own notice and nobody else’s', async () => {
+    // The claim OWN_INBOX_ONLY makes, asserted rather than assumed. Without
+    // this the exemption would be a hole in the read-only guarantee wearing a
+    // comment.
+    const auditor = tokenByRole.get('auditor')!;
+    const mine = await plantNotice('auditor');
+    const theirs = await plantNotice('evaluator');
+
+    expect((await app.inject({
+      method: 'POST', url: `/staff/notifications/${mine}/read`,
+      headers: { authorization: `Bearer ${auditor}` },
+    })).statusCode).toBe(204);
+
+    // 404, not 403: answering "forbidden" would confirm another officer's
+    // notice exists.
+    expect((await app.inject({
+      method: 'POST', url: `/staff/notifications/${theirs}/read`,
+      headers: { authorization: `Bearer ${auditor}` },
+    })).statusCode).toBe(404);
+
+    const untouched = await db.query<{ read_at: Date | null }>(
+      'select read_at from staff_notifications where id = $1', [theirs],
+    );
+    expect(untouched.rows[0]!.read_at).toBeNull();
+  });
+
+  /** A notice sitting in one role's inbox, with no application attached. */
+  async function plantNotice(role: string): Promise<string> {
+    const owner = await db.query<{ account_id: string }>(
+      'select account_id from account_roles where role = $1 limit 1', [role],
+    );
+    const planted = await db.query<{ id: string }>(
+      `insert into staff_notifications
+         (account_id, type, application_id, routed_to_role, title, body)
+       values ($1, 'workflow-changed', null, $2, 'The application workflow changed', 'x')
+       returning id`,
+      [owner.rows[0]!.account_id, role],
+    );
+    return planted.rows[0]!.id;
+  }
 
   it('refuses the auditor a real transition on a real application', async () => {
     // The coarse-guard route, asked properly. A 404 against a random id proves

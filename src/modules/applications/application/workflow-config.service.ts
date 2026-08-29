@@ -3,6 +3,8 @@ import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
 import { LIFECYCLE_STATUSES, LifecycleStatus, TransitionRule, isTerminal } from '../domain/lifecycle';
 import { loadTransitions } from '../domain/transition-repository';
+import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
+import { workflowChanged } from '../../notifications/domain/staff-catalog';
 
 /**
  * Editing the lifecycle. Owner decision D-5, 2026-08-29.
@@ -56,13 +58,16 @@ const NARROWNESS: readonly string[] = [
 
 export class WorkflowConfigService {
   private readonly audit: AuditService;
+  private readonly staffNotices: StaffNotificationService;
 
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    staffNotices?: StaffNotificationService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    this.staffNotices = staffNotices ?? new StaffNotificationService(db);
   }
 
   current(): Promise<readonly TransitionRule[]> {
@@ -164,6 +169,12 @@ export class WorkflowConfigService {
         // approval and closed the tab is the case this exists for.
         afterState: { transitions, controlsGivenUp: warnings },
       }, tx);
+
+      // TAB 14 / D-7. The routing rule IS the transition table, so an edit here
+      // silently changes whose queue an application lands in. Every officer is
+      // told, including the ones whose queue got smaller -- "my work stopped
+      // arriving" is the failure that otherwise takes a week to notice.
+      await this.staffNotices.announceToAll(tx, workflowChanged(), officer.accountId);
 
       return { ok: true as const, transitions: await loadTransitions(tx), warnings };
     });

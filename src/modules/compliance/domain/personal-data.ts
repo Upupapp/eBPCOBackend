@@ -464,6 +464,33 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     dispatched_at: none('account-lifetime'),
   },
 
+  /**
+   * An OFFICER's worklist, not an applicant's. TAB 14 / D-7.
+   *
+   * `account_id` is a member of staff, and their notices are part of how the
+   * LGU accounts for who was asked to act on what -- so the retention is the
+   * audit schedule rather than the account lifetime. The alternative, erasing
+   * an officer's queue with their account, would delete the record of what the
+   * office was told at the moment a decision was made.
+   *
+   * `title` and `body` are content and are classified as such even though the
+   * catalogue keeps them to a reference number and a status: the classification
+   * has to hold for what the columns CAN carry, not for what today's three
+   * entries happen to put there.
+   */
+  staff_notifications: {
+    id: structural,
+    account_id: linkable('audit', ACCOUNTABILITY),
+    type: none('audit'),
+    application_id: structural,
+    routed_to_role: none('audit'),
+    title: content('audit', ACCOUNTABILITY),
+    body: content('audit', ACCOUNTABILITY),
+    deep_link: none('audit'),
+    created_at: none('audit'),
+    read_at: none('audit'),
+  },
+
   notification_deliveries: {
     id: structural,
     notification_id: structural,
@@ -584,6 +611,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
   },
   notification_types: {
     type: none(), category: none(), requires_action: none(), server_generated: none(),
+  },
+  staff_notification_types: {
+    type: none(), requires_act: none(),
   },
   charter_entries: {
     id: none(), permit_type: none(), classification: none(), pledged_working_days: none(),

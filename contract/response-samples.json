@@ -2198,6 +2198,31 @@
         "nextCursor": null
       }
     },
+    "staff.notifications": {
+      "request": {
+        "method": "GET",
+        "path": "/staff/notifications",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "notifications": [
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "type": "application-awaiting-you",
+            "applicationId": "00000000-0000-4000-8000-000000000000",
+            "routedToRole": "evaluator",
+            "title": "BP-2026-000042 is waiting",
+            "body": "Application BP-2026-000042 is at Received and is waiting for your action.",
+            "deepLink": "/staff/applications/00000000-0000-4000-8000-000000000000",
+            "createdAt": "2026-01-01T00:00:00.000Z",
+            "readAt": null
+          }
+        ],
+        "unread": 1
+      }
+    },
     "staff.reports.processingTimes": {
       "request": {
         "method": "GET",

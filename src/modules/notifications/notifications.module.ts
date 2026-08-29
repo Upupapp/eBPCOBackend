@@ -4,6 +4,8 @@ import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { NotificationService } from './application/notification.service';
 import { NotificationsController } from './transport/notifications.controller';
+import { StaffNotificationService } from './application/staff-notification.service';
+import { StaffNotificationsController } from './transport/staff-notifications.controller';
 
 /**
  * The applicant's feed, their preferences, and the plan for delivering each
@@ -18,12 +20,17 @@ import { NotificationsController } from './transport/notifications.controller';
 @Module({
   providers: [
     {
+      provide: StaffNotificationService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new StaffNotificationService(db),
+    },
+    {
       provide: NotificationService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new NotificationService(db),
     },
   ],
-  controllers: [NotificationsController],
-  exports: [NotificationService],
+  controllers: [NotificationsController, StaffNotificationsController],
+  exports: [NotificationService, StaffNotificationService],
 })
 export class NotificationsModule {}

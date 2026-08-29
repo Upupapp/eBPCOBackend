@@ -53,8 +53,11 @@ let clerkToken: string;
 let applicantId: string;
 let applicantAccount: string;
 let seeded: Record<string, unknown>[];
+/** The id of the account `staffAccount` most recently created. */
+let lastAccountId: string;
 /** An archive entry with no actor is refused by the schema, and rightly. */
 let archivistId: string;
+let adminAccountId: string;
 const logLines: string[] = [];
 
 async function staffAccount(role: StaffRole): Promise<string> {
@@ -69,7 +72,7 @@ async function staffAccount(role: StaffRole): Promise<string> {
     sub: id, sid: randomUUID(), kind: 'staff',
     scopes: [...scopesFor({ kind: 'staff', roles: [role] })],
   });
-  archivistId = id;
+  lastAccountId = id;
   return issued.token;
 }
 
@@ -157,7 +160,9 @@ beforeAll(async () => {
   await app.getHttpAdapter().getInstance().ready();
   tokens = app.get(TokenService);
   adminToken = await staffAccount('administrator');
+  adminAccountId = lastAccountId;
   clerkToken = await staffAccount('records-officer');
+  archivistId = lastAccountId;
 
   applicantAccount = randomUUID();
   await db.query(
@@ -178,6 +183,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterEach(async () => {
+  await db.query('delete from staff_notifications');
   await db.query('delete from lifecycle_transitions');
   for (const row of seeded) {
     await db.query(
@@ -281,6 +287,43 @@ describe('the edit changes what the server does', () => {
     );
     expect(entries.rows).toHaveLength(1);
     expect(entries.rows[0]!.after_state.controlsGivenUp[0]).toMatch(/more officers can make it/);
+  });
+});
+
+describe('the officers whose queues just changed', () => {
+  it('tells every member of staff except the administrator who made the change', async () => {
+    // D-5 made the routing rule editable and D-7 made the routing rule the
+    // notification rule, so an edit here silently changes whose queue an
+    // application lands in. An officer whose work simply stops arriving has no
+    // way to discover why.
+    const widened = withRule(await currentRules(), 'Document Verification', 'Rejected',
+      { requiresScope: 'applications:write' });
+    expect((await send('PUT', '/staff/config/workflow', adminToken, { transitions: widened }))
+      .statusCode).toBe(200);
+
+    const notices = await db.query<{ account_id: string; title: string }>(
+      `select account_id, title from staff_notifications where type = 'workflow-changed'`,
+    );
+
+    expect(notices.rows).toHaveLength(1);
+    expect(notices.rows[0]!.title).toBe('The application workflow changed');
+    // The clerk, not the administrator: nobody is told about their own act.
+    expect(notices.rows[0]!.account_id).toBe(archivistId);
+    expect(notices.rows[0]!.account_id).not.toBe(adminAccountId);
+  });
+
+  it('tells nobody when the edit was refused', async () => {
+    const stranding = (await currentRules()).filter((rule) => rule.from !== 'Received');
+
+    expect((await send('PUT', '/staff/config/workflow', adminToken, { transitions: stranding }))
+      .statusCode).toBe(422);
+
+    // Inside the transaction, so a refused edit cannot leave officers told
+    // their workflow changed when it did not.
+    const notices = await db.query(
+      `select 1 from staff_notifications where type = 'workflow-changed'`,
+    );
+    expect(notices.rows).toHaveLength(0);
   });
 });
 

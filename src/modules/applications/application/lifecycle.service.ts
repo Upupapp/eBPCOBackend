@@ -7,6 +7,7 @@ import { DomainEvent, decide } from '../domain/lifecycle-engine';
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Refusal } from '../domain/lifecycle-errors';
 import { loadTransitions } from '../domain/transition-repository';
+import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
 
 /**
  * Moves an application, and records everything that follows, atomically.
@@ -97,13 +98,19 @@ const SNAPSHOT_SQL = `
 
 export class LifecycleService {
   private readonly audit: AuditService;
+  private readonly staffNotices: StaffNotificationService;
 
   constructor(
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    staffNotices?: StaffNotificationService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    // Constructed by default rather than left optional. A collaborator that is
+    // allowed to be absent does nothing quietly when it is, and "no officer was
+    // told" is not a state this should be able to reach by omission.
+    this.staffNotices = staffNotices ?? new StaffNotificationService(db);
   }
 
   async snapshot(applicationId: string, client: SqlClient = this.db): Promise<ApplicationSnapshot | null> {
@@ -218,6 +225,27 @@ export class LifecycleService {
       }
 
       await this.recordEvents(tx, decision.outcome.events, caller, snapshot);
+
+      // TAB 14 / D-7. Told with the SAME rules the move was decided under, so a
+      // workflow edit landing between the two cannot make the notice and the
+      // transition disagree about who is waiting. Inside the transaction for
+      // the same reason the applicant's notice is: an officer sent to an
+      // application that rolled back is worse than not being told.
+      {
+        const reference = await tx.query<{ reference_number: string }>(
+          'select reference_number from applications where id = $1', [applicationId],
+        );
+        await this.staffNotices.announceArrival({
+          tx,
+          applicationId,
+          reference: reference.rows[0]?.reference_number ?? applicationId,
+          status: to,
+          rules,
+          // Never told about their own act. An officer who has just moved an
+          // application knows where it is.
+          actingAccountId: caller.accountId,
+        });
+      }
 
       const result = { status: to, version: decision.outcome.nextVersion };
       if (idempotencyKey !== undefined) {
