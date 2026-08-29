@@ -171,14 +171,24 @@ export const TRANSITIONS: readonly TransitionRule[] = [
     preconditions: [] },
 ];
 
-const BY_PAIR = new Map(TRANSITIONS.map((rule) => [`${rule.from}->${rule.to}`, rule]));
-
-export function ruleFor(from: LifecycleStatus, to: LifecycleStatus): TransitionRule | undefined {
-  return BY_PAIR.get(`${from}->${to}`);
+/**
+ * Both of these take the table rather than closing over the compiled one.
+ *
+ * `TRANSITIONS` is the SEED for a fresh database since D-5, not the authority:
+ * the rules live in `lifecycle_transitions` and an LGU may have edited them.
+ * A function that read the constant would quietly answer about a lifecycle
+ * nobody is running.
+ */
+export function ruleFor(
+  rules: readonly TransitionRule[], from: LifecycleStatus, to: LifecycleStatus,
+): TransitionRule | undefined {
+  return rules.find((rule) => rule.from === from && rule.to === to);
 }
 
-export function legalMovesFrom(from: LifecycleStatus): readonly LifecycleStatus[] {
-  return TRANSITIONS.filter((rule) => rule.from === from).map((rule) => rule.to);
+export function legalMovesFrom(
+  rules: readonly TransitionRule[], from: LifecycleStatus,
+): readonly LifecycleStatus[] {
+  return rules.filter((rule) => rule.from === from).map((rule) => rule.to);
 }
 
 /**

@@ -55,10 +55,10 @@ describe('every legal transition, and only those', () => {
   it.each(TRANSITIONS.map((rule) => [rule.from, rule.to] as const))(
     'permits %s -> %s for a caller who may make it',
     (from, to) => {
-      const rule = ruleFor(from, to)!;
+      const rule = ruleFor(TRANSITIONS, from, to)!;
       const caller = rule.actors.includes('applicant') ? applicant() : superOfficer();
 
-      const decision = decide({ snapshot: satisfied(from), caller, to, now: NOW });
+      const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(from), caller, to, now: NOW });
 
       expect(decision.ok).toBe(true);
     },
@@ -74,7 +74,7 @@ describe('every legal transition, and only those', () => {
         if (from === to || legal.has(`${from}->${to}`)) continue;
         checked += 1;
 
-        const decision = decide({ snapshot: satisfied(from), caller: superOfficer(), to, now: NOW });
+        const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(from), caller: superOfficer(), to, now: NOW });
         if (decision.ok || decision.refusal.kind !== 'illegal-transition') {
           refused.push(`${from} -> ${to}`);
         }
@@ -88,7 +88,7 @@ describe('every legal transition, and only those', () => {
 
   it('names the moves that WERE available when it refuses one that is not', () => {
     // A refusal that only says "no" makes the caller guess.
-    const decision = decide({ snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Released', now: NOW });
+    const decision = decide({ rules: TRANSITIONS, snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Released', now: NOW });
 
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
@@ -101,7 +101,7 @@ describe('every legal transition, and only those', () => {
     for (const status of LIFECYCLE_STATUSES.filter(isTerminal)) {
       for (const to of LIFECYCLE_STATUSES) {
         if (to === status) continue;
-        const decision = decide({ snapshot: satisfied(status), caller: superOfficer(), to, now: NOW });
+        const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(status), caller: superOfficer(), to, now: NOW });
         expect(decision.ok).toBe(false);
       }
     }
@@ -116,7 +116,7 @@ describe('permission, asserted independently of precondition', () => {
   it.each(TRANSITIONS.filter((rule) => !rule.actors.includes('applicant')).map((r) => [r.from, r.to] as const))(
     'refuses %s -> %s to an applicant, even with every precondition met',
     (from, to) => {
-      const decision = decide({ snapshot: satisfied(from), caller: applicant(), to, now: NOW });
+      const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(from), caller: applicant(), to, now: NOW });
 
       expect(decision.ok).toBe(false);
       if (decision.ok) return;
@@ -127,7 +127,7 @@ describe('permission, asserted independently of precondition', () => {
   it.each(TRANSITIONS.map((rule) => [rule.from, rule.to, rule.requires] as const))(
     'refuses %s -> %s to a staff caller lacking %s',
     (from, to, required) => {
-      const rule = ruleFor(from, to)!;
+      const rule = ruleFor(TRANSITIONS, from, to)!;
       if (!rule.actors.includes('staff')) return;
 
       const withoutIt: Caller = {
@@ -136,7 +136,7 @@ describe('permission, asserted independently of precondition', () => {
         scopes: [...new Set(Object.values(ROLE_SCOPES).flat())].filter((scope) => scope !== required),
       };
 
-      const decision = decide({ snapshot: satisfied(from), caller: withoutIt, to, now: NOW });
+      const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(from), caller: withoutIt, to, now: NOW });
 
       expect(decision.ok).toBe(false);
       if (decision.ok) return;
@@ -149,6 +149,7 @@ describe('permission, asserted independently of precondition', () => {
 
   it('refuses an applicant acting on somebody else’s application', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Draft'),
       caller: applicant('a-different-applicant'),
       to: 'Submitted',
@@ -162,8 +163,8 @@ describe('permission, asserted independently of precondition', () => {
     const evaluator: Caller = { accountId: 'e', kind: 'staff', scopes: ROLE_SCOPES.evaluator };
     const cashier: Caller = { accountId: 'c', kind: 'staff', scopes: ROLE_SCOPES.cashier };
 
-    expect(decide({ snapshot: satisfied('For Approval'), caller: evaluator, to: 'Approved', now: NOW }).ok).toBe(false);
-    expect(decide({ snapshot: satisfied('Document Verification'), caller: cashier, to: 'Under Evaluation', now: NOW }).ok).toBe(false);
+    expect(decide({ rules: TRANSITIONS, snapshot: satisfied('For Approval'), caller: evaluator, to: 'Approved', now: NOW }).ok).toBe(false);
+    expect(decide({ rules: TRANSITIONS, snapshot: satisfied('Document Verification'), caller: cashier, to: 'Under Evaluation', now: NOW }).ok).toBe(false);
   });
 });
 
@@ -172,6 +173,7 @@ describe('preconditions', () => {
     // The rule the whole payments design rests on: no Order means no figure and
     // no way to pay.
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Under Evaluation', { orderOfPaymentIssued: false }),
       caller: superOfficer(),
       to: 'Assessed',
@@ -187,6 +189,7 @@ describe('preconditions', () => {
 
   it('refuses Ready for Release without a generated permit', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Permit Generated', { permitGenerated: false }),
       caller: superOfficer(),
       to: 'Ready for Release',
@@ -200,6 +203,7 @@ describe('preconditions', () => {
 
   it('refuses resubmission while instructions are still open', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Revision Required', { openInstructionCount: 2 }),
       caller: applicant(),
       to: 'Under Evaluation',
@@ -217,6 +221,7 @@ describe('preconditions', () => {
     // Tier 2 of decision E-5, enforced as a lifecycle precondition rather than
     // as a UI rule.
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Draft', { identityDocumentVerified: false }),
       caller: applicant(),
       to: 'Submitted',
@@ -230,6 +235,7 @@ describe('preconditions', () => {
 
   it('names every unmet precondition, not just the first', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Draft', { identityDocumentVerified: false, requiredDocumentsPresent: false }),
       caller: applicant(),
       to: 'Submitted',
@@ -249,12 +255,12 @@ describe('decision E-4: applicant cancellation', () => {
   it.each(['Draft', 'Submitted', 'Received', 'Revision Required'] as const)(
     'lets an applicant withdraw from %s',
     (from) => {
-      expect(decide({ snapshot: satisfied(from), caller: applicant(), to: 'Cancelled', now: NOW }).ok).toBe(true);
+      expect(decide({ rules: TRANSITIONS, snapshot: satisfied(from), caller: applicant(), to: 'Cancelled', now: NOW }).ok).toBe(true);
     },
   );
 
   it('refuses applicant cancellation once an Order of Payment exists', () => {
-    const decision = decide({ snapshot: satisfied('Assessed'), caller: applicant(), to: 'Cancelled', now: NOW });
+    const decision = decide({ rules: TRANSITIONS, snapshot: satisfied('Assessed'), caller: applicant(), to: 'Cancelled', now: NOW });
 
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
@@ -263,13 +269,14 @@ describe('decision E-4: applicant cancellation', () => {
 
   it('still lets an officer cancel an assessed application', () => {
     // The applicant can ask; it becomes a request an officer decides on.
-    expect(decide({ snapshot: satisfied('Assessed'), caller: superOfficer(), to: 'Cancelled', now: NOW }).ok).toBe(true);
+    expect(decide({ rules: TRANSITIONS, snapshot: satisfied('Assessed'), caller: superOfficer(), to: 'Cancelled', now: NOW }).ok).toBe(true);
   });
 });
 
 describe('optimistic concurrency', () => {
   it('refuses a caller acting on a version they have not seen', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Submitted', { version: 5 }),
       caller: superOfficer(),
       to: 'Received',
@@ -285,6 +292,7 @@ describe('optimistic concurrency', () => {
   it('checks the version before anything else', () => {
     // Every other answer would be about the wrong version of the record.
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Submitted', { version: 5 }),
       caller: applicant(),
       to: 'Released',
@@ -298,6 +306,7 @@ describe('optimistic concurrency', () => {
 
   it('advances the version on a successful move', () => {
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Submitted', { version: 7 }),
       caller: superOfficer(), to: 'Received', now: NOW, expectedVersion: 7,
     });
@@ -309,14 +318,14 @@ describe('optimistic concurrency', () => {
 
 describe('events', () => {
   it('produces exactly one audit event per move', () => {
-    const decision = decide({ snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Received', now: NOW });
+    const decision = decide({ rules: TRANSITIONS, snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Received', now: NOW });
 
     if (!decision.ok) throw new Error('expected success');
     expect(decision.outcome.events.filter((e) => e.type === 'application.transitioned')).toHaveLength(1);
   });
 
   it('produces the notification the rule names, and no other', () => {
-    const decision = decide({ snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Received', now: NOW });
+    const decision = decide({ rules: TRANSITIONS, snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Received', now: NOW });
 
     if (!decision.ok) throw new Error('expected success');
     const notifications = decision.outcome.events.filter((e) => e.type !== 'application.transitioned');
@@ -325,7 +334,7 @@ describe('events', () => {
 
   it('produces no events at all when the move is refused', () => {
     // A refused move must not notify anyone that something happened.
-    const decision = decide({ snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Released', now: NOW });
+    const decision = decide({ rules: TRANSITIONS, snapshot: satisfied('Submitted'), caller: superOfficer(), to: 'Released', now: NOW });
     expect(decision.ok).toBe(false);
   });
 
@@ -337,6 +346,7 @@ describe('events', () => {
       'North boundary is 0.85m outside the TCT description — “resubmit”, per §304.';
 
     const decision = decide({
+      rules: TRANSITIONS,
       snapshot: satisfied('Under Evaluation'), caller: superOfficer(),
       to: 'Revision Required', now: NOW, remarks,
     });

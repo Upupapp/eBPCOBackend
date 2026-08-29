@@ -6,6 +6,7 @@ import { ApplicationSnapshot, Caller } from '../domain/application';
 import { DomainEvent, decide } from '../domain/lifecycle-engine';
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Refusal } from '../domain/lifecycle-errors';
+import { loadTransitions } from '../domain/transition-repository';
 
 /**
  * Moves an application, and records everything that follows, atomically.
@@ -174,7 +175,15 @@ export class LifecycleService {
         return { ok: false, refusal: { kind: 'stale-version', expected: expectedVersion ?? 0, actual: -1 } };
       }
 
+      // Read inside the transaction, so a decision is made against the rules
+      // as they stand at that moment. Not cached: an LGU that edits the
+      // lifecycle and finds the next transition still refused by the old table
+      // would reasonably conclude the edit did not work, and a cache invalidated
+      // by hand is a cache that is wrong on the day it matters.
+      const rules = await loadTransitions(tx);
+
       const decision = decide({
+        rules,
         snapshot,
         caller,
         to,

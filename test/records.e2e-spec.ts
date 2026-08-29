@@ -862,10 +862,12 @@ describe('the lifecycle, as the server enforces it', () => {
     expect(body.transitions.some((t) => t.notifies === 'received-by-obo')).toBe(true);
   });
 
-  it('offers no way to change it', async () => {
-    // Read-only is the half that needs no decision. An LGU that could edit the
-    // table could strand applications in a status no transition leaves.
-    for (const method of ['PUT', 'POST', 'PATCH', 'DELETE'] as const) {
+  it('offers exactly one way to change it, and no other', async () => {
+    // Was `offers no way to change it` until D-5 was answered on 2026-08-29.
+    // PUT is now the editor; POST, PATCH and DELETE are still absent, because a
+    // lifecycle is a graph and is only correct as a whole -- a per-edge API
+    // would let a client leave it broken between two calls.
+    for (const method of ['POST', 'PATCH', 'DELETE'] as const) {
       const response = await app.inject({
         method, url: '/staff/config/workflow',
         headers: { authorization: `Bearer ${officerToken}` },
@@ -873,5 +875,14 @@ describe('the lifecycle, as the server enforces it', () => {
       });
       expect(response.statusCode).toBe(404);
     }
+
+    // This officer can read the workflow and cannot edit it: 403, not 404, so
+    // the route exists and the refusal is about authority. The editor's own
+    // behaviour is proved in workflow-config.e2e-spec.
+    const put = await app.inject({
+      method: 'PUT', url: '/staff/config/workflow',
+      headers: { authorization: `Bearer ${officerToken}` }, payload: {},
+    });
+    expect(put.statusCode).toBe(403);
   });
 });

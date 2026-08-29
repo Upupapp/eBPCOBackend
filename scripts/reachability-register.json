@@ -1,8 +1,8 @@
 {
   "src/common/logging/logger.ts::LogRecord": "the shape of what the logger emits, named for readers and for the spec that asserts it",
   "src/common/logging/logger.ts::StructuredLogger.debug": "log level implemented for completeness; nothing in the tree logs below info, and a level nobody calls is cheaper to keep than to re-add",
-  "src/common/logging/logger.ts::StructuredLogger.fatal": "same \u2014 the level exists so the set is complete; the shutdown path logs error, not fatal",
-  "src/common/logging/logger.ts::StructuredLogger.trace": "same \u2014 no caller, kept so the level set is not surprising to a reader",
+  "src/common/logging/logger.ts::StructuredLogger.fatal": "same — the level exists so the set is complete; the shutdown path logs error, not fatal",
+  "src/common/logging/logger.ts::StructuredLogger.trace": "same — no caller, kept so the level set is not surprising to a reader",
   "src/common/problem/problem.ts::ProblemException.unprocessable": "RFC 9457 helper for 422; every current validation failure is a 400, so nothing constructs it yet",
   "src/common/scheduling/job-runner.ts::JobRunner.status": "reads the job table for an operator; there is no job-status route, so only the spec calls it (UNWIRED FEATURE)",
   "src/modules/compliance/application/calendar.repository.ts::EMPTY_CALENDAR": "the no-holidays-loaded calendar, so every pledge computed against it is flagged approximate; the repository builds its own from the table",
@@ -41,5 +41,7 @@
   "src/persistence/personal-data-inventory.ts::PersonalDataColumn": "the shape inventory returns, unreached with it",
   "src/persistence/personal-data-inventory.ts::SUSPECT_NAMES": "column names that look personal, used by gaps to catch an untagged addition",
   "src/persistence/personal-data-inventory.ts::gaps": "SPECIFICATION CONSTANT: the columns the register has not classified, asserted empty by that same test",
-  "src/persistence/personal-data-inventory.ts::inventory": "SPECIFICATION CONSTANT: reads the live schema and cross-checks it against the classification register, run as a test so an untagged column fails the build"
+  "src/persistence/personal-data-inventory.ts::inventory": "SPECIFICATION CONSTANT: reads the live schema and cross-checks it against the classification register, run as a test so an untagged column fails the build",
+  "src/modules/applications/domain/lifecycle.ts::TRANSITIONS": "SEED ONLY since D-5 (2026-08-29). The rules the server applies live in lifecycle_transitions and are read per request; this constant is what a fresh database is seeded with, and its only reader is transition-seed.spec.ts, which fails if the two ever disagree. Deleting it would leave the seed migration unchecked against anything",
+  "src/modules/identity/domain/account.ts::EveryScopeIsListed": "a type, not a value — it compiles to nothing and exists so that adding a scope to the Scope union without adding it to ALL_SCOPES is a type error rather than a workflow editor that silently rejects a scope the guards honour"
 }

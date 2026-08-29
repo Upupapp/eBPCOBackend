@@ -22,6 +22,7 @@ import { RequirementsController } from './transport/requirements.controller';
 import { StaffEvaluationsController } from './transport/staff-evaluations.controller';
 import { ReportsController } from '../compliance/transport/reports.controller';
 import { CALENDAR_REPOSITORY } from '../compliance/application/calendar.repository';
+import { WorkflowConfigService } from './application/workflow-config.service';
 import { WorkflowController } from './transport/workflow.controller';
 
 // Re-exported where it used to be declared, so callers that reach for it here
@@ -58,6 +59,11 @@ export { CALENDAR_REPOSITORY };
       provide: InstructionResponseService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new InstructionResponseService(db),
+    },
+    {
+      provide: WorkflowConfigService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new WorkflowConfigService(db),
     },
     {
       provide: RequirementsService,

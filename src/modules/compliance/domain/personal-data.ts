@@ -564,7 +564,24 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     status: none(), sequence: none(), terminal: none(),
     applicant_status: none(), requires_applicant_action: none(),
   },
-  lifecycle_transitions: { from_status: none(), to_status: none() },
+  /**
+   * Configuration since D-5 (2026-08-29), and therefore no longer only a graph:
+   * `updated_by` names the officer who last changed how permits are processed,
+   * which is exactly the kind of thing an accountability record is for. Kept on
+   * the audit schedule rather than erased with the officer's account -- the
+   * change survives the person who made it.
+   */
+  lifecycle_transitions: {
+    from_status: none(),
+    to_status: none(),
+    actors: none(),
+    requires_scope: none(),
+    preconditions: none(),
+    notifies: none(),
+    ordinal: none(),
+    updated_at: none('audit'),
+    updated_by: linkable('audit', ACCOUNTABILITY),
+  },
   notification_types: {
     type: none(), category: none(), requires_action: none(), server_generated: none(),
   },

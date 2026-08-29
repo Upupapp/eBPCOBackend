@@ -89,6 +89,7 @@
     "PUT /notification-preferences",
     "PUT /staff/assessments/:assessmentId/lines/:line",
     "PUT /staff/config/payment-methods/:method",
-    "PUT /staff/config/requirements/:permitType"
+    "PUT /staff/config/requirements/:permitType",
+    "PUT /staff/config/workflow"
   ]
 }

@@ -50,6 +50,31 @@ export type Scope =
   | 'staff:administer'
   | 'audit:read';
 
+/**
+ * The union, at runtime. Needed since D-5: the workflow editor accepts a scope
+ * from an HTTP client, and a move requiring a scope that does not exist is a
+ * move no officer can ever make -- an edge in the graph and a dead end in
+ * practice.
+ */
+export const ALL_SCOPES = [
+  'applications:read', 'applications:write',
+  'documents:read', 'documents:write',
+  'payments:read', 'payments:write',
+  'notifications:read', 'notifications:write',
+  'profile:read', 'profile:write',
+  'staff:evaluate', 'staff:assess', 'staff:verify-payment',
+  'staff:approve', 'staff:release', 'staff:administer',
+  'audit:read',
+] as const satisfies readonly Scope[];
+
+/**
+ * Compiles to nothing and exists to fail: adding a scope to the union without
+ * adding it above makes this a type error, rather than a validator that quietly
+ * rejects a scope the rest of the system honours.
+ */
+export type EveryScopeIsListed = Exclude<Scope, (typeof ALL_SCOPES)[number]> extends never
+  ? true : never;
+
 export const APPLICANT_SCOPES: readonly Scope[] = [
   'applications:read', 'applications:write',
   'documents:read', 'documents:write',

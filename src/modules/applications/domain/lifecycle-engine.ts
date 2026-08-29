@@ -1,5 +1,6 @@
 import { ApplicationSnapshot, Caller } from './application';
 import {
+  TransitionRule,
   LifecycleStatus,
   Precondition,
   legalMovesFrom,
@@ -67,6 +68,16 @@ export interface DecideOptions {
   /** The version the caller last saw. Omitted means they did not check. */
   readonly expectedVersion?: number;
   readonly remarks?: string;
+  /**
+   * The rules in force, passed in rather than imported.
+   *
+   * They became configuration under D-5, so the engine cannot reach for a
+   * compiled constant any more — it would decide against a table the LGU has
+   * since edited and refuse moves the database would allow. Passing them also
+   * keeps this function pure, which is what makes every refusal here testable
+   * without a database.
+   */
+  readonly rules: readonly TransitionRule[];
 }
 
 export function decide(options: DecideOptions): Decision {
@@ -81,7 +92,7 @@ export function decide(options: DecideOptions): Decision {
     };
   }
 
-  const rule = ruleFor(snapshot.status, to);
+  const rule = ruleFor(options.rules, snapshot.status, to);
   if (rule === undefined) {
     return {
       ok: false,
@@ -89,7 +100,7 @@ export function decide(options: DecideOptions): Decision {
         kind: 'illegal-transition',
         from: snapshot.status,
         to,
-        legalMoves: legalMovesFrom(snapshot.status),
+        legalMoves: legalMovesFrom(options.rules, snapshot.status),
       },
     };
   }
