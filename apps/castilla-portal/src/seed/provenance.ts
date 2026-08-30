@@ -80,15 +80,44 @@ export function readProvenance(comment: string | null): Reading {
 }
 
 /**
- * The comment that applies to a field: its own, else the entity's, else the
- * one on the declaration the entity belongs to.
+ * The comments that could apply to a field, MOST SPECIFIC FIRST.
  *
- * Scope comments are read LAST and only as a fallback. A note above
- * `export const SB_MEMBERS` explaining how two members' ballot names were
- * recorded is not a source for the eighth member's name, and preferring it
- * over a per-entity comment would attach the wrong reason to the right fact.
+ * A list rather than a single winner, because "the nearest comment" and "the
+ * nearest comment that actually sources this fact" are different questions and
+ * only the second one is useful. The note above `export const SB_MEMBERS`
+ * explains how two members' ballot names were recorded; it is a real note and
+ * it is not a source, and while it shadowed the file header the eight
+ * Sangguniang Bayan members were all reported unsourced — with the file
+ * explicitly sourcing them four lines further up.
  */
+export function commentsFor(entity: ExtractedEntity, field: string): string[] {
+  return [
+    entity.fieldComments[field], entity.comment, entity.scopeComment, entity.fileComment,
+  ].filter((comment): comment is string => typeof comment === 'string' && comment.trim() !== '');
+}
+
+/**
+ * The first comment in scope that reads as a provenance record.
+ *
+ * Widening to an enclosing scope is legitimate ONLY for a comment that carries
+ * a date and a method: that is a statement about where these facts came from,
+ * which by its nature covers the declaration it heads. It never invents a
+ * source for a fact nobody sourced — if no comment in scope reads, the reason
+ * reported is the MOST SPECIFIC one's, because that is the comment whose author
+ * was closest to the fact and the one someone would go and fix.
+ */
+export function provenanceFor(entity: ExtractedEntity, field: string): Reading {
+  const candidates = commentsFor(entity, field);
+  if (candidates.length === 0) return { ok: false, reason: 'no comment to read' };
+
+  for (const comment of candidates) {
+    const reading = readProvenance(comment);
+    if (reading.ok) return reading;
+  }
+  return readProvenance(candidates[0]!);
+}
+
+/** @deprecated Use {@link provenanceFor}: this stops at the first comment that EXISTS. */
 export function commentFor(entity: ExtractedEntity, field: string): string | null {
-  return entity.fieldComments[field] ?? entity.comment ?? entity.scopeComment
-    ?? entity.fileComment ?? null;
+  return commentsFor(entity, field)[0] ?? null;
 }

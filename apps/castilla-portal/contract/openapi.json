@@ -50,6 +50,42 @@
         }
       }
     },
+    "/officials": {
+      "get": {
+        "summary": "Elected leadership",
+        "description": "The Mayor, Vice Mayor, Sangguniang Bayan members and ex-officio seats the municipality has confirmed. A seat whose holder is not confirmed is OMITTED — the ABC President is currently withheld for that reason.",
+        "responses": {
+          "200": {
+            "description": "The confirmed officials",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficialList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/municipality/profile": {
+      "get": {
+        "summary": "Municipality profile",
+        "description": "Ordered profile fields. A field that is a genuine MAGNITUDE also carries `count`, and optionally `countSuffix` and `countDecimals`; formatting the count to that precision and appending the suffix reproduces `value` exactly, so a client may animate the number or print the string and get the same result. Identifiers — ZIP and PSGC codes — carry no count, because counting up to a postal code is meaningless.",
+        "responses": {
+          "200": {
+            "description": "The confirmed profile fields",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MunicipalityProfile"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/offices/{slug}": {
       "get": {
         "summary": "One office in full",
@@ -250,6 +286,162 @@
           "services",
           "relatedOffices",
           "issuedPermits"
+        ],
+        "additionalProperties": false
+      },
+      "Official": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "position": {
+            "type": "string",
+            "minLength": 1
+          },
+          "office": {
+            "type": "string",
+            "minLength": 1
+          },
+          "initials": {
+            "type": "string",
+            "minLength": 1
+          },
+          "photoUrl": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "position",
+          "office",
+          "initials"
+        ],
+        "additionalProperties": false
+      },
+      "OfficialList": {
+        "type": "object",
+        "properties": {
+          "officials": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "position": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "office": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "initials": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "photoUrl": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "slug",
+                "name",
+                "position",
+                "office",
+                "initials"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "officials"
+        ],
+        "additionalProperties": false
+      },
+      "ProfileField": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "minLength": 1
+          },
+          "value": {
+            "type": "string",
+            "minLength": 1
+          },
+          "count": {
+            "type": "number"
+          },
+          "countSuffix": {
+            "type": "string",
+            "minLength": 1
+          },
+          "countDecimals": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "label",
+          "value"
+        ],
+        "additionalProperties": false
+      },
+      "MunicipalityProfile": {
+        "type": "object",
+        "properties": {
+          "fields": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "value": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "count": {
+                  "type": "number"
+                },
+                "countSuffix": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "countDecimals": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "required": [
+                "label",
+                "value"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "fields"
         ],
         "additionalProperties": false
       },

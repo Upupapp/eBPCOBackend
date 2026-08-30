@@ -45,3 +45,33 @@ export const officeListSchema = z.object({
 
 export type OfficeListResponse = z.infer<typeof officeListSchema>;
 export type OfficeDetailResponse = z.infer<typeof officeDetailSchema>;
+
+export const profileFieldSchema = z.object({
+  label: z.string().min(1),
+  value: z.string().min(1),
+  // Present only for a genuine magnitude. A ZIP code carries no count, so the
+  // contract cannot describe one as carrying an optional zero.
+  count: z.number().optional(),
+  countSuffix: z.string().min(1).optional(),
+  countDecimals: z.number().int().min(0).optional(),
+}).strict();
+
+export const municipalityProfileSchema = z.object({
+  fields: z.array(profileFieldSchema),
+}).strict();
+
+export const officialSchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  position: z.string().min(1),
+  office: z.string().min(1),
+  initials: z.string().min(1),
+  photoUrl: z.string().min(1).optional(),
+}).strict();
+
+export const officialListSchema = z.object({
+  officials: z.array(officialSchema),
+}).strict();
+
+export type MunicipalityProfileResponse = z.infer<typeof municipalityProfileSchema>;
+export type OfficialListResponse = z.infer<typeof officialListSchema>;

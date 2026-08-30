@@ -4,7 +4,8 @@ import { join } from 'node:path';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
-  officeDetailSchema, officeListSchema, officeSummarySchema,
+  municipalityProfileSchema, officeDetailSchema, officeListSchema, officeSummarySchema,
+  officialListSchema, officialSchema, profileFieldSchema,
 } from '../src/http/contract';
 
 /**
@@ -45,6 +46,32 @@ const document = {
         },
       },
     },
+    '/officials': {
+      get: {
+        summary: 'Elected leadership',
+        description:
+          'The Mayor, Vice Mayor, Sangguniang Bayan members and ex-officio seats the '
+          + 'municipality has confirmed. A seat whose holder is not confirmed is OMITTED — the '
+          + 'ABC President is currently withheld for that reason.',
+        responses: {
+          200: { description: 'The confirmed officials', content: { 'application/json': { schema: { $ref: '#/components/schemas/OfficialList' } } } },
+        },
+      },
+    },
+    '/municipality/profile': {
+      get: {
+        summary: 'Municipality profile',
+        description:
+          'Ordered profile fields. A field that is a genuine MAGNITUDE also carries `count`, '
+          + 'and optionally `countSuffix` and `countDecimals`; formatting the count to that '
+          + 'precision and appending the suffix reproduces `value` exactly, so a client may '
+          + 'animate the number or print the string and get the same result. Identifiers — ZIP '
+          + 'and PSGC codes — carry no count, because counting up to a postal code is meaningless.',
+        responses: {
+          200: { description: 'The confirmed profile fields', content: { 'application/json': { schema: { $ref: '#/components/schemas/MunicipalityProfile' } } } },
+        },
+      },
+    },
     '/offices/{slug}': {
       get: {
         summary: 'One office in full',
@@ -61,6 +88,10 @@ const document = {
       OfficeSummary: zodToJsonSchema(officeSummarySchema, { target: 'openApi3' }),
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
+      Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      OfficialList: zodToJsonSchema(officialListSchema, { target: 'openApi3' }),
+      ProfileField: zodToJsonSchema(profileFieldSchema, { target: 'openApi3' }),
+      MunicipalityProfile: zodToJsonSchema(municipalityProfileSchema, { target: 'openApi3' }),
       Problem: {
         type: 'object',
         description: 'RFC 9457 Problem Details.',

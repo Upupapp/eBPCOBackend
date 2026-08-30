@@ -1,5 +1,6 @@
 import { ExtractedEntity, ExtractedPortalData, expressionOf, spreadsOf } from './extracted';
-import { commentFor, readProvenance } from './provenance';
+import { formatMagnitude } from '../municipality/magnitude';
+import { provenanceFor } from './provenance';
 
 /**
  * Importing the portal's committed data without losing a field, a source or a
@@ -274,7 +275,29 @@ export class Seeder {
     }
 
     for (const [ordinal, f] of profile.entries()) {
-      await this.upsert(
+      const label = String(f.fields['label']);
+      const value = String(f.fields['value']);
+      const count = f.fields['count'];
+
+      // The count and the display value must agree, and the check belongs HERE
+      // rather than in the API: a field whose number and whose words disagree
+      // is bad data, and letting it into the database means every reader has to
+      // decide which half to believe. The home page hardcoding 60,635 was the
+      // same disagreement in a different place.
+      if (typeof count === 'number') {
+        const rendered = formatMagnitude({
+          count,
+          suffix: typeof f.fields['countSuffix'] === 'string' ? f.fields['countSuffix'] : null,
+          decimals: typeof f.fields['countDecimals'] === 'number' ? f.fields['countDecimals'] : null,
+        });
+        if (rendered !== value) {
+          throw new Error(
+            `profile field '${label}': the count renders as '${rendered}' but the published `
+            + `value is '${value}'. One of them is wrong and this seeder will not choose.`);
+        }
+      }
+
+      const id = await this.upsertReturningId(
         `insert into profile_fields (label, value, count, count_suffix, count_decimals, ordinal)
          values ($1,$2,$3,$4,$5,$6)
          on conflict (label) do update set value = excluded.value, count = excluded.count,
@@ -282,10 +305,20 @@ export class Seeder {
            ordinal = excluded.ordinal
          where profile_fields.value is distinct from excluded.value
             or profile_fields.count is distinct from excluded.count
-            or profile_fields.ordinal is distinct from excluded.ordinal`,
-        [f.fields['label'], f.fields['value'], f.fields['count'] ?? null,
+            or profile_fields.ordinal is distinct from excluded.ordinal
+         returning id`,
+        [label, value, count ?? null,
          f.fields['countSuffix'] ?? null, f.fields['countDecimals'] ?? null, ordinal],
+        `select id from profile_fields where label = $1`, [label],
       );
+
+      // Profile fields carried no confirmation state at all, which left a hole
+      // in the invariant every other entity obeys: 'unconfirmed content is
+      // withheld' cannot hold for a field that has no state to read. The source
+      // header says the demonym and a population trend were left pending until
+      // a citable source was found; one has since been found, and that is a
+      // fact the database should be able to express either way.
+      await this.state('profile', id, 'value', this.stateOf(f, 'value'), f, unsourced);
     }
 
     return {
@@ -393,7 +426,7 @@ export class Seeder {
     let state = want;
 
     if (want === 'confirmed') {
-      const reading = readProvenance(commentFor(entity, field.replace(/^contact\./, '')));
+      const reading = provenanceFor(entity, field.replace(/^contact\./, ''));
       if (!reading.ok) {
         // Never auto-confirm. A value whose comment cannot be read into a
         // source stays pending and is REPORTED, rather than being confirmed on
