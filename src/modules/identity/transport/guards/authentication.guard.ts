@@ -7,6 +7,7 @@ import { AccessTokenClaims } from '../../domain/tokens';
 import { TokenService } from '../../application/token.service';
 import { AccountStatusReader } from '../../application/account-status';
 import { IS_PUBLIC, REQUIRED_SCOPES } from './public.decorator';
+import { RefusalRecorder } from '../../application/refusal-recorder';
 
 /** The authenticated caller, attached to the request for handlers to read. */
 export interface AuthenticatedRequest extends FastifyRequest {
@@ -27,6 +28,11 @@ export class AuthenticationGuard implements CanActivate {
     private readonly tokens: TokenService,
     private readonly reflector: Reflector,
     private readonly accounts: AccountStatusReader,
+    /**
+     * Absent in the unit specs that construct this guard directly. Absence
+     * means a refusal is not RECORDED; it never means a refusal is allowed.
+     */
+    private readonly security?: RefusalRecorder,
   ) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -126,6 +132,9 @@ export class AuthenticationGuard implements CanActivate {
     // documentary.
     const path = request.url?.split('?')[0] ?? '';
     if (path.startsWith('/staff/') && claims.kind !== 'staff') {
+      // An applicant reaching for a staff route is the clearest probe this
+      // guard can see: no ordinary client does it by accident.
+      await this.security?.refused(claims, path, 'a non-staff caller on a staff route');
       throw new ProblemException(
         ProblemType.forbidden,
         'Not permitted',
@@ -142,6 +151,15 @@ export class AuthenticationGuard implements CanActivate {
       const held = new Set<string>(claims.scopes);
       const missing = required.filter((scope) => !held.has(scope));
       if (missing.length > 0) {
+        // Recorded, at most once per account per window. Unbounded, this write
+        // would serialise on the audit chain head and let one valid token
+        // starve the appends inside real permit transactions.
+        //
+        // The missing scope names are NOT included. They describe what the
+        // caller lacks, which tells anyone reading the entry -- or anyone who
+        // provokes one and can read the stream -- what to go looking for.
+        await this.security?.refused(claims, path, 'the account lacks a required permission');
+
         // 403 and not 404: the caller is authenticated and this is a route, not
         // a record. Object-level checks -- "is this application yours" -- answer
         // 404 instead, and those live in the domain layer where the object is.

@@ -1,5 +1,5 @@
 import { Global, Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, Reflector } from '@nestjs/core';
 
 import { AppConfig, CONFIG } from '../../config/app-config';
 import { StructuredLogger } from '../../common/logging/logger';
@@ -29,6 +29,7 @@ import { MfaController } from './transport/mfa.controller';
 import { SecretBox } from './domain/secret-box';
 import { TotpService } from './application/totp.service';
 import { replayedRefreshToken } from '../compliance/domain/security-events';
+import { RefusalRecorder } from './application/refusal-recorder';
 
 /**
  * Identity, wired.
@@ -164,10 +165,27 @@ import { replayedRefreshToken } from '../compliance/domain/security-events';
       ),
     },
 
+    {
+      provide: RefusalRecorder,
+      inject: [SQL_CLIENT, StructuredLogger],
+      useFactory: (db: SqlClient, logger: StructuredLogger) =>
+        new RefusalRecorder(new AuditService(db), (cause) =>
+          logger.error('refusal not recorded', {
+            reason: cause instanceof Error ? cause.message : String(cause),
+          })),
+    },
+
     // Registered globally: a new controller is protected the moment it exists,
     // and opting out is a visible @Public() in the diff. A guard applied per
     // route fails open when someone forgets, and fails silently.
-    { provide: APP_GUARD, useClass: AuthenticationGuard },
+    {
+      provide: APP_GUARD,
+      inject: [TokenService, Reflector, AccountStatusReader, RefusalRecorder],
+      useFactory: (
+        tokens: TokenService, reflector: Reflector,
+        accounts: AccountStatusReader, refusals: RefusalRecorder,
+      ) => new AuthenticationGuard(tokens, reflector, accounts, refusals),
+    },
   ],
   exports: [
     AccountStatusReader, IdentityService, TokenService, ACCOUNT_REPOSITORY, SESSION_REPOSITORY,

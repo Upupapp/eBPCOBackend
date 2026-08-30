@@ -34,6 +34,7 @@ export const SECURITY_ACTIONS = {
   sessionReplayDetected: 'session.replay-detected',
   mfaFailed: 'mfa.failed',
   documentSecurity: 'document.security-event',
+  authorisationRefused: 'authorisation.refused',
 } as const;
 
 export type SecurityAction = (typeof SECURITY_ACTIONS)[keyof typeof SECURITY_ACTIONS];
@@ -46,6 +47,7 @@ export const ACCESS_ACTIONS: readonly SecurityAction[] = [
 ];
 
 export const SECURITY_STREAM_ACTIONS: readonly SecurityAction[] = [
+  SECURITY_ACTIONS.authorisationRefused,
   SECURITY_ACTIONS.sessionRefused,
   SECURITY_ACTIONS.sessionReplayDetected,
   SECURITY_ACTIONS.mfaFailed,
@@ -121,6 +123,46 @@ export function replayedRefreshToken(accountId: string, familyId: string): Secur
     actorAccountId: accountId, actorRole: null,
     afterState: { familyId, treatAs: 'possible token theft; the family was revoked' },
   };
+}
+
+/**
+ * An authenticated caller refused a route.
+ *
+ * Records the route PATTERN, not the path as requested: the guard refuses on
+ * the ROUTE, before any record is looked at, so a specific id in the entry
+ * would suggest a target was checked when none was. Ids are masked rather than
+ * dropped so the shape stays readable -- `/staff/applications/:id/transitions`
+ * says what was reached for.
+ *
+ * `debouncedWindowSeconds` is carried in the entry because a reader has to know
+ * what one row represents. Without it, ten entries could mean ten refusals or
+ * ten thousand, and the difference changes what an investigator concludes.
+ */
+export function refusedAuthorisation(options: {
+  accountId: string; kind: string; path: string; reason: string; windowSeconds: number;
+}): SecurityEntry {
+  return {
+    action: SECURITY_ACTIONS.authorisationRefused,
+    subjectType: 'account', subjectId: options.accountId, outcome: 'denied',
+    actorAccountId: options.accountId, actorRole: options.kind,
+    afterState: {
+      route: maskIds(options.path),
+      reason: options.reason,
+      debouncedWindowSeconds: options.windowSeconds,
+      note: 'at most one entry per account per window; further refusals in that '
+        + 'window are not recorded here',
+    },
+  };
+}
+
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
+
+export function maskIds(path: string): string {
+  // Query strings are dropped whole rather than masked. They can carry an email
+  // -- `?email=` on a lookup -- and an append-only table is the wrong place to
+  // discover that later.
+  const withoutQuery = path.split('?')[0] ?? '';
+  return withoutQuery.replace(UUID, ':id').replace(/\/\d+(?=\/|$)/g, '/:n');
 }
 
 export function documentSecurityEvent(

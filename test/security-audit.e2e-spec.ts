@@ -51,6 +51,12 @@ const post = (url: string, payload: Record<string, unknown>) =>
 const signIn = (email: string, password: string) =>
   post('/auth/token', { grantType: 'password', email, password });
 
+async function signInAs(email: string, password: string): Promise<string> {
+  const response = await signIn(email, password);
+  expect(response.statusCode).toBe(200);
+  return response.json<{ accessToken: string }>().accessToken;
+}
+
 const streamOf = async (stream: string): Promise<Entry[]> => {
   const response = await app.inject({
     method: 'GET', url: `/staff/audit?stream=${stream}&limit=200`,
@@ -145,6 +151,87 @@ describe('a successful sign-in is a record', () => {
     // The column has carried an NPC Circular 16-01 basis since it was created
     // and was null on every row in the table until D-6.
     expect(started!.sourceAddress).not.toBeNull();
+  });
+});
+
+describe('a refused authorisation is recorded, and bounded', () => {
+  it('records the first refusal, naming the route pattern and not the id', async () => {
+    const applicantToken = await signInAs(EMAIL, PASSWORD);
+    const target = randomUUID();
+
+    const refused = await app.inject({
+      method: 'GET', url: `/staff/applications/${target}`,
+      headers: { authorization: `Bearer ${applicantToken}` },
+    });
+    expect(refused.statusCode).toBe(403);
+
+    const entries = await db.query<{ after_state: { route: string; reason: string } }>(
+      `select after_state from audit_events where action = 'authorisation.refused'`,
+    );
+    expect(entries.rows).toHaveLength(1);
+    // The guard refuses on the ROUTE, before any record is read. An id here
+    // would suggest a target was checked when none was.
+    expect(entries.rows[0]!.after_state.route).toBe('/staff/applications/:id');
+    expect(entries.rows[0]!.after_state.route).not.toContain(target);
+  });
+
+  it('writes ONE entry however many times the same account is refused', async () => {
+    const applicantToken = await signInAs(EMAIL, PASSWORD);
+
+    // Twenty-five refusals across different routes: the shape of a sweep. Keyed
+    // on the account alone, so varying the path cannot hand the bound back.
+    for (let attempt = 0; attempt < 25; attempt += 1) {
+      const response = await app.inject({
+        method: 'GET', url: `/staff/applications/${randomUUID()}`,
+        headers: { authorization: `Bearer ${applicantToken}` },
+      });
+      expect(response.statusCode).toBe(403);
+    }
+
+    // Every audit append takes the chain head FOR UPDATE. Unbounded, this is a
+    // denial of service against the audit chain reachable by any applicant.
+    const entries = await db.query(
+      `select 1 from audit_events where action = 'authorisation.refused'`,
+    );
+    expect(entries.rows).toHaveLength(1);
+  });
+
+  it('still records a different account being refused in the same window', async () => {
+    // The bound is per ACTOR. If it were global, one noisy client would hide
+    // every other account's refusals -- which is the attack, not the defence.
+    const first = await signInAs(EMAIL, PASSWORD);
+    await post('/auth/register', {
+      firstName: 'Jose', lastName: 'Rizal', email: 'jose.rizal@example.ph',
+      mobileNumber: '+639171234568', password: PASSWORD,
+    });
+    const second = await signInAs('jose.rizal@example.ph', PASSWORD);
+
+    for (const token of [first, first, second, second]) {
+      await app.inject({
+        method: 'GET', url: `/staff/applications/${randomUUID()}`,
+        headers: { authorization: `Bearer ${token}` },
+      });
+    }
+
+    const entries = await db.query<{ actor_account_id: string }>(
+      `select distinct actor_account_id from audit_events
+        where action = 'authorisation.refused'`,
+    );
+    expect(entries.rows).toHaveLength(2);
+  });
+
+  it('refuses the request even when the entry cannot be written', async () => {
+    // The refusal is the security control; the entry is the account of it.
+    // Losing the account of it must never become letting the caller through.
+    const applicantToken = await signInAs(EMAIL, PASSWORD);
+    await db.query('drop table audit_events cascade');
+
+    const response = await app.inject({
+      method: 'GET', url: `/staff/applications/${randomUUID()}`,
+      headers: { authorization: `Bearer ${applicantToken}` },
+    });
+
+    expect(response.statusCode).toBe(403);
   });
 });
 

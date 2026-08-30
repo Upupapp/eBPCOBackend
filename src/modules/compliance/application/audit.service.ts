@@ -19,14 +19,13 @@ import { ChainVerdict, ChainableEvent, GENESIS, hashEntry, verifyChain } from '.
  * wants to find". Nothing wrote one, and nothing had. Corrected here on
  * 2026-08-29 rather than left to read as a guarantee.
  *
- * It is still not written, and the reason is the row lock below. Every append
- * serialises on the chain head, so auditing every 403 makes audit volume
- * REQUEST-scale and attacker-controllable: a caller with one valid token can
- * queue appends ahead of the ones inside real permit transactions. Refused
- * SIGN-INS are audited instead -- the same investigative value, and bounded,
- * because that path deliberately burns ~100ms per attempt and sits behind the
- * rate limiter. Auditing authorisation refusals needs a bound of its own before
- * it is safe, and that bound has not been designed.
+ * D-6 shipped without it, because every append serialises on the chain head:
+ * auditing every 403 would make audit volume REQUEST-scale and
+ * attacker-controllable, letting a caller with one valid token queue appends
+ * ahead of the ones inside real permit transactions.
+ *
+ * `appendOncePerWindow` is that bound, added 2026-08-30. See its own comment
+ * for why a debounce is the right shape and what it deliberately gives up.
  */
 
 export type AuditOutcome = 'allowed' | 'denied' | 'failed';
@@ -185,6 +184,59 @@ export class AuditService {
    * chain. Paging on a timestamp would need a tiebreak for two events in the
    * same millisecond — the case this table was given `sequence` to solve.
    */
+  /**
+   * Appends at most one entry per actor per window.
+   *
+   * The bound `authorisation.refused` needed before it could be audited at all.
+   * The problem it solves is not volume for its own sake: `append` takes the
+   * chain head `for update`, so EVERY append is globally serialised, and an
+   * unbounded one on the 403 path lets anyone with a single valid token queue
+   * writes ahead of the appends inside real permit transactions. That is a
+   * denial of service against the audit chain, reachable by an ordinary
+   * applicant.
+   *
+   * A debounce rather than a counter, and the difference is worth stating. A
+   * counter would need a row to increment per refusal -- a second write on the
+   * same hot path, which is the problem again in a different table. This costs
+   * ONE INDEXED READ per refusal, which takes no lock, and at most one chained
+   * write per actor per window.
+   *
+   * What it gives up: the COUNT. An entry says "this account was being refused
+   * around this time", not "it was refused 412 times". Sustained probing shows
+   * as a run of entries one window apart, which is the shape an investigator
+   * actually reads -- when it started and how long it went on. The exact number
+   * is in the request logs, which is where request-scale facts belong.
+   *
+   * Keyed on the ACTOR alone, not the actor and the path. Keying on both would
+   * let a sweep across fifty routes write fifty entries and hand the bound back.
+   *
+   * Two concurrent refusals can both find no recent entry and both append. That
+   * race produces two rows instead of one, which is harmless -- the bound is
+   * about orders of magnitude, and locking to prevent it would reintroduce the
+   * serialisation this exists to avoid.
+   */
+  async appendOncePerWindow(
+    input: AuditInput, windowSeconds: number, tx: SqlClient = this.db,
+  ): Promise<number | null> {
+    if (input.actorAccountId === undefined || input.actorAccountId === null) {
+      // Nothing to debounce on. An anonymous refusal cannot be attributed, so
+      // it cannot be bounded per actor either -- and appending it unbounded is
+      // exactly what this guards against.
+      return null;
+    }
+
+    const since = new Date(this.clock().getTime() - windowSeconds * 1000);
+    const recent = await tx.query<{ one: number }>(
+      `select 1 as one from audit_events
+        where action = $1 and actor_account_id = $2 and occurred_at >= $3
+        limit 1`,
+      [input.action, input.actorAccountId, since],
+    );
+    if (recent.rows.length > 0) return null;
+
+    return this.append(input, tx);
+  }
+
   async stream(filters: {
     action?: string;
     /** A named set of actions -- how D-6's access and security streams are read. */

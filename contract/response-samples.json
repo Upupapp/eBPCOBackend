@@ -2145,7 +2145,7 @@
       "body": {
         "entries": [
           {
-            "sequence": 5,
+            "sequence": 6,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "application.submitted",
             "outcome": "allowed",
@@ -2156,7 +2156,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 4,
+            "sequence": 5,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "permit.release-prepared",
             "outcome": "allowed",
@@ -2167,7 +2167,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 3,
+            "sequence": 4,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "permit.generated",
             "outcome": "allowed",
@@ -2175,6 +2175,17 @@
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
             "actorRole": null,
+            "sourceAddress": "127.0.0.1"
+          },
+          {
+            "sequence": 3,
+            "occurredAt": "2026-01-01T00:00:00.000Z",
+            "action": "authorisation.refused",
+            "outcome": "denied",
+            "subjectType": "account",
+            "subjectId": "00000000-0000-4000-8000-000000000000",
+            "actorAccountId": "00000000-0000-4000-8000-000000000000",
+            "actorRole": "staff",
             "sourceAddress": "127.0.0.1"
           },
           {
@@ -2187,20 +2198,9 @@
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
             "actorRole": null,
             "sourceAddress": "127.0.0.1"
-          },
-          {
-            "sequence": 1,
-            "occurredAt": "2026-01-01T00:00:00.000Z",
-            "action": "application.transitioned",
-            "outcome": "allowed",
-            "subjectType": "application",
-            "subjectId": "00000000-0000-4000-8000-000000000000",
-            "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": "staff",
-            "sourceAddress": "127.0.0.1"
           }
         ],
-        "nextCursor": null
+        "nextCursor": 2
       }
     },
     "staff.notifications": {
