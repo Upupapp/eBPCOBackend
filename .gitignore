@@ -54,3 +54,7 @@ firebase-*.json
 # .gitignore, so when the service moved to apps/ebpco-api/ they silently
 # stopped matching and five deliberately-unversioned documents became
 # untracked. Anchored patterns are the quiet casualty of moving a tree.
+
+# The portal service's dependencies and build, same as the API's.
+apps/castilla-portal/node_modules/
+apps/castilla-portal/dist/
