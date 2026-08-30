@@ -1,0 +1,1723 @@
+{
+  "_comment": "Extracted by scripts/extract-portal-data.ts from the commit below. Do not hand-edit: re-run the script.",
+  "repo": "Upupapp/eBPCO-Website",
+  "commit": "d78d7b72f8de667c9d0dbb100ae948060457c2e1",
+  "dataDir": "castilla-lgu-portal/src/app/core/data",
+  "files": {
+    "municipality.data.ts": [
+      {
+        "source": "MUNICIPALITY_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Municipality of Castilla"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "PROVINCE_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Sorsogon"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "COUNTRY_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Republic of the Philippines"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 0,
+        "fields": {
+          "label": "Province",
+          "value": "Sorsogon",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 1,
+        "fields": {
+          "label": "Region",
+          "value": "Region V — Bicol Region",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 2,
+        "fields": {
+          "label": "Country",
+          "value": "Republic of the Philippines",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 3,
+        "fields": {
+          "label": "Income Classification",
+          "value": "3rd class municipality",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 4,
+        "fields": {
+          "label": "Number of Barangays",
+          "value": "34",
+          "isPlaceholder": false,
+          "count": 34
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 5,
+        "fields": {
+          "label": "Population",
+          "value": "60,635 (2020 Census)",
+          "isPlaceholder": false,
+          "count": 60635,
+          "countSuffix": "(2020 Census)"
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 6,
+        "fields": {
+          "label": "Land Area",
+          "value": "186.20 km²",
+          "isPlaceholder": false,
+          "count": 186.2,
+          "countSuffix": "km²",
+          "countDecimals": 2
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 7,
+        "fields": {
+          "label": "ZIP Code",
+          "value": "4713",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 8,
+        "fields": {
+          "label": "PSGC Code",
+          "value": "0506206000",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 9,
+        "fields": {
+          "label": "Founding / Establishment",
+          "value": "1827",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "PROFILE_FIELDS",
+        "ordinal": 10,
+        "fields": {
+          "label": "Demonym",
+          "value": "Castillano",
+          "isPlaceholder": false
+        },
+        "comment": "Sourced 2026-08-23: the Castilla Public Information Office's own January 2026 post uses \"mga kababayang Castillano\". Older/local usage sometimes has \"Castillanon\" or \"Castillanun\", but current LGU usage supports \"Castillano\".",
+        "scopeComment": "Fields marked isPlaceholder are still pending confirmation from an official LGU Castilla data source and must not be treated as verified. The rest were sourced 2026-08-23 from: Wikipedia \"Castilla, Sorsogon\" (population, land area, PSGC, ZIP, income class), PhilAtlas.com (2020 PSA census cross-check), and the official LGU history page (founding year) — see HISTORY_PLACEHOLDER's replacement below for that citation chain. Demonym and an exact PSA year-over-year population trend beyond the 2020 census were not found from any citable source, so they stay pending.",
+        "fieldComments": {}
+      },
+      {
+        "source": "VISION_PLACEHOLDER",
+        "ordinal": 0,
+        "fields": {
+          "value": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla."
+        },
+        "comment": "Found only as a truncated fragment (\"A premier agri-ecotourism…\") in search results — the official page (castillasorsogon.gov.ph/vision-and-mission) blocks automated fetching, so the complete statement could not be verified. Left as a placeholder rather than publishing an incomplete quote.",
+        "fieldComments": {}
+      }
+    ],
+    "offices.data.ts": [
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 0,
+        "fields": {
+          "id": "executive",
+          "label": "Executive"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 1,
+        "fields": {
+          "id": "administrative",
+          "label": "Administrative"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 2,
+        "fields": {
+          "id": "finance",
+          "label": "Finance"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 3,
+        "fields": {
+          "id": "social-services",
+          "label": "Social Services"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 4,
+        "fields": {
+          "id": "development",
+          "label": "Development"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "OFFICE_CATEGORIES",
+        "ordinal": 5,
+        "fields": {
+          "id": "public-safety",
+          "label": "Public Safety"
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 0,
+        "fields": {
+          "slug": "office-of-the-mayor",
+          "name": "Office of the Municipal Mayor",
+          "category": "executive",
+          "shortDescription": "Leads the executive administration of the municipality and oversees all local government operations.",
+          "aboutText": "The Office of the Municipal Mayor exercises general supervision over all municipal offices, implements local policies and ordinances, and represents the municipality in official and ceremonial functions.",
+          "head": {
+            "__expression": "headFromOfficial(MAYOR)"
+          },
+          "services": [
+            "Executive supervision of municipal departments and offices",
+            "Enforcement of laws, ordinances, and executive issuances",
+            "Public assistance and constituent concerns",
+            "Representation of the municipality in official matters"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "office-of-the-vice-mayor",
+            "sangguniang-bayan",
+            "municipal-administrator"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 1,
+        "fields": {
+          "slug": "office-of-the-vice-mayor",
+          "name": "Office of the Municipal Vice Mayor",
+          "category": "executive",
+          "shortDescription": "Presides over the Sangguniang Bayan and assumes executive duties in the Mayor’s absence.",
+          "aboutText": "The Office of the Municipal Vice Mayor presides over sessions of the Sangguniang Bayan, the municipality’s legislative body, and performs executive functions as provided under the Local Government Code.",
+          "head": {
+            "__expression": "headFromOfficial(VICE_MAYOR)"
+          },
+          "services": [
+            "Presiding officer of the Sangguniang Bayan",
+            "Legislative session scheduling and records oversight",
+            "Assumption of mayoral duties when required by law"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "office-of-the-mayor",
+            "sangguniang-bayan"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 2,
+        "fields": {
+          "slug": "sangguniang-bayan",
+          "name": "Sangguniang Bayan",
+          "category": "executive",
+          "shortDescription": "The municipality’s legislative council, responsible for enacting local ordinances and resolutions.",
+          "aboutText": "The Sangguniang Bayan is the legislative body of the municipality. It enacts ordinances, approves resolutions, and appropriates funds for the general welfare of Castilla in accordance with the Local Government Code.",
+          "head": {
+            "name": "Reynaldo C. Marchan",
+            "position": "Sangguniang Bayan Secretary",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Enactment of municipal ordinances and resolutions",
+            "Review of barangay ordinances",
+            "Public hearings and legislative inquiries",
+            "Approval of the annual municipal budget"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "office-of-the-vice-mayor",
+            "office-of-the-mayor"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23: identified in Sorsogon State University institutional material."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 3,
+        "fields": {
+          "slug": "municipal-administrator",
+          "name": "Municipal Administrator",
+          "category": "administrative",
+          "shortDescription": "Coordinates the day-to-day management of municipal departments on behalf of the Mayor.",
+          "aboutText": "The Office of the Municipal Administrator assists the Mayor in coordinating the activities of all municipal departments, ensuring efficient delivery of services and implementation of programs.",
+          "head": {
+            "name": "Atty. Marilyn D. Valino",
+            "position": "Municipal Administrator",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Inter-office coordination and program monitoring",
+            "Administrative policy implementation",
+            "Personnel and operations oversight support"
+          ],
+          "contact": {
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)"
+          },
+          "relatedOfficeSlugs": [
+            "office-of-the-mayor",
+            "human-resource-management",
+            "general-services"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23: LGU Citizen's Charter, corroborated by a PSA Sorsogon publication (2024 CBMS presentation, August 2025).",
+          "contact": "Direct phone/email/room not found — the Mayor's Office line should not be presented as the Administrator's direct contact. Hours are the Administrator's own published schedule (Citizen's Charter)."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 4,
+        "fields": {
+          "slug": "municipal-treasurer",
+          "name": "Municipal Treasurer's Office",
+          "category": "finance",
+          "shortDescription": "Manages collection, custody, and disbursement of municipal funds.",
+          "aboutText": "The Municipal Treasurer’s Office is responsible for the collection of local taxes, fees, and charges, and for the custody and proper disbursement of municipal funds.",
+          "head": {
+            "__expression": "placeholderHead('Municipal Treasurer')"
+          },
+          "services": [
+            "Collection of real property and business taxes",
+            "Issuance of official receipts and tax clearances",
+            "Cash management and fund custody",
+            "Disbursement processing for municipal obligations"
+          ],
+          "contact": {
+            "__expression": "placeholderContact('Castilla Municipal Hall, 1st Floor, Cumadcad, Castilla, Sorsogon')"
+          },
+          "relatedOfficeSlugs": [
+            "municipal-assessor",
+            "municipal-accounting",
+            "municipal-budget",
+            "business-permits-licensing"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "The 2023 Citizen's Charter named a Treasurer, but Castilla subsequently advertised this post (Municipal Government Department Head I – Municipal Treasurer) as vacant in late 2025 — publishing that name now risks naming someone no longer in the role, so the head stays unconfirmed. The office's own floor is unaffected by who staffs it, so that alone is updated."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 5,
+        "fields": {
+          "slug": "municipal-assessor",
+          "name": "Municipal Assessor's Office",
+          "category": "finance",
+          "shortDescription": "Handles the appraisal and assessment of real properties for taxation purposes.",
+          "aboutText": "The Municipal Assessor’s Office appraises and assesses real properties within Castilla, maintains property records, and issues certifications used for taxation and land transactions.",
+          "head": {
+            "name": "Gemma H. Arogante",
+            "position": "Municipal Assessor",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Real property appraisal and assessment",
+            "Tax declaration issuance and updates",
+            "Property record certification"
+          ],
+          "contact": {
+            "telephone": "0970-864-2404",
+            "location": "Castilla Municipal Hall, 1st Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-treasurer",
+            "municipal-planning-development"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 6,
+        "fields": {
+          "slug": "municipal-accounting",
+          "name": "Municipal Accounting Office",
+          "category": "finance",
+          "shortDescription": "Maintains municipal financial records and processes payment vouchers.",
+          "aboutText": "The Municipal Accounting Office maintains the books of accounts of the municipality, processes disbursement vouchers, and prepares financial statements and reports.",
+          "head": {
+            "name": "Susan B. Marvida",
+            "position": "Municipal Accountant",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Processing of disbursement vouchers and payrolls",
+            "Maintenance of municipal books of accounts",
+            "Preparation of financial statements"
+          ],
+          "contact": {
+            "telephone": "0970-864-2405",
+            "email": "lgucastilla@gmail.com",
+            "location": "Castilla Municipal Hall, 2nd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-treasurer",
+            "municipal-budget"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 7,
+        "fields": {
+          "slug": "municipal-budget",
+          "name": "Municipal Budget Office",
+          "category": "finance",
+          "shortDescription": "Prepares and administers the annual municipal budget.",
+          "aboutText": "The Municipal Budget Office prepares the annual and supplemental budgets of the municipality and monitors the utilization of appropriated funds across departments.",
+          "head": {
+            "name": "Roselyn M. Marbella",
+            "position": "Municipal Budget Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Preparation of the annual municipal budget",
+            "Budget monitoring and utilization reports",
+            "Review of departmental budget proposals"
+          ],
+          "contact": {
+            "telephone": "0970-864-2406",
+            "email": "mbocastilla07@gmail.com",
+            "location": "Castilla Municipal Hall, 2nd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-accounting",
+            "municipal-treasurer",
+            "municipal-planning-development"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 8,
+        "fields": {
+          "slug": "municipal-planning-development",
+          "name": "Municipal Planning and Development Office",
+          "category": "development",
+          "shortDescription": "Formulates the municipality’s development plans, programs, and investment priorities.",
+          "aboutText": "The Municipal Planning and Development Office formulates integrated development plans, monitors program implementation, and coordinates local development projects for Castilla.",
+          "head": {
+            "name": "Raquel J. Dollison",
+            "position": "Municipal Planning and Development Coordinator",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Formulation of the Comprehensive Development Plan",
+            "Project monitoring and evaluation",
+            "Local investment and development coordination"
+          ],
+          "contact": {
+            "telephone": "0970-864-2407",
+            "location": "Castilla Municipal Hall, 2nd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-engineering",
+            "municipal-budget",
+            "municipal-agriculture"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23: LGU Citizen's Charter, corroborated by a PSA Sorsogon publication (2025 CBMS presentation)."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 9,
+        "fields": {
+          "slug": "municipal-engineering",
+          "name": "Municipal Engineering Office",
+          "category": "development",
+          "shortDescription": "Oversees public infrastructure planning, construction, and maintenance.",
+          "aboutText": "The Municipal Engineering Office plans, designs, and supervises the construction and maintenance of municipal infrastructure such as roads, buildings, and public facilities.",
+          "head": {
+            "name": "Jesus D. Abitria Jr.",
+            "position": "Municipal Engineer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Infrastructure project design and supervision",
+            "Building permit technical evaluation",
+            "Public works maintenance planning"
+          ],
+          "contact": {
+            "telephone": "0970-864-2409",
+            "location": "Castilla Municipal Hall, 2nd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-planning-development",
+            "general-services"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter. The email it lists is a personal address belonging to someone other than this office's named head, which is why it is now withheld below — see the note on the contact record. The observation was made when this was first written; the owner ruled on it 2026-08-30."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 10,
+        "fields": {
+          "slug": "municipal-civil-registrar",
+          "name": "Municipal Civil Registrar",
+          "category": "administrative",
+          "shortDescription": "Handles civil registration records including birth, marriage, and death certificates.",
+          "aboutText": "The Office of the Municipal Civil Registrar registers vital events — births, marriages, and deaths — occurring within Castilla, and issues certified civil registry documents.",
+          "head": {
+            "name": "Cecilia B. Loterte",
+            "position": "Municipal Civil Registrar",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Registration of births, marriages, and deaths",
+            "Issuance of certified civil registry documents",
+            "Processing of legal corrections and annotations"
+          ],
+          "contact": {
+            "telephone": "0970-864-2411",
+            "email": "mcrocastilla@gmail.com",
+            "location": "Castilla Municipal Hall, 1st Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-health",
+            "municipal-social-welfare"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 11,
+        "fields": {
+          "slug": "municipal-health",
+          "name": "Municipal Health Office",
+          "category": "social-services",
+          "shortDescription": "Delivers primary healthcare services and public health programs to residents.",
+          "aboutText": "The Municipal Health Office provides primary healthcare, maternal and child health services, disease prevention programs, and sanitation oversight for the municipality.",
+          "head": {
+            "name": "Dr. Melquiades D. Boque",
+            "position": "Municipal Health Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Primary care and outpatient consultation",
+            "Maternal, child, and immunization programs",
+            "Public health and sanitation inspection"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "municipal-social-welfare",
+            "municipal-civil-registrar",
+            "municipal-disaster-risk-reduction"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 via web search."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 12,
+        "fields": {
+          "slug": "municipal-social-welfare",
+          "name": "Municipal Social Welfare and Development Office",
+          "category": "social-services",
+          "shortDescription": "Administers social welfare programs for vulnerable and disadvantaged residents.",
+          "aboutText": "The Municipal Social Welfare and Development Office implements assistance programs for children, senior citizens, persons with disabilities, and families in crisis, and coordinates with national social welfare agencies.",
+          "head": {
+            "name": "Roland A. Cortezano, RSW",
+            "position": "Municipal Social Welfare and Development Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Assistance programs for indigent and vulnerable residents",
+            "Senior citizen and PWD affairs",
+            "Case management and referral services"
+          ],
+          "contact": {
+            "telephone": "0930-345-8569",
+            "email": "mswdo1castilla@gmail.com",
+            "location": "Municipal Social Welfare and Development Office, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-health",
+            "municipal-disaster-risk-reduction"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter.",
+          "contact": "Exact floor/room within the office building wasn't specified in the source, only the office itself — location left at that level."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 13,
+        "fields": {
+          "slug": "municipal-agriculture",
+          "name": "Municipal Agriculture Office",
+          "category": "development",
+          "shortDescription": "Supports local farmers and fisherfolk through extension services and programs.",
+          "aboutText": "The Municipal Agriculture Office provides technical assistance, extension services, and program support to farmers and fisherfolk to improve agricultural productivity in Castilla.",
+          "head": {
+            "name": "Manuel L. Marantal",
+            "position": "Municipal Agriculturist",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Agricultural extension and technical assistance",
+            "Farmer and fisherfolk registration support",
+            "Distribution of program inputs and assistance"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "municipal-environment-natural-resources",
+            "municipal-planning-development"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from an official LGU Castilla document (Agricultures.pdf)."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 14,
+        "fields": {
+          "slug": "municipal-environment-natural-resources",
+          "name": "Municipal Environment and Natural Resources Office",
+          "category": "development",
+          "shortDescription": "Oversees environmental protection, waste management, and natural resource programs.",
+          "aboutText": "The Municipal Environment and Natural Resources Office implements environmental protection measures, solid waste management, and natural resource conservation programs within the municipality.",
+          "head": {
+            "name": "Ricardo L. Averilla",
+            "position": "Municipal Environment and Natural Resources Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Solid waste management program implementation",
+            "Environmental compliance monitoring",
+            "Coastal and natural resource protection initiatives"
+          ],
+          "contact": {
+            "telephone": "0970-864-2408",
+            "location": "Castilla Municipal Hall, 2nd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-agriculture",
+            "municipal-disaster-risk-reduction"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23 from the LGU Citizen's Charter."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 15,
+        "fields": {
+          "slug": "municipal-disaster-risk-reduction",
+          "name": "Municipal Disaster Risk Reduction and Management Office",
+          "category": "public-safety",
+          "shortDescription": "Coordinates disaster preparedness, response, and risk reduction efforts.",
+          "aboutText": "The Municipal Disaster Risk Reduction and Management Office leads preparedness planning, early warning coordination, and emergency response operations to protect residents from natural and human-induced hazards.",
+          "head": {
+            "name": "Edgar D. Ardales Jr.",
+            "position": "MDRRM Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Disaster preparedness planning and drills",
+            "Early warning and hazard monitoring",
+            "Emergency response coordination"
+          ],
+          "contact": {
+            "telephone": "0928-949-6045",
+            "email": "mdrrmcastilla@yahoo.com",
+            "location": "Municipal Building, Cumadcad, Castilla, Sorsogon",
+            "hours": "Administrative: Monday–Friday, 8:00 AM–5:00 PM · Emergency response: 24/7",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-health",
+            "municipal-social-welfare",
+            "municipal-environment-natural-resources"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Name sourced 2026-08-23, independently corroborated: first surfaced as a lower-confidence inference from the office email's username, then confirmed via LGU-published MDRRMO material naming him directly.",
+          "contact": "Exact floor within the Municipal Building wasn't specified in any source found, only the building itself. Hours distinguish ordinary administrative business from the office's actual emergency-response function, which runs continuously."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 16,
+        "fields": {
+          "slug": "business-permits-licensing",
+          "name": "Business Permits and Licensing Office",
+          "category": "administrative",
+          "shortDescription": "Processes business permit applications, renewals, and licensing requirements.",
+          "aboutText": "The Business Permits and Licensing Office processes the issuance and renewal of business permits, coordinates with regulatory offices for evaluation, and maintains the municipal business registry.",
+          "head": {
+            "name": "Loriejane N. Excija",
+            "position": "Business Permits and Licensing Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "New business permit application processing",
+            "Annual business permit renewal",
+            "Business registry maintenance"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "municipal-treasurer",
+            "municipal-engineering"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23: named on an official Castilla business-permit application form and the LGU Citizen's Charter (as Administrative Assistant II handling BPLO review/validation)."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 17,
+        "fields": {
+          "slug": "human-resource-management",
+          "name": "Human Resource Management Office",
+          "category": "administrative",
+          "shortDescription": "Manages municipal personnel administration, recruitment, and employee welfare.",
+          "aboutText": "The Human Resource Management Office administers recruitment, employee records, benefits, and personnel development programs for municipal government employees.",
+          "head": {
+            "name": "Gelita Inocencio Arcos, MPA",
+            "position": "Human Resource Management Officer",
+            "isPlaceholder": false
+          },
+          "services": [
+            "Recruitment and appointment processing",
+            "Employee records and leave administration",
+            "Personnel training and development coordination"
+          ],
+          "contact": {
+            "telephone": "0970-864-2412",
+            "email": "lguofcastillasorsogon.mhrmo@gmail.com",
+            "location": "Castilla Municipal Hall, 3rd Floor, Cumadcad, Castilla, Sorsogon",
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "isPlaceholder": false
+          },
+          "relatedOfficeSlugs": [
+            "municipal-administrator",
+            "general-services"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {
+          "head": "Sourced 2026-08-23: LGU Citizen's Charter, corroborated by recent Civil Service recruitment postings still directing applicants to her."
+        }
+      },
+      {
+        "source": "MUNICIPAL_OFFICES",
+        "ordinal": 18,
+        "fields": {
+          "slug": "general-services",
+          "name": "General Services Office",
+          "category": "administrative",
+          "shortDescription": "Manages municipal property, procurement support, and general facilities upkeep.",
+          "aboutText": "The General Services Office manages municipal government property and equipment, supports procurement processes, and maintains municipal facilities and vehicles.",
+          "head": {
+            "__expression": "placeholderHead('General Services Officer')"
+          },
+          "services": [
+            "Municipal property and supply management",
+            "Facilities and vehicle maintenance",
+            "Procurement support services"
+          ],
+          "contact": {
+            "__expression": "placeholderContact()"
+          },
+          "relatedOfficeSlugs": [
+            "municipal-administrator",
+            "municipal-engineering"
+          ]
+        },
+        "comment": null,
+        "fieldComments": {}
+      }
+    ],
+    "officials.data.ts": [
+      {
+        "source": "MAYOR",
+        "ordinal": 0,
+        "fields": {
+          "name": "Isagani \"Bong\" B. Mendoza",
+          "position": "Municipal Mayor",
+          "office": "Office of the Municipal Mayor",
+          "initials": "IM",
+          "isPlaceholder": false,
+          "photoUrl": "assets/officials/mayor-isagani-mendoza.jpg"
+        },
+        "comment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "VICE_MAYOR",
+        "ordinal": 0,
+        "fields": {
+          "name": "Jesus \"Boy\" Agarap",
+          "position": "Municipal Vice Mayor",
+          "office": "Office of the Municipal Vice Mayor",
+          "initials": "JA",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 0,
+        "fields": {
+          "name": "Camille Mendoza",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "CM",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 1,
+        "fields": {
+          "name": "Vicente Manata",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "VM",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 2,
+        "fields": {
+          "name": "Erick Navas",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "EN",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 3,
+        "fields": {
+          "name": "Joel Agripa",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "JA",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 4,
+        "fields": {
+          "name": "Allan Canon",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "AC",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 5,
+        "fields": {
+          "name": "Kap Luna Luna",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "LL",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 6,
+        "fields": {
+          "name": "Kap Budoy Mirandilla",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "BM",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_MEMBERS",
+        "ordinal": 7,
+        "fields": {
+          "name": "Ian Llona",
+          "position": "Sangguniang Bayan Member",
+          "office": "Sangguniang Bayan",
+          "initials": "IL",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "scopeComment": "\"Kap Luna Luna\" and \"Kap Budoy Mirandilla\" are reported this way in every source found (ballot/press name, \"Kap\" denoting a sitting or former barangay captain) — their full legal given names weren't found and aren't invented here.",
+        "fieldComments": {},
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_EXOFFICIO_MEMBERS",
+        "ordinal": 0,
+        "fields": {
+          "name": "Name pending confirmation",
+          "position": "ABC President (Liga ng mga Barangay)",
+          "office": "Sangguniang Bayan",
+          "initials": "LB",
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {
+          "name": "Every source found names only the *provincial*-level ABC President (a different office) — Castilla's own municipal-chapter president wasn't identified, so this stays unconfirmed rather than risk attributing the wrong office to a real person."
+        },
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      },
+      {
+        "source": "SB_EXOFFICIO_MEMBERS",
+        "ordinal": 1,
+        "fields": {
+          "name": "Hon. Ronard L. Lladones",
+          "position": "SK Federation President",
+          "office": "Sangguniang Bayan",
+          "initials": "RL",
+          "isPlaceholder": false
+        },
+        "comment": null,
+        "fieldComments": {
+          "name": "Sourced 2026-08-23: Brigada News (Nov 15, 2023 election), with continuity through 2025 in municipal SK documents and a 2025 Binibining Castilla proposal bearing Mayor Mendoza's approval. A 2026 SB roster would be the ideal freshness check, but this is well-corroborated across independent sources through 2025."
+        },
+        "fileComment": "Elected officials for the 2025–2028 term, sourced 2026-08-23 from the 2025 local election results (Rappler's live results page, cross-checked against Wikipedia's \"Castilla, Sorsogon\" infobox and a BicolTV Facebook congratulatory post naming the same winners). See SB_EXOFFICIO_MEMBERS below for the two ex-officio seats."
+      }
+    ],
+    "permits.data.ts": [
+      {
+        "source": "PERMIT_OFFICE_GROUPS",
+        "ordinal": 0,
+        "fields": {
+          "id": "engineering",
+          "label": "Office of the Building Official"
+        },
+        "comment": null,
+        "scopeComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below.",
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PERMIT_OFFICE_GROUPS",
+        "ordinal": 1,
+        "fields": {
+          "id": "zoning",
+          "label": "Zoning / Planning"
+        },
+        "comment": null,
+        "scopeComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below.",
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PERMIT_OFFICE_GROUPS",
+        "ordinal": 2,
+        "fields": {
+          "id": "bfp",
+          "label": "Bureau of Fire Protection"
+        },
+        "comment": null,
+        "scopeComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below.",
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "OBO_OFFICE_SLUG",
+        "ordinal": 0,
+        "fields": {
+          "value": "municipal-engineering"
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "ZONING_OFFICE_SLUG",
+        "ordinal": 0,
+        "fields": {
+          "value": "municipal-planning-development"
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "OBO_OFFICE_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Office of the Building Official (Municipal Engineering Office)"
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "ZONING_OFFICE_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Municipal Planning and Development Office"
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "BFP_OFFICE_NAME",
+        "ordinal": 0,
+        "fields": {
+          "value": "Bureau of Fire Protection – Castilla Fire Station"
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 0,
+        "fields": {
+          "slug": "building-permit-new-construction",
+          "name": "Building Permit – New Construction",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Required before starting construction of a new building or structure, confirming that plans meet the National Building Code and local zoning rules.",
+          "requirements": [
+            "Land title or tax declaration for the property",
+            "Barangay clearance",
+            "Locational/zoning clearance",
+            "Valid government-issued ID of the applicant",
+            "Signed and sealed architectural, structural, electrical, and sanitary plans",
+            "Bill of materials",
+            "PRC license and PTR of the engineer/architect of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "processNote": "A Zoning / Locational Clearance is typically secured first and filed as part of this application.",
+          "formUrl": {
+            "__expression": "formFile('Building-Permit-Unified-Application-Form.pdf')"
+          },
+          "checklistUrl": {
+            "__expression": "BUILDING_AND_OCCUPANCY_CHECKLIST"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 1,
+        "fields": {
+          "slug": "building-permit-renovation-alteration",
+          "name": "Building Permit – Renovation / Alteration",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers renovation or alteration work on an existing building that changes its structure, layout, or utilities.",
+          "requirements": [
+            "Renovation/alteration plans",
+            "Copy of the original Building Permit, if available",
+            "Bill of materials",
+            "PRC license and PTR of the engineer/architect of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Building-Permit-Unified-Application-Form.pdf')"
+          },
+          "checklistUrl": {
+            "__expression": "BUILDING_AND_OCCUPANCY_CHECKLIST"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 2,
+        "fields": {
+          "slug": "building-permit-addition-extension",
+          "name": "Building Permit – Addition / Extension",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers adding floor area or extending an existing structure, such as a new floor or wing.",
+          "requirements": [
+            "Addition/extension plans",
+            "Structural analysis covering the added load",
+            "Bill of materials",
+            "PRC license and PTR of the engineer/architect of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Building-Permit-Unified-Application-Form.pdf')"
+          },
+          "checklistUrl": {
+            "__expression": "BUILDING_AND_OCCUPANCY_CHECKLIST"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 3,
+        "fields": {
+          "slug": "demolition-permit",
+          "name": "Demolition Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Required before tearing down all or part of an existing structure.",
+          "requirements": [
+            "Method of demolition / work plan",
+            "Structural safety assessment",
+            "Utility disconnection clearance (water, power, etc.)",
+            "PRC license and PTR of the engineer of record"
+          ],
+          "validity": "6 months from date of issuance",
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 4,
+        "fields": {
+          "slug": "zoning-locational-clearance",
+          "name": "Zoning / Locational Clearance",
+          "officeGroup": "zoning",
+          "issuingOfficeSlug": {
+            "__expression": "ZONING_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "ZONING_OFFICE_NAME"
+          },
+          "description": "Confirms that a proposed project or business location is consistent with the municipality’s zoning ordinance and land use plan. Usually the first step before applying for a Building Permit.",
+          "requirements": [
+            "Notarized letter request addressed to the Zoning Administrator",
+            "Site development plan",
+            "Vicinity map",
+            "Sketch plan of the house",
+            "Bill of materials",
+            "Proof of ownership",
+            "Tax declaration / Certificate of Title (COT) / OCT",
+            "Land tax receipt (current year)",
+            "Barangay building clearance",
+            "Cedula (photocopy)",
+            "DPWH clearance, if applicable",
+            "Environmental Compliance Certificate (ECC), if applicable"
+          ],
+          "validity": "12 months from date of issuance",
+          "processNote": "Typically filed and secured before submitting a Building Permit application.",
+          "formUrl": {
+            "__expression": "formFile('Zoning-Locational-Clearance-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 5,
+        "fields": {
+          "slug": "architectural-permit",
+          "name": "Architectural Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers the architectural design aspect of a construction project.",
+          "requirements": [
+            "Architectural plans",
+            "PRC license and PTR of the architect of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 6,
+        "fields": {
+          "slug": "civil-structural-permit",
+          "name": "Civil / Structural Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers the structural design and civil works aspect of a construction project.",
+          "requirements": [
+            "Structural plans",
+            "Structural design analysis",
+            "PRC license and PTR of the civil engineer of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Civil-Structural-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 7,
+        "fields": {
+          "slug": "electrical-permit",
+          "name": "Electrical Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers the electrical installation aspect of a construction project.",
+          "requirements": [
+            "Electrical plans",
+            "PRC license and PTR of the electrical engineer of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Electrical-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 8,
+        "fields": {
+          "slug": "mechanical-permit",
+          "name": "Mechanical Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers mechanical systems such as elevators, HVAC, and other mechanical equipment installations.",
+          "requirements": [
+            "Mechanical plans",
+            "PRC license and PTR of the mechanical engineer of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Mechanical-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 9,
+        "fields": {
+          "slug": "sanitary-permit",
+          "name": "Sanitary Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers sanitary and plumbing systems within a building, such as waste and water lines.",
+          "requirements": [
+            "Sanitary/plumbing plans",
+            "PRC license and PTR of the sanitary engineer or master plumber of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Sanitary-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 10,
+        "fields": {
+          "slug": "plumbing-permit",
+          "name": "Plumbing Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers the plumbing layout and fixtures of a building.",
+          "requirements": [
+            "Plumbing layout plans",
+            "PRC license and PTR of the master plumber of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Plumbing-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 11,
+        "fields": {
+          "slug": "electronics-permit",
+          "name": "Electronics Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers electronics and communications wiring/equipment installed within a building.",
+          "requirements": [
+            "Electronics/communications layout plans",
+            "PRC license and PTR of the electronics engineer of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Electronics-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 12,
+        "fields": {
+          "slug": "interior-design-permit",
+          "name": "Interior Design Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Covers interior design and fit-out work within a building.",
+          "requirements": [
+            "Interior design layout plans",
+            "PRC license and PTR of the interior designer of record"
+          ],
+          "validity": "12 months from date of issuance",
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 13,
+        "fields": {
+          "slug": "fencing-permit",
+          "name": "Fencing Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Required before constructing a perimeter fence or wall.",
+          "requirements": [
+            "Fence plan / site development plan"
+          ],
+          "validity": "6 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Fencing-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 14,
+        "fields": {
+          "slug": "sign-permit",
+          "name": "Sign Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Required for billboards, signages, and similar structures, especially elevated or free-standing signs.",
+          "requirements": [
+            "Sign design and structural detail",
+            "PRC license and PTR of the engineer of record, if the sign is elevated or structural"
+          ],
+          "validity": "12 months from date of issuance, subject to annual renewal",
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 15,
+        "fields": {
+          "slug": "excavation-permit",
+          "name": "Excavation Permit",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Required before excavation or ground preparation work on a site.",
+          "requirements": [
+            "Excavation / site development plan",
+            "Geotechnical or soil assessment, if excavation exceeds the regulated depth",
+            "PRC license and PTR of the engineer of record"
+          ],
+          "validity": "6 months from date of issuance",
+          "formUrl": {
+            "__expression": "formFile('Excavation-Permit-Form.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 16,
+        "fields": {
+          "slug": "fsec-building-permit",
+          "name": "FSEC for Building Permit (BFP)",
+          "officeGroup": "bfp",
+          "issuingOfficeSlug": null,
+          "issuingOfficeName": {
+            "__expression": "BFP_OFFICE_NAME"
+          },
+          "description": "The Fire Safety Evaluation Clearance (FSEC) is issued by the Bureau of Fire Protection before a Building Permit is granted, confirming that building plans meet fire safety requirements under the Fire Code of the Philippines.",
+          "requirements": [
+            "Three (3) complete sets of proposed plans covering: Architectural, Civil/Structural, Electrical, Mechanical, Plumbing, Electronics, Sanitary, and Fire Protection documents",
+            "Fire Safety Compliance Report (FSCR), one (1) set, if necessary",
+            "Cost estimate of the building, including labor cost, signed and sealed by the designer/contractor and duly notarized",
+            "Fire Safety Clearance for Welding, Cutting, and other Hot Work Operations, if required"
+          ],
+          "validity": "Valid for the specific project/plans evaluated; not a recurring renewal item",
+          "processNote": "Normally required before the Building Permit itself is approved.",
+          "formUrl": {
+            "__expression": "formFile('FSEC-for-Building-Permit-BFP.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {
+          "issuingOfficeSlug": "No Bureau of Fire Protection / Castilla Fire Station entry exists in offices.data.ts yet — BFP is a national agency office, not a municipal government office, so there is no municipal directory page to cross-link to."
+        },
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 17,
+        "fields": {
+          "slug": "certificate-of-occupancy",
+          "name": "Certificate of Occupancy",
+          "officeGroup": "engineering",
+          "issuingOfficeSlug": {
+            "__expression": "OBO_OFFICE_SLUG"
+          },
+          "issuingOfficeName": {
+            "__expression": "OBO_OFFICE_NAME"
+          },
+          "description": "Certifies that a completed building may be legally occupied or used, issued after final inspection.",
+          "requirements": [
+            "As-built plans",
+            "Certificate of completion",
+            "Final Fire Safety Inspection Certificate",
+            "Certificate of final electrical inspection"
+          ],
+          "validity": "No fixed expiry — valid for the life of the structure unless its use, occupancy, or ownership changes",
+          "checklistUrl": {
+            "__expression": "BUILDING_AND_OCCUPANCY_CHECKLIST"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "PUBLIC_PERMIT_TYPES",
+        "ordinal": 18,
+        "fields": {
+          "slug": "fsic-occupancy-permit",
+          "name": "FSIC for Occupancy Permit (BFP)",
+          "officeGroup": "bfp",
+          "issuingOfficeSlug": null,
+          "issuingOfficeName": {
+            "__expression": "BFP_OFFICE_NAME"
+          },
+          "description": "The Fire Safety Inspection Certificate (FSIC) is issued by the Bureau of Fire Protection after construction, confirming that the completed building matches its approved fire safety plans (FSEC) before it can be occupied.",
+          "requirements": [
+            "Endorsement from the Office of the Building Official (OBO)",
+            "Certificate of completion",
+            "Certified true copy of the assessment fee for securing the Certificate of Occupancy, from OBO",
+            "As-built plan, if necessary",
+            "Fire Safety Compliance and Commissioning Report (FSCCR), one (1) set, if necessary"
+          ],
+          "validity": "Required once, as a prerequisite to occupancy; re-inspection may be required if occupancy or use later changes",
+          "processNote": "A statutory prerequisite to occupancy, issued after the FSEC and after construction is complete.",
+          "formUrl": {
+            "__expression": "formFile('FSIC-for-Occupancy-Permit-BFP.pdf')"
+          },
+          "isPlaceholder": true
+        },
+        "comment": null,
+        "fieldComments": {
+          "issuingOfficeSlug": "Same BFP caveat as the FSEC entry above."
+        },
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      }
+    ]
+  }
+}
