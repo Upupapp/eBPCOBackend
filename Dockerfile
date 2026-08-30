@@ -41,6 +41,20 @@ COPY --from=build --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
+# The migrations, and not only for `npm run migrate`.
+#
+# `MIGRATIONS_DIR` resolves to `<app>/db/migrations` from `dist`, and the
+# READINESS PROBE reads it on every check to compare the schema this build
+# expects against the schema it found. Without the directory that read throws,
+# is caught, logs a warning and returns null -- and null is reported as UP.
+#
+# So an image without this line reports itself ready while unable to tell
+# whether its schema matches, and the drift protection is silently inert in the
+# only artefact anyone would ever deploy, while passing in every test, where the
+# directory is on disk. Found 2026-08-30; `deployment-contract.spec` asserts
+# this COPY exists so it cannot be dropped again.
+COPY --chown=node:node db/migrations ./db/migrations
+
 EXPOSE 3000
 
 # No HEALTHCHECK: the orchestrator polls /health and /ready over the network,

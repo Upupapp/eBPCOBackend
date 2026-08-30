@@ -24,6 +24,15 @@ export const DRAIN_STATE = Symbol('EBPCO_DRAIN_STATE');
 /** Injected by tests to run against PGlite instead of a server. */
 export const SQL_CLIENT_OVERRIDE = Symbol('EBPCO_SQL_CLIENT_OVERRIDE');
 
+/**
+ * Read at RUNTIME, not only by tooling: the readiness probe compares the
+ * migrations this build carries against the ledger in the database.
+ *
+ * That makes it a file the container image must contain, which is not obvious
+ * from anything in this file -- and it was missing from the image until
+ * 2026-08-30, leaving the drift protection inert exactly where it mattered.
+ * `deployment-contract.spec` now asserts the Dockerfile copies it.
+ */
 export const MIGRATIONS_DIR = join(__dirname, '../../db/migrations');
 
 /**
