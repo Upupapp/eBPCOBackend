@@ -27,6 +27,29 @@ async function main(): Promise<void> {
 
   const logger = new StructuredLogger(config.LOG_LEVEL ?? 'info');
 
+  // Said out loud, every boot, outside development.
+  //
+  // Three settings an operator is REQUIRED to supply are read by nothing: the
+  // S3 adapter and the ClamAV client do not exist yet. Someone who set
+  // OBJECT_STORE_ENDPOINT to their bucket and MALWARE_SCANNER_URL to their
+  // scanner has every reason to believe documents go there and are scanned. In
+  // fact documents are written to one container's local disk -- lost on the
+  // next deploy, invisible to every other replica -- and checked by a stub.
+  //
+  // A warning in the boot log is the cheapest place for that to be discovered.
+  // The alternative is discovering it from a citizen's missing land title.
+  if (config.EBPCO_ENVIRONMENT !== 'development') {
+    logger.warn('documents are stored on local disk and scanned by a stub', {
+      objectStore: 'filesystem',
+      objectStorePath: config.OBJECT_STORE_LOCAL_PATH,
+      objectStoreEndpointIgnored: config.OBJECT_STORE_ENDPOINT,
+      malwareScanner: 'local-signature-stub',
+      malwareScannerUrlIgnored: config.MALWARE_SCANNER_URL,
+      consequence: 'uploaded documents do not survive a redeploy and are not seen by other '
+        + 'replicas; no real malware scanning is performed',
+    });
+  }
+
   let app;
   try {
     app = await createApp(config, logger);

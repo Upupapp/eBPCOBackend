@@ -160,3 +160,75 @@ describe('migration numbering', () => {
     expect(new Set(versions).size).toBe(versions.length);
   });
 });
+
+describe('required configuration that nothing reads', () => {
+  /**
+   * Settings an operator MUST supply for the service to boot, which no code
+   * path consults. Each needs a reason, because the default reading of a
+   * required setting is that it does something.
+   *
+   * This is the direction the first version of this file missed. It checked
+   * that every key the service reads is documented, and that nothing
+   * documented goes unread -- both questions about the template. Neither
+   * notices a key `loadConfig` demands and no consumer touches.
+   */
+  const REQUIRED_BUT_UNUSED: Readonly<Record<string, string>> = {
+    OBJECT_STORE_ENDPOINT: 'the S3 adapter does not exist. Documents go to '
+      + "OBJECT_STORE_LOCAL_PATH, on one container's disk -- lost on redeploy, invisible to "
+      + 'other replicas. Still demanded at boot so the value is in place when the adapter '
+      + 'lands, and named in a startup warning so an operator who pointed this at their '
+      + 'bucket is not left believing documents go there.',
+    OBJECT_STORE_BUCKET: 'same as OBJECT_STORE_ENDPOINT above',
+    MALWARE_SCANNER_URL: 'no ClamAV or ICAP client exists. Uploads are checked by '
+      + 'LocalSignatureScanner, which is a stub. See docs/decisions/0009-malware-scanning.md.',
+    DOCS_ENABLED: 'validated but inert: boot is refused if it is true in production, and no '
+      + 'route serves documentation whether it is true or false. There is no OpenAPI document '
+      + 'in this repository -- the contract is the recorded response samples. An operator who '
+      + 'sets it in staging gets nothing, and no error.',
+  };
+
+  it('names every one, with a reason', () => {
+    const source = ['src', 'scripts']
+      .flatMap((dir) => sourceFilesIn(join(ROOT, dir)))
+      .filter((file) => !file.endsWith('.spec.ts') && !file.endsWith('app-config.ts'))
+      .map((file) => readFileSync(file, 'utf8'))
+      .join('\n')
+      // Comments name these settings while explaining why they are NOT used,
+      // and counting a comment as a use would hide the very thing this looks
+      // for.
+      .replace(/\/\/[^\n]*/g, '')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      // And so does the startup warning, which reads them in order to say they
+      // are ignored. `Ignored` in the field name is the marker that keeps this
+      // check and that warning honest about each other.
+      .replace(/^.*Ignored:.*$/gm, '');
+
+    const unused = configuredKeys().filter((key) => !source.includes(`.${key}`));
+
+    // Both ways: a setting that gains a real consumer has to leave this list,
+    // or the list becomes a record of things that used to be true.
+    expect(unused.sort()).toEqual(Object.keys(REQUIRED_BUT_UNUSED).sort());
+  });
+
+  it('says so at boot, where an operator will see it', () => {
+    // The register above is for whoever reads this repository. This is for
+    // whoever runs it -- and they are not the same person. An operator who set
+    // OBJECT_STORE_ENDPOINT to their bucket has every reason to believe
+    // documents go there; the boot log is the cheapest place to learn they do
+    // not, and the alternative is learning it from a citizen's missing land
+    // title.
+    const main = readFileSync(join(ROOT, 'src/main.ts'), 'utf8');
+
+    expect(main).toContain('objectStoreEndpointIgnored');
+    expect(main).toContain('malwareScannerUrlIgnored');
+    expect(main).toMatch(/local disk and scanned by a stub/);
+  });
+});
+
+function sourceFilesIn(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const full = join(directory, entry.name);
+    if (entry.isDirectory()) return sourceFilesIn(full);
+    return entry.name.endsWith('.ts') ? [full] : [];
+  });
+}
