@@ -58,11 +58,15 @@ export const PUBLISHED_NAME_BY_KEY: Readonly<Record<string, PublishedPermitName>
  */
 export const KEYS_WITHOUT_A_PUBLISHED_NAME: Readonly<Record<string, string>> = {
   'Sanitary/Plumbing':
-    "reads as the combined term, and this service ALSO keys 'Plumbing' separately -- which maps "
-    + "cleanly to 'Plumbing Permit'. So this one is probably 'Sanitary Permit' under an older "
-    + "combined name, and probably is not good enough: mapping it wrongly labels a citizen's "
-    + "sanitary permit as a plumbing one. Needs the LGU's ruling on whether the two are one "
-    + 'permit here or two.',
+    'a stale COMBINED key. Resolved on the documents rather than by ruling: the two forms this '
+    + 'LGU publishes are NBC FORM NO. A-05 (Sanitary Permit, under the Code on Sanitation of the '
+    + 'Philippines) and NBC FORM NO. A-06 (Plumbing Permit, under the Revised Plumbing Code) -- '
+    + 'two distinct forms under PD 1096, certified by different licensed professionals, and the '
+    + 'same pair appears across unrelated LGUs. So this key means Sanitary and should be renamed '
+    + "to 'Sanitary'. NOT mapped here because the rename is a primary-key migration: permit_type "
+    + 'is referenced by applications, charter entries, fee schedules and requirements, and this '
+    + "key carries the 'SPP' prefix already printed on issued permit numbers. Mapping it without "
+    + 'renaming would leave two names for one permit.',
   'Business Permit':
     'a different service domain. This service models Business Permit and Construction Permit; '
     + 'the published catalogue is building permits only, so there is no counterpart to map to '
@@ -88,3 +92,19 @@ export const PUBLISHED_NAMES_WITHOUT_A_KEY: Readonly<Record<PublishedPermitName,
     "unclaimed only because 'Sanitary/Plumbing' above is unresolved. This entry disappears the "
     + 'moment that ruling is made.',
 };
+
+/**
+ * The name a citizen would recognise, for an internal key.
+ *
+ * `null` rather than the key itself when there is no agreed published name.
+ * Falling back to the key would put an internal identifier in a field a client
+ * binds to its published vocabulary -- which is the defect this whole function
+ * exists to remove, reintroduced one layer down and harder to see.
+ *
+ * A client reading `null` knows the backend has no published name for this
+ * permit. A client reading 'Sanitary/Plumbing' in a field promising a published
+ * name has been told something false.
+ */
+export function publishedNameFor(key: string): string | null {
+  return PUBLISHED_NAME_BY_KEY[key] ?? null;
+}

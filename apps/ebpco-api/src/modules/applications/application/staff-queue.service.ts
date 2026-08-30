@@ -6,6 +6,7 @@ import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } fr
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
 import { visibleStatusesFor } from '../domain/visibility';
+import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
  * What an officer sees, and what an officer is allowed to count.
@@ -37,6 +38,20 @@ export interface QueueRow {
   readonly id: string;
   readonly referenceNumber: string;
   readonly permitType: string;
+  /**
+   * The published name for `permitType`, or null when there is no agreed one.
+   *
+   * `permitType` is this service's internal key -- 'Fencing', 'Civil/Structural'.
+   * The admin portal and the public portal both publish a different, longer
+   * vocabulary -- 'Fencing Permit', 'Civil / Structural Permit'. Serving the
+   * published name here means a client binds to it directly instead of casting
+   * the key into a union that does not contain it.
+   *
+   * Null is a real answer: six internal keys have no agreed published name, and
+   * echoing the key back in a field that promises one would be the same defect
+   * one layer down.
+   */
+  readonly permitTypeName: string | null;
   readonly applicationAction: string;
   readonly lifecycleStatus: LifecycleStatus;
   readonly classification: string | null;
@@ -537,6 +552,11 @@ export class StaffQueueService {
       id: row['id'] as string,
       referenceNumber: row['reference_number'] as string,
       permitType: row['permit_type'] as string,
+      // The name a citizen would recognise, beside the internal key.
+      // Additive: `permitType` keeps its meaning, so no client breaks. It exists
+      // because the admin portal was casting the key into its own published-name
+      // union with `as`, holding a value that union does not contain.
+      permitTypeName: publishedNameFor(row['permit_type'] as string),
       applicationAction: row['application_action'] as string,
       lifecycleStatus: row['lifecycle_status'] as LifecycleStatus,
       classification: (row['classification'] as string | null) ?? null,

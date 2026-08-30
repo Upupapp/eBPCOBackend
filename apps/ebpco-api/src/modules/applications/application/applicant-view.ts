@@ -27,6 +27,20 @@ export interface ApplicationRecord {
   readonly id: string;
   readonly referenceNumber: string;
   readonly permitType: string;
+  /**
+   * The published name for `permitType`, or null when there is no agreed one.
+   *
+   * `permitType` is this service's internal key -- 'Fencing', 'Civil/Structural'.
+   * The admin portal and the public portal both publish a different, longer
+   * vocabulary -- 'Fencing Permit', 'Civil / Structural Permit'. Serving the
+   * published name here means a client binds to it directly instead of casting
+   * the key into a union that does not contain it.
+   *
+   * Null is a real answer: six internal keys have no agreed published name, and
+   * echoing the key back in a field that promises one would be the same defect
+   * one layer down.
+   */
+  readonly permitTypeName: string | null;
   readonly serviceDomain: string;
   readonly applicationAction: string;
   readonly lifecycleStatus: LifecycleStatus;

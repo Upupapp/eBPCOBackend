@@ -6,6 +6,7 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { loadMigrations, migrate } from '../../../persistence/migrator';
 import {
   KEYS_WITHOUT_A_PUBLISHED_NAME, PUBLISHED_NAMES_WITHOUT_A_KEY, PUBLISHED_NAME_BY_KEY,
+  publishedNameFor,
 } from './published-vocabulary';
 
 /**
@@ -115,5 +116,35 @@ describe('every published name is accounted for', () => {
     // portal and has nowhere to file them in this system. Asserted so the
     // number cannot quietly grow.
     expect(Object.keys(PUBLISHED_NAMES_WITHOUT_A_KEY)).toHaveLength(4);
+  });
+});
+
+describe('the published name served beside the internal key', () => {
+  it('answers the published name for a mapped key', () => {
+    expect(publishedNameFor('Fencing')).toBe('Fencing Permit');
+    expect(publishedNameFor('New Construction')).toBe('Building Permit – New Construction');
+    expect(publishedNameFor('Civil/Structural')).toBe('Civil / Structural Permit');
+  });
+
+  it('answers NULL for a key with no agreed published name, never the key itself', () => {
+    // The whole point of the field. Echoing the key back would put an internal
+    // identifier in a field that promises a published name -- the same defect
+    // the field exists to remove, one layer down and harder to see, because a
+    // client would bind it and it would look like a value.
+    expect(publishedNameFor('Sanitary/Plumbing')).toBeNull();
+    expect(publishedNameFor('Business Permit')).toBeNull();
+  });
+
+  it('answers null for a key this service does not have at all', () => {
+    expect(publishedNameFor('Not A Permit')).toBeNull();
+  });
+
+  it('never answers a name that is not in the published catalogue', () => {
+    // A property over the whole mapping rather than three examples: anything
+    // this function can return must be a name the admin and the portal both
+    // publish, or a client binding it to their union is back where it started.
+    for (const key of Object.keys(PUBLISHED_NAME_BY_KEY)) {
+      expect(VOCABULARY.admin.names).toContain(publishedNameFor(key));
+    }
   });
 });

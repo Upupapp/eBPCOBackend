@@ -2,6 +2,7 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { CalendarRepository } from '../../compliance/application/calendar.repository';
 import { Classification, computePledge } from '../../compliance/domain/pledge-clock';
 import { ApplicationRecord, toApplicantView } from './applicant-view';
+import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
  * An applicant's own applications, and nothing else's.
@@ -145,6 +146,11 @@ export class ApplicantQueryService {
       id: row.id as string,
       referenceNumber: row.reference_number as string,
       permitType: row.permit_type as string,
+      // The name a citizen would recognise, beside the internal key.
+      // Additive: `permitType` keeps its meaning, so no client breaks. It exists
+      // because the admin portal was casting the key into its own published-name
+      // union with `as`, holding a value that union does not contain.
+      permitTypeName: publishedNameFor(row.permit_type as string),
       serviceDomain: row.service_domain as string,
       applicationAction: row.application_action as string,
       lifecycleStatus: row.lifecycle_status as ApplicationRecord['lifecycleStatus'],
