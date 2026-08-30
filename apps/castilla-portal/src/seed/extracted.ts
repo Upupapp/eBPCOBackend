@@ -27,3 +27,19 @@ export function expressionOf(value: unknown): string | null {
   const expr = (value as { __expression?: unknown }).__expression;
   return typeof expr === 'string' ? expr : null;
 }
+
+/**
+ * The expressions a `{ ...helper(), field: 'x' }` spread carries.
+ *
+ * A spread was invisible to the seeder until 2026-08-30: the extractor kept
+ * only the literal properties, so an office whose contact spread
+ * `placeholderContact()` lost `isPlaceholder: true` and read as a sourced
+ * fact. Returned as expressions, not values, because what a helper MEANS is a
+ * seeding decision — see `expressionOf`.
+ */
+export function spreadsOf(value: unknown): string[] {
+  if (typeof value !== 'object' || value === null) return [];
+  const spreads = (value as { __spread?: unknown }).__spread;
+  if (!Array.isArray(spreads)) return [];
+  return spreads.map(expressionOf).filter((e): e is string => e !== null);
+}

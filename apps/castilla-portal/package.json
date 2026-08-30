@@ -5,7 +5,7 @@
   "description": "API for the Municipality of Castilla public information portal",
   "scripts": {
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src --max-warnings 0",
+    "lint": "eslint src scripts test --max-warnings 0",
     "extract:portal": "ts-node --transpile-only scripts/extract-portal-data.ts",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js",
     "verify": "npm run typecheck && npm run lint && npm run test"

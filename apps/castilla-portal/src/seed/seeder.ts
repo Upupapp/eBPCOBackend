@@ -1,4 +1,4 @@
-import { ExtractedEntity, ExtractedPortalData, expressionOf } from './extracted';
+import { ExtractedEntity, ExtractedPortalData, expressionOf, spreadsOf } from './extracted';
 import { commentFor, readProvenance } from './provenance';
 
 /**
@@ -42,6 +42,24 @@ export interface Reconciliation {
 }
 
 const OFFICE = 'office';
+
+/**
+ * A name for the unsourced-fields report.
+ *
+ * `slug` and `name` are usually strings, but an entity's `name` can be a helper
+ * expression (`{ __expression: 'MAYOR' }`), and template-stringifying that
+ * printed `[object Object]` into the list of fields the LGU still has to
+ * source. A report nobody can act on is not a report.
+ */
+function labelOf(entity: ExtractedEntity): string {
+  for (const key of ['slug', 'name']) {
+    const value = entity.fields[key];
+    if (typeof value === 'string' && value.length > 0) return value;
+    const expression = expressionOf(value);
+    if (expression !== null) return expression;
+  }
+  return '?';
+}
 
 export class Seeder {
   private writes = 0;
@@ -247,9 +265,36 @@ export class Seeder {
     unsourced: { entity: string; field: string; reason: string }[],
   ): Promise<void> {
     const contact = office.fields['contact'];
-    if (expressionOf(contact) !== null) {
+    // A spread of the placeholder helper IS a placeholder contact. Treated
+    // identically to the bare call: the override beside it (the Administrator's
+    // published hours) is a real value, but the office's contact as a whole is
+    // still something the LGU has not confirmed.
+    const spreadPlaceholder = spreadsOf(contact).some((e) => e.startsWith('placeholderContact'));
+    if (expressionOf(contact) !== null || spreadPlaceholder) {
       // `placeholderContact(...)`: no confirmed contact for this office.
+      const overrides = spreadPlaceholder && typeof contact === 'object' && contact !== null
+        ? (contact as Record<string, unknown>)
+        : {};
+      await this.upsert(
+        `update offices set contact_is_placeholder = true
+          where id = $1 and contact_is_placeholder is distinct from true`,
+        [officeId],
+      );
       for (const field of ['telephone', 'email', 'location', 'hours']) {
+        // An override written BESIDE the spread is a deliberate real value —
+        // the Administrator's published hours. It is stored so the backend can
+        // reproduce what the portal shows, and left pending because the office
+        // it belongs to has no confirmed contact.
+        const override = overrides[field];
+        if (typeof override === 'string' && override.length > 0) {
+          await this.upsert(
+            `insert into office_contacts (office_id, field_name, value, is_institutional)
+             values ($1,$2,$3,true)
+             on conflict (office_id, field_name) do update set value = excluded.value
+             where office_contacts.value is distinct from excluded.value`,
+            [officeId, field, override],
+          );
+        }
         await this.state(OFFICE, officeId, `contact.${field}`, 'pending', office, unsourced);
       }
       return;
@@ -300,7 +345,7 @@ export class Seeder {
         // source stays pending and is REPORTED, rather than being confirmed on
         // the strength of a flag alone.
         unsourced.push({
-          entity: `${entityType}:${String(entity.fields['slug'] ?? entity.fields['name'] ?? '?')}`,
+          entity: `${entityType}:${labelOf(entity)}`,
           field, reason: reading.reason,
         });
         state = 'pending';

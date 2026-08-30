@@ -1,7 +1,7 @@
 {
   "_comment": "Extracted by scripts/extract-portal-data.ts from the commit below. Do not hand-edit: re-run the script.",
   "repo": "Upupapp/eBPCO-Website",
-  "commit": "d78d7b72f8de667c9d0dbb100ae948060457c2e1",
+  "commit": "921fd32042798eedf4321b57f4f1abe2b3a58da1",
   "dataDir": "castilla-lgu-portal/src/app/core/data",
   "files": {
     "municipality.data.ts": [
@@ -352,7 +352,12 @@
             "Personnel and operations oversight support"
           ],
           "contact": {
-            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)"
+            "hours": "Monday–Friday, 8:00 AM–5:00 PM (no noon break)",
+            "__spread": [
+              {
+                "__expression": "placeholderContact()"
+              }
+            ]
           },
           "relatedOfficeSlugs": [
             "office-of-the-mayor",

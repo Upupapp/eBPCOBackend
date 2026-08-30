@@ -90,11 +90,28 @@ function valueOf(node: ts.Expression, source: ts.SourceFile): unknown {
   }
   if (ts.isObjectLiteralExpression(node)) {
     const out: Record<string, unknown> = {};
+    const spreads: unknown[] = [];
+    const dropped: string[] = [];
     for (const p of node.properties) {
       if (ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name))) {
         out[p.name.text] = valueOf(p.initializer, source);
+        continue;
       }
+      // `{ ...placeholderContact(), hours: '...' }`. Recorded, not merged: the
+      // spread carries isPlaceholder AND a default location, and dropping it
+      // silently let an office the source calls a placeholder be confirmed as
+      // a sourced fact. Resolution stays a seeding decision, like any helper.
+      if (ts.isSpreadAssignment(p)) {
+        spreads.push(valueOf(p.expression, source));
+        continue;
+      }
+      // Anything this extractor cannot represent — shorthand, a computed name,
+      // a method. NAMED rather than dropped: the spread above was invisible
+      // for exactly as long as it was silent.
+      dropped.push(p.getText(source).split('\n')[0]!.trim());
     }
+    if (spreads.length > 0) out['__spread'] = spreads;
+    if (dropped.length > 0) out['__unrepresented'] = dropped;
     return out;
   }
   // A helper call such as placeholderHead('Municipal Mayor') or a reference
