@@ -22,10 +22,14 @@ beforeEach(async () => {
   await migrate(db, MIGRATIONS);
   await db.exec(`
     insert into office_categories (id, label, ordinal) values ('executive', 'Executive', 1);
-    insert into offices (id, slug, name, category_id, short_description, about_text, ordinal)
+    -- head_name is set because 005 refuses a CONFIRMED head with no name to
+    -- serve, and several tests below confirm this office's head. An office
+    -- fixture without one is not a valid office.
+    insert into offices (id, slug, name, category_id, short_description, about_text, ordinal,
+                         head_name, head_position)
     values ('11111111-1111-4111-8111-111111111111', 'office-of-the-mayor',
             'Office of the Municipal Mayor', 'executive', 'The executive office.',
-            'About the office.', 1);
+            'About the office.', 1, 'Isagani "Bong" B. Mendoza', 'Municipal Mayor');
   `);
 });
 
@@ -165,5 +169,39 @@ describe('what the schema refuses to lose', () => {
       `insert into profile_fields (label, value, count_suffix, ordinal)
        values ('ZIP Code', '4713', '(2020 Census)', 8)`,
     )).rejects.toThrow();
+  });
+});
+
+describe('a confirmed head must be nameable', () => {
+  it('refuses confirming a head the database cannot name', async () => {
+    // The gap this closed: 15 offices carried `head: confirmed` while the only
+    // head column was a link into the ELECTED roster, which appointed
+    // department heads are not in. The state was recorded faithfully and the
+    // name was discarded, so the API had nothing to serve and no test noticed.
+    await db.exec(
+      `update offices set head_name = null, head_position = null
+        where id = '11111111-1111-4111-8111-111111111111'`);
+    await source('head');
+
+    await expect(confirm('head')).rejects.toThrow(/confirmed head with no name/);
+  });
+
+  it('accepts a head named on the office itself, not only an elected one', async () => {
+    await source('head');
+
+    await expect(confirm('head')).resolves.toBeDefined();
+  });
+
+  it('refuses an office claiming a head from both sources at once', async () => {
+    // Two answers to "who runs this office" means whichever the query reads
+    // first wins, silently.
+    await db.exec(`insert into officials (id, slug, name, position, office, initials, ordinal)
+                   values ('22222222-2222-4222-8222-222222222222', 'a-person', 'A Person',
+                           'Municipal Mayor', 'Office of the Municipal Mayor', 'AP', 1)`);
+
+    await expect(db.exec(
+      `update offices set head_official_id = '22222222-2222-4222-8222-222222222222'
+        where id = '11111111-1111-4111-8111-111111111111'`),
+    ).rejects.toThrow(/office_head_has_one_source/);
   });
 });

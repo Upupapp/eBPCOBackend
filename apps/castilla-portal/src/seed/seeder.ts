@@ -130,6 +130,24 @@ export class Seeder {
       const head = o.fields['head'];
       const headExpression = expressionOf(head);
       let headOfficialId: string | null = null;
+      // An appointed head written inline on the office. Until 2026-08-30 this
+      // name was read to decide the head's STATE and then thrown away, so 15
+      // offices were 'head: confirmed' with nothing to serve. The 005 trigger
+      // now refuses that combination outright.
+      let headName: string | null = null;
+      let headPosition: string | null = null;
+      if (headExpression === null && typeof head === 'object' && head !== null) {
+        const inline = head as Record<string, unknown>;
+        const name = inline['name'];
+        const position = inline['position'];
+        // `placeholderHead()` produces 'Name pending confirmation'. It is a
+        // sentinel, not a head, and TAB 03 forbids it reaching the wire — so it
+        // is refused entry to the column rather than filtered on the way out.
+        if (typeof name === 'string' && name.length > 0 && inline['isPlaceholder'] !== true) {
+          headName = name;
+          headPosition = typeof position === 'string' && position.length > 0 ? position : null;
+        }
+      }
 
       if (headExpression?.startsWith('headFromOfficial') === true) {
         // `headFromOfficial(MAYOR)` -- the head IS that official's record.
@@ -144,15 +162,18 @@ export class Seeder {
 
       const id = await this.upsertReturningId(
         `insert into offices (slug, name, category_id, short_description, about_text, ordinal,
-                              head_official_id)
-         values ($1,$2,$3,$4,$5,$6,$7)
+                              head_official_id, head_name, head_position)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)
          on conflict (slug) do update set name = excluded.name,
            category_id = excluded.category_id, short_description = excluded.short_description,
            about_text = excluded.about_text, ordinal = excluded.ordinal,
-           head_official_id = excluded.head_official_id
+           head_official_id = excluded.head_official_id,
+           head_name = excluded.head_name, head_position = excluded.head_position
          returning id`,
         [slug, o.fields['name'], o.fields['category'], o.fields['shortDescription'],
-         o.fields['aboutText'], ordinal, headOfficialId],
+         o.fields['aboutText'], ordinal, headOfficialId,
+         headOfficialId === null ? headName : null,
+         headOfficialId === null ? headPosition : null],
         `select id from offices where slug = $1`, [slug],
       );
       officeIdBySlug.set(slug, id);
@@ -180,6 +201,39 @@ export class Seeder {
       await this.state(OFFICE, id, 'head', headState, derivedFrom ?? o, unsourced);
 
       await this.contacts(id, o, unsourced);
+    }
+
+    // Relations come after every office exists, because they point at each
+    // other and half of them would otherwise resolve to nothing. `office_related`
+    // was created in 001 and had never been written to; the table was empty
+    // while every office in the source carried relatedOfficeSlugs.
+    for (const o of offices) {
+      const slug = String(o.fields['slug']);
+      const officeId = officeIdBySlug.get(slug);
+      if (officeId === undefined) continue;
+      const related = (o.fields['relatedOfficeSlugs'] as unknown[] | undefined) ?? [];
+      let ordinal = 0;
+      for (const target of related) {
+        const targetId = typeof target === 'string' ? officeIdBySlug.get(target) : undefined;
+        if (targetId === undefined) {
+          // A slug naming no office is a broken link on the live site, so it is
+          // REPORTED rather than skipped quietly.
+          unplaced.push(`${slug}: relatedOfficeSlugs names '${String(target)}', which is not an office`);
+          continue;
+        }
+        if (targetId === officeId) {
+          unplaced.push(`${slug}: relatedOfficeSlugs names itself`);
+          continue;
+        }
+        await this.upsert(
+          `insert into office_related (office_id, related_office_id, ordinal)
+           values ($1,$2,$3)
+           on conflict (office_id, related_office_id) do update set ordinal = excluded.ordinal
+           where office_related.ordinal is distinct from excluded.ordinal`,
+          [officeId, targetId, ordinal],
+        );
+        ordinal += 1;
+      }
     }
 
     for (const [ordinal, p] of permits.entries()) {

@@ -1,0 +1,282 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Castilla LGU Portal — public content API",
+    "version": "0.1.0",
+    "description": "Public read API for the Municipality of Castilla, Sorsogon. Content the LGU has not confirmed is OMITTED from responses rather than returned as null or as a placeholder string: an absent key means the municipality has not verified that fact."
+  },
+  "servers": [
+    {
+      "url": "https://castilla-ebpco.online/api"
+    }
+  ],
+  "paths": {
+    "/offices": {
+      "get": {
+        "summary": "List municipal offices",
+        "description": "Returned in the municipality's own order, which groups executive offices first. Not alphabetical.",
+        "parameters": [
+          {
+            "name": "category",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Restrict to one office category. An unknown category is a 400, not an empty list, so a typo is distinguishable from a category with no offices."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The published offices",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficeList"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Unknown category",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/offices/{slug}": {
+      "get": {
+        "summary": "One office in full",
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The office",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OfficeDetail"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No office is published with that slug",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "OfficeSummary": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shortDescription": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "category",
+          "shortDescription"
+        ],
+        "additionalProperties": false
+      },
+      "OfficeList": {
+        "type": "object",
+        "properties": {
+          "offices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "category": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "shortDescription": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "slug",
+                "name",
+                "category",
+                "shortDescription"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "offices"
+        ],
+        "additionalProperties": false
+      },
+      "OfficeDetail": {
+        "type": "object",
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "category": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shortDescription": {
+            "type": "string",
+            "minLength": 1
+          },
+          "aboutText": {
+            "type": "string",
+            "minLength": 1
+          },
+          "services": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "head": {
+            "type": "object",
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "position": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "name",
+              "position"
+            ],
+            "additionalProperties": false
+          },
+          "contact": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "relatedOffices": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "slug": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "name": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "slug",
+                "name"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "issuedPermits": {
+            "type": "array",
+            "items": {
+              "$ref": "#/properties/relatedOffices/items"
+            }
+          }
+        },
+        "required": [
+          "slug",
+          "name",
+          "category",
+          "shortDescription",
+          "aboutText",
+          "services",
+          "relatedOffices",
+          "issuedPermits"
+        ],
+        "additionalProperties": false
+      },
+      "Problem": {
+        "type": "object",
+        "description": "RFC 9457 Problem Details.",
+        "properties": {
+          "type": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "detail"
+        ]
+      }
+    }
+  }
+}
