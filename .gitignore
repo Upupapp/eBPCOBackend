@@ -22,14 +22,14 @@ https:/
 # secrets, an existence oracle, untuned limits — and on a public repo that is a
 # map for anyone who finds a deployment. It lives on disk and is shared
 # directly until the gaps it lists are closed.
-docs/READINESS-REVIEW.md
+**/docs/READINESS-REVIEW.md
 # Held back for the same reason as the readiness review: this repository is
 # public, and both documents enumerate what the system cannot yet do. The
 # owner's call, not a default.
-docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.html
-docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.pdf
-docs/CERTIFICATION-WEB-PORTAL-BACKEND.html
-docs/CERTIFICATION-WEB-PORTAL-BACKEND.pdf
+**/docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.html
+**/docs/MASTER-COMMAND-WEB-PORTAL-BACKEND.pdf
+**/docs/CERTIFICATION-WEB-PORTAL-BACKEND.html
+**/docs/CERTIFICATION-WEB-PORTAL-BACKEND.pdf
 
 # Uploaded bytes from the development server. Never a deliverable.
 .dev-objects/
@@ -48,3 +48,9 @@ docs/CERTIFICATION-WEB-PORTAL-BACKEND.pdf
 service-account*.json
 *serviceaccount*.json
 firebase-*.json
+
+# The five patterns above carry `**/` since the monorepo move on 2026-08-30.
+# A pattern written `docs/x` is anchored to the directory holding the
+# .gitignore, so when the service moved to apps/ebpco-api/ they silently
+# stopped matching and five deliberately-unversioned documents became
+# untracked. Anchored patterns are the quiet casualty of moving a tree.

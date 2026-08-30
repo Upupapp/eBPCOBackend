@@ -1,84 +1,62 @@
-# eBPCO API
+# eBPCO — backend
 
-The backend of record for the Electronic Building Permit and Certificate of Occupancy
-system. One authoritative service behind two clients: the applicant mobile app (Flutter)
-and the LGU web admin (Angular).
+One backend estate for the Municipality of Castilla's electronic Building Permit
+and Certificate of Occupancy systems, and for the LGU's public information
+portal.
 
-> **TAB 02 of the Production Launch Master Command.** This repository is a service
-> skeleton: it can be configured, run, observed and verified, and it deliberately
-> contains **no domain logic**. Identity arrives in TAB 03, the data model in TAB 04, the
-> lifecycle engine in TAB 05.
+## What this backend serves
 
-## Run it
+| Client | Repository | Audience |
+|---|---|---|
+| Business owner mobile — Android | `Upupapp/eBPCOMobile` | applicants |
+| Business owner mobile — iOS | `Upupapp/eBPCOMobile` | applicants |
+| Business owner web portal | applicant-facing portal | applicants |
+| Admin web portal | `ebpco-admin` | LGU staff |
+| Public information portal | `Upupapp/eBPCO-Website` | citizens |
 
-```sh
-npm ci
-cp .env.example .env      # development only; staging and production set real env vars
-npm run start:dev
-```
+The three business-owner surfaces — Android, iOS and web — are **one product in
+three shells**, and are required to be in parity. That is a constraint on this
+backend before it is a constraint on any client: a capability that exists for one
+of them and not the others is a parity defect here, not a gap over there. The
+recorded response samples under each service's `contract/` are the instrument
+that makes parity checkable rather than asserted.
 
-```sh
-curl localhost:3000/health    # {"status":"ok"}
-curl localhost:3000/ready     # {"status":"ready","checks":[]}
-curl localhost:3000/version
-```
+## Services
 
-## Verify it
+    apps/
+      ebpco-api/        the permit transaction system (this is the mature one)
+      castilla-portal/  the public information portal API — TAB 00 done, not yet built
 
-```sh
-./scripts/verify.sh          # typecheck, lint, tests, secret scan, build
-./scripts/install-hooks.sh   # …and run that on every commit
-```
+Each service owns its own `package.json`, migrations, gate and Dockerfile, and
+each deploys independently. They are separate services in one repository, not
+one service with two domains — the two run on different machines, hold different
+data, and answer to different data-protection postures.
 
-There is no CI workflow, deliberately — see `docs/decisions/0002-no-ci-workflow.md`.
+### Why they still share a repository
 
-## Shape
+Interoperability that has to be *enforced* rather than hoped for. The clearest
+case: the 19 canonical permit names are held by the permit system, by the admin
+portal, and — once built — by the public portal. They match verbatim and in order
+today, and nothing checks it. In one repository a single spec can assert both
+vocabularies against each other by exact string and index, which is what the
+portal's TAB 05 asks for and could not otherwise get.
 
-```
-src/
-  main.ts             process entry; fails loudly on bad config, binds the port
-  bootstrap.ts        builds the app without listening, so tests exercise the real wiring
-  app.module.ts       composition root
-  config/             twelve-factor configuration, validated once at boot
-  common/
-    correlation/      one id per request, through every log line
-    logging/          structured logs that redact personal data and credentials
-    problem/          RFC 9457 Problem Details, as the contract defines them
-    http/             helmet, rate limiting, timeouts, request logging
-  modules/
-    health/           /health, /ready, /version
-```
+## Working here
 
-Layering is enforced by module boundaries rather than convention: transport may depend on
-application services, application services on the domain, the domain on nothing. A
-lifecycle rule that ends up in a controller is a rule no unit test can reach without an
-HTTP request.
+Each service is entered directly:
 
-## Things that are load-bearing
+    cd apps/ebpco-api && npm run verify        # typecheck, lint, tests, audits, build
 
-- **Configuration has no defaults for backing services.** A default database URL is a
-  service that starts successfully while talking to the wrong thing. Boot fails with
-  every problem listed at once and exit code `78`.
-- **The logger redacts, the reviewer does not.** A log aggregator holding applicant names
-  and mobile numbers is a second, unregistered copy of personal data with none of the
-  database's access controls. `logger.spec.ts` asserts thirty field names never appear.
-- **A 5xx never carries `detail`.** An unexpected exception's message routinely contains
-  a query fragment or a row of applicant data. It goes to the log with the correlation
-  id; the caller learns only that the request failed.
-- **`/ready` starts with no probes** and answers honestly — see
-  `docs/decisions/0003-empty-readiness-registry.md`. Four probes reporting `up` against
-  services that do not exist would make the first real outage invisible.
-- **`/health` touches nothing.** If it checked the database, a database outage would fail
-  liveness on every instance, the orchestrator would restart all of them, and a
-  recoverable dependency outage would become a total one.
+Docker builds take the **service directory** as their context, not the
+repository root:
 
-## Documents
+    docker build -f apps/ebpco-api/Dockerfile apps/ebpco-api
 
-| | |
-|---|---|
-| `docs/ENVIRONMENTS.md` | The three environments and the resource graph hosting must satisfy |
-| `docs/DEPLOYMENT.md` | The deploy sequence, as a runbook, since there is no pipeline |
-| `docs/decisions/` | Architecture decision records, including E-1 |
+There is deliberately no root `package.json` and no workspace tooling. Two
+services with different lifecycles do not need a shared dependency graph, and a
+root manifest would invite one.
 
-The API contract lives in its own repository (`ebpco-contract`) and is the single source
-of truth for what this service returns. It is at `0.1.0` and **not yet ratified**.
+## History
+
+`apps/ebpco-api` was the repository root until 30 August 2026. It was moved to
+make room for a second service; `git log --follow` reaches through the move.

@@ -1,5 +1,15 @@
 # syntax=docker/dockerfile:1.7
 
+# BUILD CONTEXT IS THIS DIRECTORY, NOT THE REPOSITORY ROOT.
+#
+#   docker build -f apps/ebpco-api/Dockerfile apps/ebpco-api
+#
+# Every COPY below is relative to that. Since the monorepo move on 2026-08-30
+# this repository holds more than one service, and building from the root would
+# resolve `COPY package.json` to a file that is not this service's -- or to
+# nothing at all. Stated here because the failure is a confusing one: the build
+# succeeds against the wrong tree, or fails on a path that plainly exists.
+
 # ─────────────────────────────────────────────────────────────── build ──
 # Pinned to a specific minor. The digest is pinned at the first real build,
 # when a registry is reachable and the digest can be read rather than guessed;
