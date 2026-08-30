@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { loadConfig } from './app-config';
@@ -109,5 +109,54 @@ describe('there is something to run migrations with', () => {
     };
 
     expect(Object.keys(scripts.scripts)).toContain('migrate');
+  });
+});
+
+describe('migration numbering', () => {
+  /**
+   * Version numbers that no file uses, with the reason each is absent.
+   *
+   * A gap means a migration was renamed or removed, and the consequence only
+   * appears at DEPLOY: `migrate` refuses a database holding a version this
+   * build does not contain, because that means the code is older than the
+   * schema. Nothing has been deployed yet, so today every gap is harmless --
+   * which is exactly why it has to be written down now rather than discovered
+   * by the first deployment.
+   *
+   * Renaming is not caught by the checksum rule either: moving
+   * `026_x.sql` to `027_x.sql` changes the version and leaves the contents
+   * identical, so the immutability check sees nothing.
+   */
+  const EXPLAINED_GAPS: Readonly<Record<number, string>> = {
+    26: 'document_review was written by another lane as 026, swept into 9613f65 by a '
+      + '`git add -A` that was not mine to make, then renamed to 027 by that lane in '
+      + '8d83860 -- same file, byte for byte, same checksum. No database has ever '
+      + 'applied version 26, so nothing can be holding it.',
+  };
+
+  it('has no unexplained gap in the sequence', () => {
+    const versions = readdirSync(join(ROOT, 'db/migrations'))
+      .filter((file) => file.endsWith('.sql'))
+      .map((file) => Number(/^(\d+)/.exec(file)?.[1] ?? 0))
+      .sort((a, b) => a - b);
+
+    const highest = versions[versions.length - 1] ?? 0;
+    const present = new Set(versions);
+    const gaps: number[] = [];
+    for (let version = 1; version <= highest; version += 1) {
+      if (!present.has(version)) gaps.push(version);
+    }
+
+    // Checked both ways: a gap that closes has to be removed from the list, or
+    // it becomes a note about something that used to be true.
+    expect(gaps).toEqual(Object.keys(EXPLAINED_GAPS).map(Number));
+  });
+
+  it('numbers every migration uniquely, which is what makes a gap meaningful', () => {
+    const versions = readdirSync(join(ROOT, 'db/migrations'))
+      .filter((file) => file.endsWith('.sql'))
+      .map((file) => Number(/^(\d+)/.exec(file)?.[1] ?? 0));
+
+    expect(new Set(versions).size).toBe(versions.length);
   });
 });

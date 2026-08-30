@@ -10,6 +10,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "migrate": "ts-node --transpile-only scripts/migrate.ts",
+    "verify:migrate": "ts-node --transpile-only scripts/verify-migrate.ts",
     "start": "node dist/main.js",
     "start:dev": "ts-node-dev --respawn --transpile-only src/main.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
@@ -38,6 +39,7 @@
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.5",
+    "@electric-sql/pglite-socket": "^0.2.11",
     "@eslint/js": "^9.39.5",
     "@nestjs/testing": "^11.1.6",
     "@types/jest": "^29.5.14",
