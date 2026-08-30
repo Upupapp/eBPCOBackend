@@ -29,25 +29,33 @@ async function main(): Promise<void> {
 
   // Said out loud, every boot, outside development.
   //
-  // Three settings an operator is REQUIRED to supply are read by nothing: the
-  // S3 adapter and the ClamAV client do not exist yet. Someone who set
-  // OBJECT_STORE_ENDPOINT to their bucket and MALWARE_SCANNER_URL to their
-  // scanner has every reason to believe documents go there and are scanned. In
-  // fact documents are written to one container's local disk -- lost on the
-  // next deploy, invisible to every other replica -- and checked by a stub.
+  // MALWARE_SCANNER_URL is required and read by nothing: there is no ClamAV or
+  // ICAP client, so every upload is checked by LocalSignatureScanner, a stub.
+  // An operator who pointed that setting at their scanner has every reason to
+  // believe uploads are being scanned.
   //
-  // A warning in the boot log is the cheapest place for that to be discovered.
-  // The alternative is discovering it from a citizen's missing land title.
+  // The object store half is conditional now that the S3 adapter exists --
+  // warning about local disk while documents go to Linode would be the same
+  // kind of wrong in the other direction.
   if (config.EBPCO_ENVIRONMENT !== 'development') {
-    logger.warn('documents are stored on local disk and scanned by a stub', {
-      objectStore: 'filesystem',
-      objectStorePath: config.OBJECT_STORE_LOCAL_PATH,
-      objectStoreEndpointIgnored: config.OBJECT_STORE_ENDPOINT,
+    logger.warn('uploads are scanned by a stub, not by a malware scanner', {
       malwareScanner: 'local-signature-stub',
       malwareScannerUrlIgnored: config.MALWARE_SCANNER_URL,
-      consequence: 'uploaded documents do not survive a redeploy and are not seen by other '
-        + 'replicas; no real malware scanning is performed',
+      consequence: 'no real malware scanning is performed on uploaded documents',
     });
+
+    if (config.OBJECT_STORE_DRIVER !== 's3') {
+      // Unreachable in production, which refuses to boot on this driver. This
+      // is for a staging environment somebody chose it for, where losing
+      // documents on a redeploy is a surprise rather than a decision.
+      logger.warn('documents are stored on this container’s local disk', {
+        objectStore: 'filesystem',
+        objectStorePath: config.OBJECT_STORE_LOCAL_PATH,
+        objectStoreEndpointIgnored: config.OBJECT_STORE_ENDPOINT,
+        consequence: 'uploaded documents do not survive a redeploy and are not seen by '
+          + 'other replicas',
+      });
+    }
   }
 
   let app;

@@ -252,7 +252,15 @@ describe('security headers', () => {
   });
 
   it('sends HSTS outside development', async () => {
-    const { app } = await build(baseEnv({ EBPCO_ENVIRONMENT: 'production' }));
+    // The S3 settings are here because production now REFUSES to boot on the
+    // filesystem store -- documents on one container's disk do not survive a
+    // redeploy. Nothing in this test touches storage; it is what a production
+    // configuration has to contain in order to be one.
+    const { app } = await build(baseEnv({
+      EBPCO_ENVIRONMENT: 'production',
+      OBJECT_STORE_DRIVER: 's3',
+      OBJECT_STORE_REGION: 'ap-south-1',
+    }));
     try {
       const response = await app.inject({ method: 'GET', url: '/health' });
       expect(response.headers['strict-transport-security']).toContain('max-age=31536000');

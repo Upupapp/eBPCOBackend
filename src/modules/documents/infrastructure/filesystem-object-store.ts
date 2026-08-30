@@ -1,8 +1,8 @@
-import { createHmac, randomUUID, timingSafeEqual } from 'node:crypto';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 
 import { ObjectStore } from '../domain/object-store';
+import { SignedUrlVerdict, signObjectUrl, verifyObjectUrl } from '../domain/signed-url';
 
 /**
  * The object store, on a local filesystem.
@@ -67,38 +67,22 @@ export class FilesystemObjectStore implements ObjectStore {
     }
   }
 
+  // Signing lives in the domain, shared with the S3 store. The scheme is a
+  // property of how this API hands out documents, not of where the bytes are.
   signedUrl(key: string, expiresInSeconds: number): Promise<string> {
-    const expiresAt = Math.floor(this.clock().getTime() / 1000) + expiresInSeconds;
-    // A nonce, so the same key issued twice produces two distinct URLs and one
-    // cannot be mistaken for a stable address.
-    const nonce = randomUUID();
-    const signature = this.sign(key, expiresAt, nonce);
-    return Promise.resolve(`/documents/content?key=${encodeURIComponent(key)}&expires=${expiresAt}&n=${nonce}&sig=${signature}`);
+    return Promise.resolve(signObjectUrl(this.signingKey, key, expiresInSeconds, this.clock()));
   }
 
-  verifySignedUrl(key: string, expiresAt: number, nonce: string, signature: string): 'ok' | 'expired' | 'invalid' {
-    // Constant-time. A `!==` on an HMAC leaks, through timing, how many leading
-    // bytes of a guess were right — which is the one thing that turns forging a
-    // 256-bit signature from impossible into a search. The cost is a buffer
-    // compare, and `timingSafeEqual` is already how this codebase compares
-    // secrets elsewhere.
-    const expected = Buffer.from(this.sign(key, expiresAt, nonce), 'utf8');
-    const presented = Buffer.from(signature, 'utf8');
-    if (expected.length !== presented.length) return 'invalid';
-    if (!timingSafeEqual(expected, presented)) return 'invalid';
-
-    if (expiresAt * 1000 <= this.clock().getTime()) return 'expired';
-    return 'ok';
+  verifySignedUrl(
+    key: string, expiresAt: number, nonce: string, signature: string,
+  ): SignedUrlVerdict {
+    return verifyObjectUrl(this.signingKey, key, expiresAt, nonce, signature, this.clock());
   }
 
   isPubliclyReadable(): Promise<boolean> {
     // A local directory is not served by anything. The S3 adapter answers this
     // by actually attempting an unauthenticated read.
     return Promise.resolve(false);
-  }
-
-  private sign(key: string, expiresAt: number, nonce: string): string {
-    return createHmac('sha256', this.signingKey).update(`${key}:${expiresAt}:${nonce}`).digest('base64url');
   }
 
   private pathFor(key: string): string {

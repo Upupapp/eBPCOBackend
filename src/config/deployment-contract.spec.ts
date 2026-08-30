@@ -173,12 +173,10 @@ describe('required configuration that nothing reads', () => {
    * notices a key `loadConfig` demands and no consumer touches.
    */
   const REQUIRED_BUT_UNUSED: Readonly<Record<string, string>> = {
-    OBJECT_STORE_ENDPOINT: 'the S3 adapter does not exist. Documents go to '
-      + "OBJECT_STORE_LOCAL_PATH, on one container's disk -- lost on redeploy, invisible to "
-      + 'other replicas. Still demanded at boot so the value is in place when the adapter '
-      + 'lands, and named in a startup warning so an operator who pointed this at their '
-      + 'bucket is not left believing documents go there.',
-    OBJECT_STORE_BUCKET: 'same as OBJECT_STORE_ENDPOINT above',
+    // OBJECT_STORE_ENDPOINT and OBJECT_STORE_BUCKET were here until the S3
+    // adapter landed. This test is what removed them: it fails when a listed
+    // setting gains a real consumer, so the list cannot quietly become a record
+    // of things that used to be true.
     MALWARE_SCANNER_URL: 'no ClamAV or ICAP client exists. Uploads are checked by '
       + 'LocalSignatureScanner, which is a stub. See docs/decisions/0009-malware-scanning.md.',
     DOCS_ENABLED: 'validated but inert: boot is refused if it is true in production, and no '
@@ -219,9 +217,16 @@ describe('required configuration that nothing reads', () => {
     // title.
     const main = readFileSync(join(ROOT, 'src/main.ts'), 'utf8');
 
-    expect(main).toContain('objectStoreEndpointIgnored');
+    // The scanner warning is unconditional outside development, because the
+    // stub is unconditional.
     expect(main).toContain('malwareScannerUrlIgnored');
-    expect(main).toMatch(/local disk and scanned by a stub/);
+    expect(main).toMatch(/scanned by a stub/);
+
+    // The store warning is conditional now that the S3 adapter exists --
+    // warning about local disk while documents go to Linode would be wrong in
+    // the other direction, and just as misleading.
+    expect(main).toContain('objectStoreEndpointIgnored');
+    expect(main).toMatch(/OBJECT_STORE_DRIVER !== 's3'/);
   });
 });
 

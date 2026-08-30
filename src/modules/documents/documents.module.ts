@@ -13,6 +13,7 @@ import { FilesystemObjectStore } from './infrastructure/filesystem-object-store'
 import { DocumentsController } from './transport/documents.controller';
 import { AuditService } from '../compliance/application/audit.service';
 import { documentSecurityEvent } from '../compliance/domain/security-events';
+import { S3ObjectStore, s3ClientFor } from './infrastructure/s3-object-store';
 
 export const OBJECT_STORE = Symbol('EBPCO_OBJECT_STORE');
 export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
@@ -24,18 +25,9 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
     {
       provide: OBJECT_STORE,
       inject: [CONFIG],
-      useFactory: (config: AppConfig): ObjectStore =>
-        // The S3 adapter belongs here once E-1's hosting half is answered. The
-        // filesystem store is real and complete, and it is what development
-        // uses; deploying it would mean documents living on one replica's disk.
-        //
-        // OBJECT_STORE_LOCAL_PATH, not OBJECT_STORE_ENDPOINT. The endpoint is
-        // the S3 adapter's setting, and passing it here wrote every uploaded
-        // document into a directory named `https:/objects.internal/` under the
-        // process working directory — invisible to anyone looking for them, and
-        // gone on the next redeploy. The store now refuses a URL outright.
-        new FilesystemObjectStore(config.OBJECT_STORE_LOCAL_PATH, config.JWT_SIGNING_KEY),
+      useFactory: objectStoreFor,
     },
+
     {
       provide: MALWARE_SCANNER,
       // Replaced by ClamAV or an ICAP service in any real deployment. See
@@ -99,4 +91,40 @@ export class DocumentsModule {
 
     logger.info('document service ready', { scanner: 'local-signature-scanner' });
   }
+}
+
+/**
+ * Which store the service runs on.
+ *
+ * Exported and named rather than an inline factory, because an inline factory
+ * is unreachable from a test: a break-check that pointed this branch at the
+ * filesystem store while the driver said `s3` passed the whole suite. Wiring
+ * that nothing can observe is the defect this repository keeps finding.
+ */
+export function objectStoreFor(config: AppConfig): ObjectStore {
+  if (config.OBJECT_STORE_DRIVER === 's3') {
+    // Credentials come from the SDK's default chain -- an instance role, or the
+    // standard AWS_* variables -- and deliberately not from this service's own
+    // configuration. A storage secret that never enters `.env.example` is one
+    // that cannot be committed by accident.
+    return new S3ObjectStore(
+      s3ClientFor({
+        endpoint: config.OBJECT_STORE_ENDPOINT,
+        region: config.OBJECT_STORE_REGION,
+      }),
+      config.OBJECT_STORE_BUCKET,
+      config.JWT_SIGNING_KEY,
+      config.OBJECT_STORE_PUBLIC_PROBE_URL.length > 0
+        ? config.OBJECT_STORE_PUBLIC_PROBE_URL
+        : null,
+    );
+  }
+
+  // OBJECT_STORE_LOCAL_PATH, not OBJECT_STORE_ENDPOINT. The endpoint is the S3
+  // adapter's setting, and passing it here wrote every uploaded document into a
+  // directory literally named after a URL.
+  //
+  // Production refuses to boot on this branch -- see app-config -- so reaching
+  // it means development, or a staging environment somebody chose it for.
+  return new FilesystemObjectStore(config.OBJECT_STORE_LOCAL_PATH, config.JWT_SIGNING_KEY);
 }

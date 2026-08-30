@@ -105,3 +105,49 @@ describe('configuration', () => {
     expect(() => loadConfig({ ...validEnv(), TRUST_PROXY: 'yes' })).toThrow(ConfigurationError);
   });
 });
+
+describe('choosing an object store', () => {
+  const base = {
+    DATABASE_URL: 'postgres://ebpco@db.internal:5432/ebpco',
+    OBJECT_STORE_ENDPOINT: 'https://ap-south-1.linodeobjects.com',
+    OBJECT_STORE_BUCKET: 'ebpco-documents',
+    MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
+    JWT_SIGNING_KEY: 'a-signing-key-of-at-least-thirty-two-ch',
+    PASSWORD_PEPPER: 'a-pepper-of-at-least-thirty-two-charact',
+    TOTP_ENCRYPTION_KEY: 'a-totp-key-of-at-least-thirty-two-chars',
+  };
+
+  it('defaults to the filesystem store', () => {
+    // Development and tests. Not inferred from whether an endpoint is set: an
+    // operator who mistypes the variable name would get this silently, and find
+    // out when documents disappeared on the next redeploy.
+    expect(loadConfig({ ...base, EBPCO_ENVIRONMENT: 'development' }).OBJECT_STORE_DRIVER)
+      .toBe('filesystem');
+  });
+
+  it('REFUSES to boot in production on the filesystem store', () => {
+    // The filesystem store keeps documents on one container's disk, where a
+    // redeploy destroys them and no other replica can read them. Acceptable in
+    // staging if somebody chose it; not for citizens' identity documents.
+    expect(() => loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'production', OBJECT_STORE_DRIVER: 'filesystem',
+    })).toThrow(/OBJECT_STORE_DRIVER/);
+  });
+
+  it('accepts production once the S3 driver is configured', () => {
+    // The other half: proving the refusal above is about the driver and not
+    // about production being unbootable for some unrelated reason.
+    expect(loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'production', OBJECT_STORE_DRIVER: 's3',
+      OBJECT_STORE_REGION: 'ap-south-1',
+    }).OBJECT_STORE_DRIVER).toBe('s3');
+  });
+
+  it('names the specific variable that is missing for S3, not the subsystem', () => {
+    // An operator reading a crash loop needs the variable. "S3 is
+    // misconfigured" sends them to look at all four.
+    expect(() => loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'staging', OBJECT_STORE_DRIVER: 's3',
+    })).toThrow(/OBJECT_STORE_REGION/);
+  });
+});

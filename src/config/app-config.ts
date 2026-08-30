@@ -39,6 +39,10 @@ const boolFromEnv = (fallback: boolean) =>
     .optional()
     .transform((value) => (value === undefined ? fallback : value === 'true'));
 
+/** An unfilled environment variable is not a value. */
+const blankToUndefined = (value: unknown): unknown =>
+  typeof value === 'string' && value.trim().length === 0 ? undefined : value;
+
 const schema = z
   .object({
     EBPCO_ENVIRONMENT: Environment,
@@ -110,6 +114,42 @@ const schema = z
     // replica's disk.
     OBJECT_STORE_LOCAL_PATH: z.string().min(1).optional()
       .transform((value) => value ?? '.data/objects'),
+
+    /**
+     * Which object store to build. Explicit, not inferred.
+     *
+     * Inferring it from whether an endpoint is set was the obvious design and
+     * is the wrong one: an operator who mistypes the variable name gets the
+     * filesystem store, silently, and finds out when documents disappear on the
+     * next redeploy. A driver that must be named cannot be chosen by accident.
+     */
+    OBJECT_STORE_DRIVER: z.enum(['filesystem', 's3']).optional()
+      .transform((value) => value ?? 'filesystem'),
+
+    /**
+     * The region an S3-compatible endpoint expects.
+     *
+     * No default. Linode Object Storage, MinIO and AWS all want different
+     * values here, and a default would be one of them being right and the rest
+     * failing in a way that looks like a credential problem.
+     */
+    // Empty is treated as UNSET, not as an invalid value. A hosting platform
+    // that renders an unfilled variable as "" is common, and refusing to boot
+    // over it would report a validation failure for something the operator
+    // never set.
+    OBJECT_STORE_REGION: z.preprocess(blankToUndefined, z.string().min(1).optional())
+      .transform((value) => value ?? ''),
+
+    /**
+     * The base URL an ANONYMOUS request would use to reach the bucket, for the
+     * public-readability probe. Usually the same as OBJECT_STORE_ENDPOINT.
+     *
+     * Separate because they are not always the same thing: a service reaching
+     * storage over a private network has an endpoint no stranger can use, and
+     * probing that one would prove nothing about what the internet can see.
+     */
+    OBJECT_STORE_PUBLIC_PROBE_URL: z.preprocess(blankToUndefined, z.string().url().optional())
+      .transform((value) => value ?? ''),
 
     // How long an access token lives, in seconds.
     //
@@ -203,6 +243,40 @@ const schema = z
         message:
           'required outside development — without it, a leaked database yields directly crackable password verifiers',
       });
+    }
+
+    // The filesystem store means documents live on ONE container's disk: lost
+    // on the next deploy, invisible to every other replica, and written against
+    // a root filesystem the Dockerfile expects to be read-only. That is
+    // acceptable in development and in a staging environment somebody has
+    // chosen it for. It is not acceptable for citizens' identity documents and
+    // land titles, so production refuses to boot rather than accepting them
+    // somewhere they will not survive.
+    if (config.EBPCO_ENVIRONMENT === 'production' && config.OBJECT_STORE_DRIVER !== 's3') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['OBJECT_STORE_DRIVER'],
+        message: 'must be "s3" in production — the filesystem store keeps documents on one '
+          + "container's disk, where a redeploy destroys them and no other replica can read them",
+      });
+    }
+
+    if (config.OBJECT_STORE_DRIVER === 's3') {
+      // Named individually rather than as one "S3 is misconfigured": an
+      // operator reading a crash loop needs the variable, not the subsystem.
+      for (const [key, value] of [
+        ['OBJECT_STORE_ENDPOINT', config.OBJECT_STORE_ENDPOINT],
+        ['OBJECT_STORE_BUCKET', config.OBJECT_STORE_BUCKET],
+        ['OBJECT_STORE_REGION', config.OBJECT_STORE_REGION],
+      ] as const) {
+        if (value.trim().length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'required when OBJECT_STORE_DRIVER is "s3"',
+          });
+        }
+      }
     }
 
     if (config.EBPCO_ENVIRONMENT === 'production' && config.DOCS_ENABLED) {
