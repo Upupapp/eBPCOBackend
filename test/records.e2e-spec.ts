@@ -825,10 +825,15 @@ describe('the lifecycle, as the server enforces it', () => {
     // which is the drift TAB 00 removed.
     const body = await workflow(officerToken);
 
+    // `staff:receive` since 2026-08-30, and `applications:read` before it. The
+    // change is the point rather than an incidental edit: gating intake on a
+    // READ scope granted the move to every role holding one, the auditor
+    // included -- and the roles list below is exactly how that becomes visible
+    // to anyone reading the workflow instead of the scope table.
     const received = body.transitions.find((t) => t.from === 'Submitted' && t.to === 'Received');
-    expect(received?.requiresScope).toBe('applications:read');
-    expect(received?.roles.length).toBeGreaterThan(0);
-    expect(received?.roles).toContain('evaluator');
+    expect(received?.requiresScope).toBe('staff:receive');
+    expect(received?.roles).toEqual(['receiving-officer', 'records-officer']);
+    expect(received?.roles).not.toContain('auditor');
   });
 
   it('says which statuses are terminal and where a pledge clock runs', async () => {

@@ -93,12 +93,12 @@ export const TRANSITIONS: readonly TransitionRule[] = [
   { from: 'Draft', to: 'Cancelled', actors: ['applicant'], requires: 'applications:write',
     preconditions: [] },
 
-  { from: 'Submitted', to: 'Received', actors: ['staff'], requires: 'applications:read',
+  { from: 'Submitted', to: 'Received', actors: ['staff'], requires: 'staff:receive',
     preconditions: [], notifies: 'received-by-obo' },
   { from: 'Submitted', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
     preconditions: [] },
 
-  { from: 'Received', to: 'Document Verification', actors: ['staff'], requires: 'documents:read',
+  { from: 'Received', to: 'Document Verification', actors: ['staff'], requires: 'staff:receive',
     preconditions: [], notifies: 'document-verification-started' },
   { from: 'Received', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
     preconditions: [] },

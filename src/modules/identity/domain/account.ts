@@ -42,6 +42,20 @@ export type Scope =
   | 'notifications:write'
   | 'profile:read'
   | 'profile:write'
+  /**
+   * Intake. Added 2026-08-30 to close a hole, not to add a feature.
+   *
+   * `receiving-officer` was the only ACTING role with no acting scope: every
+   * other one has evaluate, assess, verify-payment, approve or release, and it
+   * had two read scopes. So the two intake transitions were gated on the
+   * weakest thing available -- `applications:read` and `documents:read` -- and a
+   * READ scope authorising a state change grants that change to every role
+   * holding it. `auditor` holds both by design, which meant the
+   * read-everything-change-nothing role could move an application through
+   * intake. Nothing caught it, because a separate bug left the auditor unable
+   * to SEE any application; the guarantee was being enforced by a defect.
+   */
+  | 'staff:receive'
   | 'staff:evaluate'
   | 'staff:assess'
   | 'staff:verify-payment'
@@ -62,7 +76,7 @@ export const ALL_SCOPES = [
   'payments:read', 'payments:write',
   'notifications:read', 'notifications:write',
   'profile:read', 'profile:write',
-  'staff:evaluate', 'staff:assess', 'staff:verify-payment',
+  'staff:receive', 'staff:evaluate', 'staff:assess', 'staff:verify-payment',
   'staff:approve', 'staff:release', 'staff:administer',
   'audit:read',
 ] as const satisfies readonly Scope[];
@@ -89,7 +103,7 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  * assesses a fee must not also be the one who confirms it was paid.
  */
 export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
-  'receiving-officer': ['applications:read', 'documents:read'],
+  'receiving-officer': ['applications:read', 'documents:read', 'staff:receive'],
   // `applications:write` because withdrawing an application on the applicant's
   // behalf, or expiring one after inaction, is maintenance of the record --
   // which is what this role exists to do. Its absence made three staff
@@ -98,7 +112,14 @@ export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
   // required a scope no role granted. A table-driven test over the transitions
   // caught it; no individual test would have, because each was written against
   // a caller holding every scope.
-  'records-officer': ['applications:read', 'applications:write', 'documents:read', 'documents:write'],
+  // `staff:receive` as well: the records officer already saw every status and
+  // performed intake in practice, and the transitions must stay reachable by a
+  // second role -- an office with one receiving officer on leave still has to
+  // receive applications.
+  'records-officer': [
+    'applications:read', 'applications:write', 'documents:read', 'documents:write',
+    'staff:receive',
+  ],
   evaluator: ['applications:read', 'documents:read', 'staff:evaluate'],
   assessor: ['applications:read', 'payments:read', 'staff:assess'],
   cashier: ['applications:read', 'payments:read', 'staff:verify-payment'],

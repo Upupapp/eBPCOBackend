@@ -19,8 +19,11 @@ import { recipientsFor } from './staff-recipients';
 
 const EXPECTED: Readonly<Record<string, { reason: string; roles: string[] }>> = {
   'Draft': { reason: 'awaiting-applicant', roles: [] },
-  'Submitted': { reason: 'expected-move', roles: ['evaluator'] },
-  'Received': { reason: 'expected-move', roles: ['evaluator'] },
+  // Was `evaluator` until 2026-08-30, because intake was gated on
+  // `applications:read` and the evaluator was the narrowest holder. With
+  // `staff:receive` the notice reaches the officer whose job the status names.
+  'Submitted': { reason: 'expected-move', roles: ['receiving-officer'] },
+  'Received': { reason: 'expected-move', roles: ['receiving-officer'] },
   'Document Verification': { reason: 'expected-move', roles: ['evaluator'] },
   'Under Evaluation': { reason: 'expected-move', roles: ['assessor'] },
   // The applicant is revising. The only staff move out is Expire, and telling
@@ -84,7 +87,7 @@ describe('the routing follows the rules it is given, not the compiled ones', () 
   ];
 
   it('sends the notice wherever the edited rule points', () => {
-    expect(recipientsFor('Submitted', TRANSITIONS).roles).toEqual(['evaluator']);
+    expect(recipientsFor('Submitted', TRANSITIONS).roles).toEqual(['receiving-officer']);
     // Same status, same code, different rule: the cashier's scope now owns the
     // move, and the cashier is told.
     expect(recipientsFor('Submitted', rewire('staff:verify-payment')).reason)
@@ -111,16 +114,14 @@ describe('the routing follows the rules it is given, not the compiled ones', () 
   });
 });
 
-describe('a role that can see nothing is told nothing', () => {
-  it('never routes to receiving-officer, which no visibility rule mentions', () => {
-    // NOT a defect introduced here, and recorded rather than worked around:
-    // `receiving-officer` holds applications:read and documents:read, and
-    // SCOPE_VISIBILITY grants statuses for neither -- so the role sees no
-    // application at all. Every notice that would go to it is correctly
-    // withheld, because sending one would point an officer at a record the row
-    // filter then refuses to show them.
-    for (const status of LIFECYCLE_STATUSES) {
-      expect(recipientsFor(status, TRANSITIONS).roles).not.toContain('receiving-officer');
-    }
+describe('the receiving officer is a real queue again', () => {
+  it('is routed the two intake statuses', () => {
+    // This role held two READ scopes and no acting scope, matched no visibility
+    // rule, and could see no application at all -- so every notice to it was
+    // correctly withheld and the role was, in practice, inert. `staff:receive`
+    // made it an officer with work. Recorded here because the previous
+    // assertion in this file pinned the blindness as if it were intended.
+    expect(recipientsFor('Submitted', TRANSITIONS).roles).toContain('receiving-officer');
+    expect(recipientsFor('Received', TRANSITIONS).roles).toContain('receiving-officer');
   });
 });

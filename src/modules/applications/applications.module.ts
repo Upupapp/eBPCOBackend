@@ -24,6 +24,8 @@ import { ReportsController } from '../compliance/transport/reports.controller';
 import { CALENDAR_REPOSITORY } from '../compliance/application/calendar.repository';
 import { WorkflowConfigService } from './application/workflow-config.service';
 import { WorkflowController } from './transport/workflow.controller';
+import { StaffNotificationService } from '../notifications/application/staff-notification.service';
+import { NotificationsModule } from '../notifications/notifications.module';
 
 // Re-exported where it used to be declared, so callers that reach for it here
 // keep working. It now lives beside the port -- see calendar.repository.ts for
@@ -41,7 +43,7 @@ export { CALENDAR_REPOSITORY };
  * met a statutory deadline.
  */
 @Module({
-  imports: [PaymentsModule, PermitsModule],
+  imports: [PaymentsModule, PermitsModule, NotificationsModule],
   providers: [
     {
       provide: CALENDAR_REPOSITORY,
@@ -62,8 +64,9 @@ export { CALENDAR_REPOSITORY };
     },
     {
       provide: WorkflowConfigService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new WorkflowConfigService(db),
+      inject: [SQL_CLIENT, StaffNotificationService],
+      useFactory: (db: SqlClient, staffNotices: StaffNotificationService) =>
+        new WorkflowConfigService(db, () => new Date(), undefined, staffNotices),
     },
     {
       provide: RequirementsService,
@@ -88,8 +91,13 @@ export { CALENDAR_REPOSITORY };
     },
     {
       provide: LifecycleService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new LifecycleService(db),
+      // The module's StaffNotificationService, not one built here. Its
+      // "nobody holds this role" warning is configured where it is provided,
+      // and a locally constructed one silently uses the no-op default -- which
+      // is exactly what happened, and what made the warning look absent.
+      inject: [SQL_CLIENT, StaffNotificationService],
+      useFactory: (db: SqlClient, staffNotices: StaffNotificationService) =>
+        new LifecycleService(db, () => new Date(), undefined, staffNotices),
     },
     {
       provide: EvaluationService,

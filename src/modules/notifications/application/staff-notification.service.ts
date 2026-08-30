@@ -27,7 +27,21 @@ export interface StaffNotificationRow {
 }
 
 export class StaffNotificationService {
-  constructor(private readonly db: SqlClient) {}
+  constructor(
+    private readonly db: SqlClient,
+    /**
+     * Called when a notice was routed to real roles and reached NO account.
+     *
+     * That is not a rare edge: an LGU that has not created a receiving officer,
+     * or whose only one is disabled, gets applications arriving in a queue
+     * nobody is told about. Nothing else in the system would say so -- the
+     * transition succeeds, the routing is correct, and the inbox is simply
+     * empty. Surfaced rather than counted, because a count nobody reads is the
+     * same as no count.
+     */
+    private readonly onNobodyToTell:
+      (status: string, roles: readonly string[]) => void = () => undefined,
+  ) {}
 
   /**
    * Tells whoever is now waiting on this application that it is waiting.
@@ -55,6 +69,13 @@ export class StaffNotificationService {
     for (const role of decision.roles) {
       written += await this.writeTo(tx, role, notice, applicationId, actingAccountId);
     }
+
+    // Zero is not automatically wrong -- the only holder may be the officer who
+    // just made the move, and not telling them is deliberate. It is wrong when
+    // the role has no enabled account at all, which is the case worth naming.
+    if (written === 0 && !await this.anyoneHolds(tx, decision.roles)) {
+      this.onNobodyToTell(status, decision.roles);
+    }
     return written;
   }
 
@@ -81,6 +102,28 @@ export class StaffNotificationService {
       [notice.type, notice.title, notice.body, notice.deepLink, exceptAccountId],
     );
     return result.rows.length;
+  }
+
+  /**
+   * Whether ANY enabled staff account holds one of these roles -- the actor
+   * included, deliberately.
+   *
+   * The question is "is there an officer for this work", not "was anyone
+   * notified". An office with one receiving officer who has just moved the
+   * application has an officer; they were not told because they already know.
+   * Excluding the actor here made every such move warn, which would have
+   * trained an operator to ignore the one warning that means an application is
+   * stuck in a queue with nobody to work it.
+   */
+  private async anyoneHolds(tx: SqlClient, roles: readonly string[]): Promise<boolean> {
+    const held = await tx.query<{ one: number }>(
+      `select 1 as one from accounts a
+         join account_roles r on r.account_id = a.id
+        where r.role = any($1) and a.kind = 'staff' and a.disabled_at is null
+        limit 1`,
+      [[...roles]],
+    );
+    return held.rows.length > 0;
   }
 
   private async writeTo(

@@ -27,6 +27,23 @@ import { LifecycleStatus } from './lifecycle';
  */
 const SCOPE_VISIBILITY: ReadonlyArray<{ scope: string; statuses: readonly LifecycleStatus[] | 'all' }> = [
   { scope: 'staff:administer', statuses: 'all' },
+  // Oversight reads everything: that is the definition of the role, stated in
+  // ROLE_SCOPES as "READ EVERYTHING, CHANGE NOTHING". `auditor` was added by the
+  // web-portal reconciliation and this table was not updated with it, so the
+  // role that exists to read everything could read NO application at all --
+  // exactly the "accident of an omitted case" the comment above warns about,
+  // committed by the mechanism meant to prevent it. Found 2026-08-30.
+  { scope: 'audit:read', statuses: 'all' },
+  // Intake. Added with `auditor` above, for `receiving-officer`, which matched
+  // no rule here at all: it could see nothing, while the transition table gave
+  // it precisely two moves to make. An officer assigned work by one table and
+  // refused sight of it by another gets a 404 and no explanation anywhere.
+  //
+  // Keyed on `staff:receive` rather than `documents:read`, so that reading
+  // documents does not by itself confer sight of the intake queue. The auditor
+  // holds `documents:read` and must not gain a queue; it sees everything
+  // through `audit:read` above, which grants sight and no authority.
+  { scope: 'staff:receive', statuses: ['Submitted', 'Received', 'Document Verification'] },
   { scope: 'applications:write', statuses: 'all' },
   { scope: 'staff:approve', statuses: 'all' },
   { scope: 'staff:evaluate', statuses: ['Submitted', 'Received', 'Document Verification', 'Under Evaluation', 'Revision Required'] },

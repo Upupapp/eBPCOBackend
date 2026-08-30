@@ -141,14 +141,17 @@ const move = (applicationId: string, to: LifecycleStatus, role: StaffRole) =>
 beforeAll(async () => {
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(join(__dirname, '../db/migrations')));
-  app = await createApp(loadConfig(ENV), new StructuredLogger('error', (l) => logLines.push(l)), db);
+  // `warn`, not `error`: the "nobody holds this role" signal is a warning, and
+  // an error-level logger silently filters it -- which is how the first version
+  // of that test passed a suite while asserting nothing.
+  app = await createApp(loadConfig(ENV), new StructuredLogger('warn', (l) => logLines.push(l)), db);
   await app.init();
   await app.getHttpAdapter().getInstance().ready();
   tokens = app.get(TokenService);
 
   staff.clear();
-  for (const role of ['records-officer', 'evaluator', 'assessor', 'cashier',
-    'building-official', 'releasing-officer', 'administrator'] as StaffRole[]) {
+  for (const role of ['records-officer', 'receiving-officer', 'evaluator', 'assessor',
+    'cashier', 'building-official', 'releasing-officer', 'administrator'] as StaffRole[]) {
     staff.set(role, await staffAccount(role));
   }
 
@@ -166,6 +169,7 @@ beforeAll(async () => {
 }, 60_000);
 
 afterEach(async () => {
+  await db.query('update accounts set disabled_at = null where kind = $1', ['staff']);
   // The inbox, and the applications that filled it. Archived rather than
   // deleted because notices and history reference them, and `archive_is_
   // attributable` requires an actor -- an archive entry with nobody
@@ -191,19 +195,19 @@ afterAll(async () => {
 });
 
 describe('a move puts the application in the next officer’s inbox', () => {
-  it('tells the evaluator, and nobody else, when an application is received', async () => {
+  it('tells the receiving officer, and nobody else, when an application is filed', async () => {
     const { id, reference } = await file('Submitted');
 
     expect((await move(id, 'Received', 'records-officer')).statusCode).toBe(200);
 
-    const evaluator = await inboxOf('evaluator');
-    expect(evaluator.notifications).toHaveLength(1);
-    expect(evaluator.notifications[0]!.title).toBe(`${reference} is waiting`);
-    expect(evaluator.notifications[0]!.routedToRole).toBe('evaluator');
-    expect(evaluator.unread).toBe(1);
+    const intake = await inboxOf('receiving-officer');
+    expect(intake.notifications).toHaveLength(1);
+    expect(intake.notifications[0]!.title).toBe(`${reference} is waiting`);
+    expect(intake.notifications[0]!.routedToRole).toBe('receiving-officer');
+    expect(intake.unread).toBe(1);
 
     // The whole point of routing. Without it every one of these is 1.
-    for (const role of ['assessor', 'cashier', 'releasing-officer',
+    for (const role of ['evaluator', 'assessor', 'cashier', 'releasing-officer',
       'administrator'] as StaffRole[]) {
       expect((await inboxOf(role)).notifications).toHaveLength(0);
     }
@@ -241,8 +245,8 @@ describe('a move puts the application in the next officer’s inbox', () => {
     // invited to expire an applicant who is doing what was asked.
     expect((await move(id, 'Revision Required', 'evaluator')).statusCode).toBe(200);
 
-    for (const role of ['records-officer', 'evaluator', 'assessor', 'cashier',
-      'building-official', 'releasing-officer', 'administrator'] as StaffRole[]) {
+    for (const role of ['records-officer', 'receiving-officer', 'evaluator', 'assessor',
+      'cashier', 'building-official', 'releasing-officer', 'administrator'] as StaffRole[]) {
       expect((await inboxOf(role)).notifications).toHaveLength(0);
     }
   });
@@ -291,11 +295,40 @@ describe('a move puts the application in the next officer’s inbox', () => {
 
 });
 
+describe('when no officer holds the routed role', () => {
+  it('says so, rather than filing the application into nobody’s queue', async () => {
+    // An LGU that has not created a receiving officer, or whose only one is
+    // disabled, gets applications arriving in a queue nobody is told about.
+    // Nothing else would say so: the transition succeeds, the routing is
+    // correct, and the inbox is simply empty.
+    await db.query(
+      'update accounts set disabled_at = now() where id = $1',
+      [staff.get('receiving-officer')!.id],
+    );
+    const { id } = await file('Submitted');
+
+    expect((await move(id, 'Received', 'records-officer')).statusCode).toBe(200);
+
+    expect(logLines.join('\n')).toContain('no officer holds the role');
+  });
+
+  it('says nothing when the only holder is the officer who made the move', async () => {
+    // Zero notices is CORRECT here and must not be reported as a gap -- not
+    // telling an officer about their own act is deliberate. A warning on every
+    // such move would train the operator to ignore the warning.
+    const { id } = await file('Submitted');
+
+    expect((await move(id, 'Received', 'receiving-officer')).statusCode).toBe(200);
+
+    expect(logLines.some((line) => line.includes('no officer holds the role'))).toBe(false);
+  });
+});
+
 describe('the inbox belongs to one officer', () => {
   it('refuses to mark another officer’s notice read, and says nothing about it', async () => {
     const { id } = await file('Submitted');
     await move(id, 'Received', 'records-officer');
-    const notice = (await inboxOf('evaluator')).notifications[0]!;
+    const notice = (await inboxOf('receiving-officer')).notifications[0]!;
 
     const response = await send('POST', `/staff/notifications/${notice.id}/read`,
       staff.get('cashier')!.token);
@@ -303,19 +336,19 @@ describe('the inbox belongs to one officer', () => {
     // 404, not 403: answering "forbidden" would confirm the notice exists,
     // which is a fact about another officer's queue.
     expect(response.statusCode).toBe(404);
-    expect((await inboxOf('evaluator')).notifications[0]!.readAt).toBeNull();
+    expect((await inboxOf('receiving-officer')).notifications[0]!.readAt).toBeNull();
   });
 
   it('marks it read for the officer it belongs to, once', async () => {
     const { id } = await file('Submitted');
     await move(id, 'Received', 'records-officer');
-    const notice = (await inboxOf('evaluator')).notifications[0]!;
-    const token = staff.get('evaluator')!.token;
+    const notice = (await inboxOf('receiving-officer')).notifications[0]!;
+    const token = staff.get('receiving-officer')!.token;
 
     expect((await send('POST', `/staff/notifications/${notice.id}/read`, token)).statusCode)
       .toBe(204);
 
-    const after = await inboxOf('evaluator');
+    const after = await inboxOf('receiving-officer');
     expect(after.notifications[0]!.readAt).not.toBeNull();
     expect(after.unread).toBe(0);
 
@@ -348,7 +381,7 @@ describe('what the notice says', () => {
     const { id, reference } = await file('Submitted');
     await move(id, 'Received', 'records-officer');
 
-    const notice = (await inboxOf('evaluator')).notifications[0]!;
+    const notice = (await inboxOf('receiving-officer')).notifications[0]!;
 
     // A worklist is read at a counter, on a shared screen, all day. The
     // reference opens the record; the record is where access is checked.

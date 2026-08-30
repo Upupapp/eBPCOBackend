@@ -267,7 +267,15 @@ describe('the role table and the route table agree', () => {
       payload: { to: 'Received' },
     });
 
-    expect(response.statusCode).not.toBe(200);
+    // 403, not merely "not 200". Until 2026-08-30 this passed with a 404,
+    // because a separate defect left the auditor matching no visibility rule
+    // and unable to SEE any application -- so the read-only guarantee was being
+    // enforced by a bug rather than by authorisation. Fixing the visibility
+    // exposed that the intake move was gated on `applications:read`, which the
+    // auditor holds by design, and the auditor could then move an application.
+    // `staff:receive` closed it. Asserting the code, not just the absence of
+    // success, is what stops that from happening again quietly.
+    expect(response.statusCode).toBe(403);
     // And the record did not move, which is the fact that actually matters --
     // a refusal that still wrote would be the worst of both.
     const after = await db.query<{ lifecycle_status: string }>(
@@ -276,9 +284,14 @@ describe('the role table and the route table agree', () => {
     expect(after.rows[0]?.lifecycle_status).toBe('Submitted');
   });
 
-  it('lets a receiving officer make that same transition, so the test above proves refusal and not breakage', async () => {
+  it('lets a records officer make that same transition, so the test above proves refusal and not breakage', async () => {
     // Without this, the assertion above passes just as well if the route is
     // broken for everyone.
+    //
+    // Named for `receiving-officer` until 2026-08-30 while using
+    // `records-officer` throughout. Harmless to the assertion and misleading to
+    // a reader -- and it is the reason the receiving officer's total blindness
+    // went unnoticed: this test appeared to cover it.
     const account = randomUUID();
     const applicant = randomUUID();
     const application = randomUUID();

@@ -72,6 +72,7 @@ const EDGES: ReadonlyArray<readonly [LifecycleStatus, LifecycleStatus]> = [
 interface Seeded {
   official: string;
   records: string;
+  receiving: string;
   evaluator: string;
   assessor: string;
   cashier: string;
@@ -131,6 +132,11 @@ async function seed(db: SqlClient): Promise<Seeded> {
   const assessor = randomUUID();
   const cashier = randomUUID();
   const releasing = randomUUID();
+  // Added 2026-08-30 with `staff:receive`. Without an account holding it, the
+  // intake statuses route to a role that does not exist and the worklist sample
+  // records an empty envelope -- which documents nothing, and is also the exact
+  // condition the service now warns about.
+  const receiving = randomUUID();
 
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
@@ -140,6 +146,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
   for (const [id, role] of [
     [official, 'building-official'], [records, 'records-officer'], [evaluator, 'evaluator'],
     [assessor, 'assessor'], [cashier, 'cashier'], [releasing, 'releasing-officer'],
+    [receiving, 'receiving-officer'],
   ] as const) {
     await db.query(
       `insert into accounts (id, kind, email, email_normalised, password_hash)
@@ -316,7 +323,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
   );
 
   return {
-    official, records, evaluator, assessor, cashier, releasing,
+    official, records, evaluator, assessor, cashier, releasing, receiving,
     applicantAccount, detailed, fresh, completed, assessable, approved, payment,
   };
 }
@@ -359,6 +366,7 @@ async function main(): Promise<void> {
   const assessorToken = await tokenFor('assessor', seeded.assessor);
   const cashierToken = await tokenFor('cashier', seeded.cashier);
   const releasingToken = await tokenFor('releasing-officer', seeded.releasing);
+  const receivingToken = await tokenFor('receiving-officer', seeded.receiving);
 
   // The administration and audit surfaces need scopes no operational role
   // holds -- `staff:administer` and `audit:read`. Minted from the same seeded
@@ -531,10 +539,12 @@ async function main(): Promise<void> {
   await record('staff.evaluations.queue', 'GET', '/staff/evaluations', evaluatorToken);
   await record('staff.users.list', 'GET', '/staff/users', adminToken);
   await record('staff.audit.stream', 'GET', '/staff/audit?limit=5', adminToken);
-  // The officer's worklist. Recorded from the evaluator, because the routing is
-  // the feature: a sample taken from an account nothing routes to would document
-  // an empty envelope and prove nothing about who gets told.
-  await record('staff.notifications', 'GET', '/staff/notifications', evaluatorToken);
+  // The officer's worklist. Recorded from the RECEIVING officer, because the
+  // routing is the feature and a sample taken from an account nothing routes to
+  // documents an empty envelope. It was the evaluator until `staff:receive`
+  // moved the intake statuses to the officers who actually receive; the empty
+  // sample that produced is why this is worth stating rather than assuming.
+  await record('staff.notifications', 'GET', '/staff/notifications', receivingToken);
   await record('staff.reports.processingTimes', 'GET',
     '/staff/reports/processing-times?from=2026-01-01&to=2027-01-01', officialToken);
 
