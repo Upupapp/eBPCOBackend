@@ -75,7 +75,10 @@ export async function applySecurity(
     const supplied = sanitiseCorrelationId(request.headers[CORRELATION_HEADER]);
     const correlationId = supplied ?? newCorrelationId();
     void reply.header(CORRELATION_HEADER, correlationId);
-    runWithCorrelationId(correlationId, done);
+    // `request.ip` honours trustProxy when it is configured, so this is the
+    // caller's address rather than the load balancer's wherever the deployment
+    // says so.
+    runWithCorrelationId(correlationId, done, request.ip);
   });
 
   // A request that has not finished within the configured budget is abandoned

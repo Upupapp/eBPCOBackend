@@ -4,6 +4,9 @@ import { z } from 'zod';
 import { ProblemException } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import { AuditService } from '../application/audit.service';
+import {
+  ACCESS_ACTIONS, SECURITY_STREAM_ACTIONS,
+} from '../domain/security-events';
 
 /**
  * The audit trail, read.
@@ -28,20 +31,35 @@ import { AuditService } from '../application/audit.service';
  * ── What is NOT here, and why ───────────────────────────────────────────
  *
  * The portal's System Logs screen has five streams: activity, access, error,
- * security and system events. This serves the FIRST. The other four are
- * operational telemetry — request logs, stack traces, authentication failures —
- * and they are not this table. Serving them from here would mean either
- * diluting a hash-linked evidential chain with log lines, or making the API a
- * log store. Which of those the LGU wants, or whether that screen should point
- * at whatever hosts the logs, is decision D-6 and not one to take by writing a
- * route.
+ * security and system events. **D-6 was answered on 2026-08-29: this serves
+ * THREE of them, and deliberately not the other two.**
+ *
+ * Activity, access and security are records of WHO DID WHAT -- a sign-in, a
+ * refused sign-in, a replayed refresh token, malware in an upload. They belong
+ * in this table, which already hash-links them, retains them on the audit
+ * schedule, and classifies every column in the privacy register. `?stream=`
+ * selects one, so the client does not have to know which action names belong to
+ * which tab.
+ *
+ * Error and system-event logs stay in the host's log stack. They are telemetry,
+ * they are request-scale rather than act-scale, and -- the argument that
+ * settles it -- an error log inside the database is unwritable exactly when the
+ * database is the thing that has failed.
  */
 
 const SUBJECT_TYPES = [
   'application', 'document', 'payment', 'order-of-payment', 'account', 'export',
 ] as const;
 
+/**
+ * The named streams. `activity` is everything that is not access or security,
+ * which is how the first tab keeps meaning "the acts of the office" now that
+ * sign-ins share the table with them.
+ */
+const STREAMS = ['activity', 'access', 'security'] as const;
+
 const streamShape = z.object({
+  stream: z.enum(STREAMS).optional(),
   action: z.string().min(1).max(80).optional(),
   subjectType: z.enum(SUBJECT_TYPES).optional(),
   actorAccountId: z.string().uuid().optional(),
@@ -50,6 +68,23 @@ const streamShape = z.object({
   limit: z.coerce.number().int().min(1).max(200).optional(),
   before: z.coerce.number().int().min(1).optional(),
 }).strict();
+
+/**
+ * Activity is defined by SUBTRACTION, not by a list.
+ *
+ * A list would mean every new audited act had to be added here to appear
+ * anywhere, and the failure mode of forgetting is an act that is recorded and
+ * invisible -- which is worse than an act that is not recorded at all, because
+ * the table says it was covered.
+ */
+function actionsFor(stream: (typeof STREAMS)[number]):
+  { actions: readonly string[] } | { excludeActions: readonly string[] } {
+  if (stream === 'access') return { actions: ACCESS_ACTIONS };
+  if (stream === 'security') return { actions: SECURITY_STREAM_ACTIONS };
+  return {
+    excludeActions: [...new Set([...ACCESS_ACTIONS, ...SECURITY_STREAM_ACTIONS])],
+  };
+}
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -72,6 +107,7 @@ export class AuditController {
   async stream(@Query() query: unknown): Promise<Record<string, unknown>> {
     const input = parse(streamShape, query ?? {});
     const page = await this.audit.stream({
+      ...(input.stream === undefined ? {} : actionsFor(input.stream)),
       ...(input.action === undefined ? {} : { action: input.action }),
       ...(input.subjectType === undefined ? {} : { subjectType: input.subjectType }),
       ...(input.actorAccountId === undefined ? {} : { actorAccountId: input.actorAccountId }),

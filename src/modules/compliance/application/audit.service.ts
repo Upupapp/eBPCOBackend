@@ -1,5 +1,7 @@
 import { SqlClient } from '../../../persistence/sql-client';
-import { currentCorrelationId } from '../../../common/correlation/correlation';
+import {
+  currentCorrelationId, currentSourceAddress, normaliseSourceAddress,
+} from '../../../common/correlation/correlation';
 import { ChainVerdict, ChainableEvent, GENESIS, hashEntry, verifyChain } from '../domain/audit-chain';
 
 /**
@@ -8,9 +10,23 @@ import { ChainVerdict, ChainableEvent, GENESIS, hashEntry, verifyChain } from '.
  * Coverage is deliberately wider than mutations. NPC Circular 16-01 expects a
  * government agency to account for who VIEWED personal data, not only who
  * changed it, so a document read and a personal-data export are audited events
- * in their own right. So is a refused authorisation: an attempt to reach
- * another applicant's record is exactly the thing anyone investigating an
- * incident wants to find.
+ * in their own right.
+ *
+ * ── One thing this comment used to claim and did not do ─────────────────
+ *
+ * It said a refused AUTHORISATION was audited -- "an attempt to reach another
+ * applicant's record is exactly the thing anyone investigating an incident
+ * wants to find". Nothing wrote one, and nothing had. Corrected here on
+ * 2026-08-29 rather than left to read as a guarantee.
+ *
+ * It is still not written, and the reason is the row lock below. Every append
+ * serialises on the chain head, so auditing every 403 makes audit volume
+ * REQUEST-scale and attacker-controllable: a caller with one valid token can
+ * queue appends ahead of the ones inside real permit transactions. Refused
+ * SIGN-INS are audited instead -- the same investigative value, and bounded,
+ * because that path deliberately burns ~100ms per attempt and sits behind the
+ * rate limiter. Auditing authorisation refusals needs a bound of its own before
+ * it is safe, and that bound has not been designed.
  */
 
 export type AuditOutcome = 'allowed' | 'denied' | 'failed';
@@ -94,7 +110,12 @@ export class AuditService {
       [
         sequence, event.occurredAt, event.actorAccountId, event.actorRole, event.action,
         event.subjectType, event.subjectId, event.outcome, event.correlationId,
-        input.sourceAddress ?? null,
+        // Same reasoning as the correlation id above: taken from the request
+        // context unless a caller states one, so an entry written deep in a
+        // service still says where the act came from. The column has carried an
+        // NPC Circular 16-01 basis since it was created and, until now, has
+        // been null on every row in the table.
+        normaliseSourceAddress(input.sourceAddress ?? currentSourceAddress() ?? undefined),
         event.beforeState === null ? null : JSON.stringify(event.beforeState),
         event.afterState === null ? null : JSON.stringify(event.afterState),
         previousHash, entryHash,
@@ -166,6 +187,10 @@ export class AuditService {
    */
   async stream(filters: {
     action?: string;
+    /** A named set of actions -- how D-6's access and security streams are read. */
+    actions?: readonly string[];
+    /** Everything EXCEPT these -- how the activity stream stays open-ended. */
+    excludeActions?: readonly string[];
     subjectType?: string;
     actorAccountId?: string;
     from?: Date;
@@ -177,6 +202,9 @@ export class AuditService {
       sequence: number; occurredAt: Date; action: string; outcome: AuditOutcome;
       subjectType: string; subjectId: string | null;
       actorAccountId: string | null; actorRole: string | null;
+      // Where the act came from. Null on everything written before D-6, and on
+      // anything that reached the service outside a request context.
+      sourceAddress: string | null;
     }>;
     nextCursor: number | null;
   }> {
@@ -189,6 +217,15 @@ export class AuditService {
 
     const where: string[] = [];
     if (filters.action !== undefined) where.push(`action = ${bind(filters.action)}`);
+    if (filters.actions !== undefined) {
+      // An empty set must select NOTHING, not everything. `action = any('{}')`
+      // is false for every row, which is the answer wanted; the guard is here
+      // so a future caller passing [] cannot accidentally widen the query.
+      where.push(`action = any(${bind([...filters.actions])})`);
+    }
+    if (filters.excludeActions !== undefined) {
+      where.push(`action <> all(${bind([...filters.excludeActions])})`);
+    }
     if (filters.subjectType !== undefined) where.push(`subject_type = ${bind(filters.subjectType)}`);
     if (filters.actorAccountId !== undefined) {
       where.push(`actor_account_id = ${bind(filters.actorAccountId)}`);
@@ -197,9 +234,11 @@ export class AuditService {
     if (filters.to !== undefined) where.push(`occurred_at < ${bind(filters.to)}`);
     if (filters.before !== undefined) where.push(`sequence < ${bind(filters.before)}`);
 
-    const rows = await this.db.query<AuditRow & { subject_type: string; subject_id: string | null }>(
+    const rows = await this.db.query<
+      AuditRow & { subject_type: string; subject_id: string | null; source_address: string | null }
+    >(
       `select sequence, occurred_at, action, outcome, subject_type, subject_id,
-              actor_account_id, actor_role
+              actor_account_id, actor_role, host(source_address) as source_address
          from audit_events
         ${where.length > 0 ? `where ${where.join(' and ')}` : ''}
         order by sequence desc
@@ -219,6 +258,7 @@ export class AuditService {
         subjectId: row.subject_id,
         actorAccountId: row.actor_account_id,
         actorRole: row.actor_role,
+        sourceAddress: row.source_address,
       })),
       nextCursor: rows.rows.length > limit && last !== undefined ? Number(last.sequence) : null,
     };

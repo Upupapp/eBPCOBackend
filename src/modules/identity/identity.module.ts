@@ -28,6 +28,7 @@ import { ContactsController } from './transport/contacts.controller';
 import { MfaController } from './transport/mfa.controller';
 import { SecretBox } from './domain/secret-box';
 import { TotpService } from './application/totp.service';
+import { replayedRefreshToken } from '../compliance/domain/security-events';
 
 /**
  * Identity, wired.
@@ -102,8 +103,10 @@ import { TotpService } from './application/totp.service';
     },
     {
       provide: TokenService,
-      inject: [CONFIG, SESSION_REPOSITORY, StructuredLogger],
-      useFactory: (config: AppConfig, sessions: SessionRepository, logger: StructuredLogger) =>
+      inject: [CONFIG, SESSION_REPOSITORY, StructuredLogger, SQL_CLIENT],
+      useFactory: (
+        config: AppConfig, sessions: SessionRepository, logger: StructuredLogger, db: SqlClient,
+      ) =>
         new TokenService({
           accessTtlSeconds: config.ACCESS_TOKEN_TTL_SECONDS,
           signingKey: new TextEncoder().encode(config.JWT_SIGNING_KEY),
@@ -118,13 +121,28 @@ import { TotpService } from './application/totp.service';
               familyId: event.familyId,
               detail: event.detail,
             });
+
+            // And recorded. D-6, 2026-08-29: until now the single strongest
+            // theft signal this service produces existed only as a line on
+            // stdout -- unqueryable, unchained, and gone with the container.
+            //
+            // Fire-and-forget because the caller is a synchronous callback in
+            // the middle of revoking a token family: making the revocation wait
+            // on an audit write, or fail with it, would trade a security
+            // response for a security record.
+            void new AuditService(db)
+              .append(replayedRefreshToken(event.accountId, event.familyId))
+              .catch((cause: unknown) => logger.error('security event not recorded', {
+                event: event.type,
+                reason: cause instanceof Error ? cause.message : String(cause),
+              }));
           },
         }),
     },
     {
       provide: IdentityService,
       inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy,
-        PASSWORD_RESET_REPOSITORY, TotpService],
+        PASSWORD_RESET_REPOSITORY, TotpService, SQL_CLIENT, StructuredLogger],
       useFactory: (
         accounts: AccountRepository,
         tokens: TokenService,
@@ -132,7 +150,18 @@ import { TotpService } from './application/totp.service';
         policy: PasswordPolicy,
         resetTickets: PasswordResetRepository,
         totp: TotpService,
-      ) => new IdentityService(accounts, tokens, hasher, policy, resetTickets, () => new Date(), totp),
+        db: SqlClient,
+        logger: StructuredLogger,
+      ) => new IdentityService(
+        accounts, tokens, hasher, policy, resetTickets, () => new Date(), totp,
+        new AuditService(db),
+        // Surfaced, never swallowed. A sign-in that succeeded and was not
+        // recorded is a gap in the accountability chain, and the operator has
+        // to be able to see it happened.
+        (action, cause) => logger.error('audit entry could not be written', {
+          action, reason: cause instanceof Error ? cause.message : String(cause),
+        }),
+      ),
     },
 
     // Registered globally: a new controller is protected the moment it exists,

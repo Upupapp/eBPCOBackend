@@ -11,6 +11,8 @@ import { LocalSignatureScanner, MalwareScanner } from './domain/malware-scanner'
 import { ObjectStore } from './domain/object-store';
 import { FilesystemObjectStore } from './infrastructure/filesystem-object-store';
 import { DocumentsController } from './transport/documents.controller';
+import { AuditService } from '../compliance/application/audit.service';
+import { documentSecurityEvent } from '../compliance/domain/security-events';
 
 export const OBJECT_STORE = Symbol('EBPCO_OBJECT_STORE');
 export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
@@ -54,6 +56,22 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
             accountId: event.accountId,
             detail: event.detail,
           });
+
+          // And recorded, since D-6. Malware in an upload and an unauthorised
+          // document read are accountability records, not telemetry: they name
+          // an account and a file, and an investigator needs them to survive
+          // the container that produced them.
+          //
+          // Fire-and-forget: refusing an infected upload must not depend on an
+          // audit write succeeding.
+          void new AuditService(db)
+            .append(documentSecurityEvent(
+              event.accountId ?? null, event.documentId ?? null, event.type, event.detail,
+            ))
+            .catch((cause: unknown) => logger.error('security event not recorded', {
+              event: event.type,
+              reason: cause instanceof Error ? cause.message : String(cause),
+            }));
         }),
     },
   ],

@@ -2152,7 +2152,8 @@
             "subjectType": "application",
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": null
+            "actorRole": null,
+            "sourceAddress": "127.0.0.1"
           },
           {
             "sequence": 4,
@@ -2162,7 +2163,8 @@
             "subjectType": "application",
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": null
+            "actorRole": null,
+            "sourceAddress": "127.0.0.1"
           },
           {
             "sequence": 3,
@@ -2172,7 +2174,8 @@
             "subjectType": "application",
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": null
+            "actorRole": null,
+            "sourceAddress": "127.0.0.1"
           },
           {
             "sequence": 2,
@@ -2182,7 +2185,8 @@
             "subjectType": "application",
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": null
+            "actorRole": null,
+            "sourceAddress": "127.0.0.1"
           },
           {
             "sequence": 1,
@@ -2192,7 +2196,8 @@
             "subjectType": "application",
             "subjectId": "00000000-0000-4000-8000-000000000000",
             "actorAccountId": "00000000-0000-4000-8000-000000000000",
-            "actorRole": "staff"
+            "actorRole": "staff",
+            "sourceAddress": "127.0.0.1"
           }
         ],
         "nextCursor": null

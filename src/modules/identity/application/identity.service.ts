@@ -7,6 +7,10 @@ import { PasswordPolicy, PasswordRejection } from '../domain/password-policy';
 import { AccountRepository, normaliseEmail } from './account.repository';
 import { TokenService } from './token.service';
 import { TotpService } from './totp.service';
+import { AuditService } from '../../compliance/application/audit.service';
+import {
+  SecurityEntry, endedSession, failedSecondFactor, refusedSignIn, startedSession,
+} from '../../compliance/domain/security-events';
 
 /**
  * Sign-in, registration, recovery and revocation.
@@ -66,6 +70,18 @@ export class IdentityService {
      * fails closed rather than letting a second factor through unchecked.
      */
     private readonly totp?: TotpService,
+    /**
+     * Where security entries go. D-6, 2026-08-29.
+     *
+     * Optional for the same reason `totp` is -- the unit specs construct this
+     * service with repositories and no database. Unlike `totp`, absence here
+     * fails OPEN by design: a missing audit writer means a sign-in is not
+     * recorded, not that it is refused. Locking an office out of its own system
+     * because accountability could not be written is the larger harm, and the
+     * e2e specs assert the entry really is written when the writer is present.
+     */
+    private readonly audit?: AuditService,
+    private readonly onAuditFailure: (action: string, cause: unknown) => void = () => undefined,
   ) {}
 
   async authenticate(email: string, password: string, totp?: string): Promise<AuthenticationOutcome> {
@@ -73,19 +89,34 @@ export class IdentityService {
 
     if (account === null) {
       await this.burnEquivalentWork(password);
+      await this.recordRefusal();
       return { ok: false, reason: 'rejected' };
     }
 
     const passwordMatches = await this.hasher.verify(password, account.passwordHash);
-    if (!passwordMatches) return { ok: false, reason: 'rejected' };
+    if (!passwordMatches) {
+      await this.recordRefusal();
+      return { ok: false, reason: 'rejected' };
+    }
 
     // Checked after the password, not before: a disabled account must not be
     // distinguishable from a wrong password by an attacker who has neither.
-    if (account.disabledAt !== null) return { ok: false, reason: 'rejected' };
+    if (account.disabledAt !== null) {
+      // Audited as a plain refusal, with no id, for the same reason the check
+      // is ordered this way. An entry saying "this disabled account was tried"
+      // would tell a reader the account exists.
+      await this.recordRefusal();
+      return { ok: false, reason: 'rejected' };
+    }
 
     if (requiresMfa(account)) {
       if (totp === undefined) return { ok: false, reason: 'mfa-required' };
-      if (!await this.verifyTotp(account, totp)) return { ok: false, reason: 'rejected' };
+      if (!await this.verifyTotp(account, totp)) {
+        // Named, unlike the refusals above: reaching here requires the correct
+        // password, so the account's existence is not news to whoever did.
+        await this.record(failedSecondFactor(account.id, account.kind));
+        return { ok: false, reason: 'rejected' };
+      }
     }
 
     // Upgrade the stored verifier if policy has moved on since it was written.
@@ -99,8 +130,31 @@ export class IdentityService {
     // timestamp written before MFA would say an officer signed in when they
     // presented a password and nothing else.
     await this.accounts.recordSignIn(account.id, this.clock());
+    await this.record(startedSession(account.id, account.kind));
 
     return { ok: true, tokens: await this.issueFor(account) };
+  }
+
+  /**
+   * Writes a security entry, if this service was given somewhere to write it.
+   *
+   * Optional because the unit specs construct this service with repositories
+   * and no database, and because a failure to RECORD a sign-in must never
+   * become a failure to sign in -- the record is for accountability, and losing
+   * one is a smaller harm than locking an office out of its own system. Any
+   * failure is surfaced through the logger rather than swallowed.
+   */
+  private async record(entry: SecurityEntry): Promise<void> {
+    if (this.audit === undefined) return;
+    try {
+      await this.audit.append(entry);
+    } catch (cause) {
+      this.onAuditFailure(entry.action, cause);
+    }
+  }
+
+  private recordRefusal(): Promise<void> {
+    return this.record(refusedSignIn());
   }
 
   /**
@@ -169,12 +223,17 @@ export class IdentityService {
     };
   }
 
-  async signOut(familyId: string): Promise<void> {
+  async signOut(familyId: string, accountId?: string, kind?: string): Promise<void> {
     await this.tokens.endSession(familyId);
+    if (accountId !== undefined) {
+      await this.record(endedSession(accountId, kind ?? 'unknown', false));
+    }
   }
 
-  async signOutEverywhere(accountId: string): Promise<number> {
-    return this.tokens.endAllSessions(accountId);
+  async signOutEverywhere(accountId: string, kind = 'unknown'): Promise<number> {
+    const ended = await this.tokens.endAllSessions(accountId);
+    await this.record(endedSession(accountId, kind, true));
+    return ended;
   }
 
   /**
