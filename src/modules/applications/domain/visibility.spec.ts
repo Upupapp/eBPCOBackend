@@ -1,4 +1,6 @@
-import { ROLE_SCOPES, StaffRole } from '../../identity/domain/account';
+import {
+  ROLE_SCOPES, StaffRole, grantsAuthority, isReadOnlyRole,
+} from '../../identity/domain/account';
 import { LIFECYCLE_STATUSES, TRANSITIONS } from './lifecycle';
 import { visibleStatusesFor } from './visibility';
 
@@ -93,5 +95,42 @@ describe('the auditor sees everything, which is the definition of the role', () 
     for (const status of LIFECYCLE_STATUSES) {
       expect(canSee('auditor', status)).toBe(true);
     }
+  });
+});
+
+describe('no transition names a scope that confers only sight', () => {
+  it('gates every staff move on a scope that grants authority', () => {
+    // The seed half of the guarantee. `WorkflowConfigService` refuses the same
+    // thing at runtime, and both are needed: this one cannot be edited around,
+    // and that one covers a lifecycle this file never sees.
+    const readGated = TRANSITIONS
+      .filter((rule) => rule.actors.includes('staff'))
+      .filter((rule) => !grantsAuthority(rule.requires))
+      .map((rule) => `${rule.from} -> ${rule.to} requires ${rule.requires}`);
+
+    expect(readGated).toEqual([]);
+  });
+
+  it('lets no read-only role make any move', () => {
+    // The harm the rule above prevents, asserted directly rather than inferred
+    // from the naming convention -- a scope called `staff:observe` would pass
+    // the suffix test and fail this one.
+    const escalating: string[] = [];
+
+    for (const role of (Object.keys(ROLE_SCOPES) as StaffRole[]).filter(isReadOnlyRole)) {
+      const held = new Set<string>(ROLE_SCOPES[role]);
+      for (const rule of TRANSITIONS) {
+        if (rule.actors.includes('staff') && held.has(rule.requires)) {
+          escalating.push(`${role} could make ${rule.from} -> ${rule.to}`);
+        }
+      }
+    }
+
+    expect(escalating).toEqual([]);
+  });
+
+  it('has a read-only role to check against, so neither test is vacuous', () => {
+    // Both assertions above pass trivially if `isReadOnlyRole` never matches.
+    expect((Object.keys(ROLE_SCOPES) as StaffRole[]).filter(isReadOnlyRole)).toContain('auditor');
   });
 });

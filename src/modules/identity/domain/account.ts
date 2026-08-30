@@ -89,6 +89,18 @@ export const ALL_SCOPES = [
 export type EveryScopeIsListed = Exclude<Scope, (typeof ALL_SCOPES)[number]> extends never
   ? true : never;
 
+/**
+ * Whether a scope confers AUTHORITY rather than sight.
+ *
+ * `:read` scopes let a caller look; `:write` and `staff:*` scopes let them act.
+ * The distinction has to be computable because a transition rule names a scope
+ * as its authority, and a rule naming a read scope grants that act to everyone
+ * holding it -- which is how `auditor`, defined as "read everything, change
+ * nothing", could move an application through intake until 2026-08-30.
+ */
+export const grantsAuthority = (scope: string): boolean =>
+  scope.endsWith(':write') || scope.startsWith('staff:');
+
 export const APPLICANT_SCOPES: readonly Scope[] = [
   'applications:read', 'applications:write',
   'documents:read', 'documents:write',
@@ -154,6 +166,18 @@ export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
     'audit:read', 'staff:administer',
   ],
 };
+
+/**
+ * A role that may look at everything it is shown and change none of it.
+ *
+ * Not a list, because a list is a second place to update. `auditor` is the only
+ * one today; the point is that adding another must not silently become a role
+ * that can act, and that a transition rule must never name a scope such a role
+ * holds.
+ */
+export const isReadOnlyRole = (role: StaffRole): boolean =>
+  !ROLE_SCOPES[role].some(grantsAuthority);
+
 
 /**
  * The staff web portal's role names, mapped to this table's.

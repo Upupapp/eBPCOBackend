@@ -1,6 +1,7 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
+import { ROLE_SCOPES, StaffRole, isReadOnlyRole } from '../../identity/domain/account';
 import { LIFECYCLE_STATUSES, LifecycleStatus, TransitionRule, isTerminal } from '../domain/lifecycle';
 import { loadTransitions } from '../domain/transition-repository';
 import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
@@ -110,6 +111,31 @@ export class WorkflowConfigService {
       }
     }
 
+    // A read-only role gaining authority is refused, not warned about.
+    //
+    // D-5's line is that weakening separation of duty is PERMITTED and never
+    // silent -- an LGU may decide any officer can approve. This is on the other
+    // side of that line for a reason the codebase already states elsewhere: an
+    // administrator who genuinely needs to assess "can be given the assessor
+    // role as well -- visibly, in the role table, where it can be audited".
+    // Gaining authority belongs in the role table, not as a side effect of
+    // editing a workflow.
+    //
+    // And this is not hypothetical. Until 2026-08-30 `Submitted -> Received`
+    // required `applications:read`, which `auditor` holds, so the
+    // read-everything-change-nothing role could move applications. That was
+    // fixed in the seed; without this check the editor could put it straight
+    // back, one PUT at a time, with only a warning.
+    const escalating = readOnlyRolesGaining(transitions);
+    if (escalating.length > 0) {
+      return {
+        ok: false, reason: 'read-only-role-would-gain-authority',
+        detail: `${escalating.join('; ')}. A role defined as read-only must not gain the `
+          + 'power to act by a workflow edit. Give the officer an acting role in Users & '
+          + 'Roles instead, where it is visible and audited.',
+      };
+    }
+
     const stranded = strandedStatuses(transitions);
     if (stranded.length > 0) {
       return {
@@ -179,6 +205,27 @@ export class WorkflowConfigService {
       return { ok: true as const, transitions: await loadTransitions(tx), warnings };
     });
   }
+}
+
+/**
+ * Read-only roles that this lifecycle would let act.
+ *
+ * Reported per role and move rather than as a count: "the auditor could make
+ * Payment Verified -> For Approval" is actionable, and "1 problem" is not.
+ */
+function readOnlyRolesGaining(transitions: readonly TransitionInput[]): string[] {
+  const found: string[] = [];
+  for (const role of (Object.keys(ROLE_SCOPES) as StaffRole[]).filter(isReadOnlyRole)) {
+    const held = new Set<string>(ROLE_SCOPES[role]);
+    for (const move of transitions) {
+      if (!move.actors.includes('staff') || !held.has(move.requiresScope)) continue;
+      found.push(
+        `${role} is a read-only role and would be able to make ${move.from} -> ${move.to}, `
+        + `which requires ${move.requiresScope}`,
+      );
+    }
+  }
+  return found;
 }
 
 /**

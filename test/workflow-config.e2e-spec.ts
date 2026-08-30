@@ -383,6 +383,52 @@ describe('edits that would strand applications', () => {
   });
 });
 
+describe('an edit may not hand a read-only role the power to act', () => {
+  it('refuses a lifecycle that lets the auditor make a move', async () => {
+    // This is the hole that existed until 2026-08-30: `Submitted -> Received`
+    // required `applications:read`, which the auditor holds, so the
+    // read-everything-change-nothing role could move applications. Fixing the
+    // seed is not enough on its own -- without this, the editor could put it
+    // straight back, one PUT at a time.
+    const rules = withRule(await currentRules(), 'Submitted', 'Received',
+      { requiresScope: 'applications:read' });
+
+    const response = await send('PUT', '/staff/config/workflow', adminToken,
+      { transitions: rules });
+
+    expect(response.statusCode).toBe(422);
+    const detail = response.json<{ detail: string }>().detail;
+    expect(detail).toContain('auditor');
+    // Names the move, not a count: "1 problem" is not actionable.
+    expect(detail).toContain('Submitted -> Received');
+    // And says where authority is supposed to come from.
+    expect(detail).toMatch(/Users & Roles/);
+  });
+
+  it('refuses it even when the move is one nobody would think about', async () => {
+    // Not special-cased to intake. Any move, any read scope the auditor holds.
+    const rules = withRule(await currentRules(), 'Payment Verified', 'For Approval',
+      { requiresScope: 'payments:read' });
+
+    expect((await send('PUT', '/staff/config/workflow', adminToken, { transitions: rules }))
+      .statusCode).toBe(422);
+  });
+
+  it('still allows an edit that widens authority between ACTING roles', async () => {
+    // The line D-5 drew, still where it was. Weakening separation of duty
+    // between roles that already act is permitted and warned about; handing a
+    // read-only role authority is not, because that belongs in the role table.
+    const rules = withRule(await currentRules(), 'Document Verification', 'Rejected',
+      { requiresScope: 'applications:write' });
+
+    const response = await send('PUT', '/staff/config/workflow', adminToken,
+      { transitions: rules });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ controlsGivenUp: string[] }>().controlsGivenUp).not.toEqual([]);
+  });
+});
+
 describe('what cannot be spelled at all', () => {
   it('refuses a status this system does not have', async () => {
     const rules = [...await currentRules(),
