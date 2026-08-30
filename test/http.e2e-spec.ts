@@ -24,6 +24,7 @@ const baseEnv = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
   PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
   TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
+  PUSH_TOKEN_ENCRYPTION_KEY: 'a-test-push-key-of-at-least-32-characters',
   BUILD_COMMIT: 'abc1234',
   BUILD_TIME: '2026-08-19T12:00:00+08:00',
   ...overrides,

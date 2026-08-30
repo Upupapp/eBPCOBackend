@@ -33,3 +33,18 @@ docs/CERTIFICATION-WEB-PORTAL-BACKEND.pdf
 
 # Uploaded bytes from the development server. Never a deliverable.
 .dev-objects/
+
+# Service-account keys. Firebase, Google Cloud, anything shaped like them.
+#
+# `scan-secrets.py` already refuses a PEM private-key header, so a committed one
+# fails the gate — this is the earlier stop, before it is staged at all. Added
+# 2026-08-30 after a Firebase admin key reached a place it should not have; the
+# key itself was rotated rather than trusted to stay unread.
+#
+# The marker is described rather than written out: spelling it here made the
+# scanner flag this very file, which is the trap of a gate tripping over its own
+# explanation.
+*-adminsdk-*.json
+service-account*.json
+*serviceaccount*.json
+firebase-*.json

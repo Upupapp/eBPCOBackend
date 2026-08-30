@@ -144,6 +144,7 @@ async function main(): Promise<void> {
     JWT_SIGNING_KEY: 'a-development-signing-key-of-at-least-32-chars',
     PASSWORD_PEPPER: 'a-development-pepper-of-at-least-32-characters',
     TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
+    PUSH_TOKEN_ENCRYPTION_KEY: 'a-test-push-key-of-at-least-32-characters',
     RATE_LIMIT_MAX: '10000',
     PORT: process.env.PORT ?? '3000',
     // The real environment wins, and the guard below REFUSES anything that is

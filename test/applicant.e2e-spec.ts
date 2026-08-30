@@ -31,6 +31,7 @@ const ENV: NodeJS.ProcessEnv = {
   JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
   PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
   TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
+  PUSH_TOKEN_ENCRYPTION_KEY: 'a-test-push-key-of-at-least-32-characters',
   RATE_LIMIT_MAX: '10000',
 };
 
@@ -354,6 +355,34 @@ describe('devices', () => {
 
     expect(response.statusCode).toBe(201);
     expect(JSON.stringify(response.json())).not.toContain('a-real-looking-fcm-token');
+  });
+
+  it('stores the token ENCRYPTED, not merely in a column named for it', async () => {
+    // The column has been called `push_token_encrypted` since it was created
+    // and held the raw token until 2026-08-30, because no key had been chosen.
+    // A push token is the ability to send a notification to a citizen's phone
+    // as the LGU, so a database leak that yields live tokens hands someone a
+    // phishing channel into a phone they trust.
+    const response = await app.inject({
+      method: 'POST', url: '/devices',
+      headers: { authorization: `Bearer ${await applicantToken(MARIA)}` },
+      payload: { platform: 'android', pushToken: 'a-real-looking-fcm-token' },
+    });
+    expect(response.statusCode).toBe(201);
+
+    const stored = await db.query<{ push_token_encrypted: Uint8Array }>(
+      'select push_token_encrypted from devices order by registered_at desc limit 1',
+    );
+    // `bytea` comes back as a Uint8Array rather than a Buffer, and a
+    // `.toString()` on the wrong one yields comma-separated byte numbers that
+    // look nothing like the token and would pass this assertion for the wrong
+    // reason.
+    const raw = Buffer.from(stored.rows[0]!.push_token_encrypted).toString('utf8');
+
+    expect(raw).not.toContain('a-real-looking-fcm-token');
+    // And it is a sealed envelope rather than something merely mangled: the
+    // SecretBox format is version.nonce.body.tag.
+    expect(raw.split('.')).toHaveLength(4);
   });
 
   it('registering the same handset twice does not create two', async () => {

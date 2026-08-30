@@ -76,6 +76,21 @@ const schema = z
     // it, below.
     TOTP_ENCRYPTION_KEY: z.string().optional().transform((v) => v ?? ''),
 
+    /**
+     * Encrypts push tokens at rest.
+     *
+     * A separate key from TOTP's on purpose. Reusing one would mean a
+     * compromise of either purpose is a compromise of both, and these protect
+     * different things: TOTP guards an officer's second factor, this guards the
+     * ability to send a notification to a citizen's phone in the LGU's name.
+     *
+     * The column has been called `push_token_encrypted` since the day it was
+     * created and held the raw token, because no key-management service had
+     * been chosen. `SecretBox` -- already encrypting TOTP secrets at rest --
+     * settled that; this key is what made the column's name true, 2026-08-30.
+     */
+    PUSH_TOKEN_ENCRYPTION_KEY: z.string().optional().transform((v) => v ?? ''),
+
     // Request handling. Bounded by construction: an unbounded body or an
     // unbounded request lifetime is a denial-of-service surface.
     REQUEST_TIMEOUT_MS: intFromEnv(1_000, 120_000, 20_000),
@@ -241,6 +256,18 @@ const schema = z
         message:
           'required outside development — without it a leaked database yields every officer\'s '
           + 'second factor, which is the one thing standing between a stolen password and an approval',
+      });
+    }
+
+    if (config.EBPCO_ENVIRONMENT !== 'development'
+      && config.PUSH_TOKEN_ENCRYPTION_KEY.length < 32) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['PUSH_TOKEN_ENCRYPTION_KEY'],
+        message:
+          'required outside development — without it a leaked database yields live push tokens, '
+          + "and a push token is the ability to send a notification to a citizen's phone in the "
+          + "LGU's name",
       });
     }
 

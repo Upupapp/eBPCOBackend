@@ -50,6 +50,7 @@ const ENV: NodeJS.ProcessEnv = {
   JWT_SIGNING_KEY: 'a-sample-signing-key-of-at-least-32-chars',
   PASSWORD_PEPPER: 'a-sample-pepper-of-at-least-32-characters',
   TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
+  PUSH_TOKEN_ENCRYPTION_KEY: 'a-test-push-key-of-at-least-32-characters',
   RATE_LIMIT_MAX: '10000',
 };
 

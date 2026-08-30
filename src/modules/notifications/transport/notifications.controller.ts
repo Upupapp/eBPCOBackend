@@ -6,6 +6,7 @@ import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { NotificationService } from '../application/notification.service';
+import { SecretBox } from '../../identity/domain/secret-box';
 
 /**
  * The applicant's feed, their preferences, and their devices.
@@ -89,7 +90,15 @@ function callerAccount(request: AuthenticatedRequest): string {
 
 @Controller()
 export class NotificationsController {
-  constructor(private readonly notifications: NotificationService) {}
+  constructor(
+    private readonly notifications: NotificationService,
+    /**
+     * Sealing lives here rather than in the service because this is where the
+     * raw token exists and stops existing. Anything further in should never
+     * have been able to see it.
+     */
+    private readonly pushTokens: SecretBox,
+  ) {}
 
   @Get('notifications')
   @RequireScopes('notifications:read')
@@ -192,19 +201,20 @@ export class NotificationsController {
     // The raw token never reaches the database. A digest identifies the handset
     // for de-duplication and revocation; the token itself is what can send to
     // it, and encrypting it means a database disclosure is not a licence to
-    // push to every applicant's phone.
+    // push to every applicant's phone in the LGU's name.
     //
-    // The encryption here is NOT real: it stores the bytes unchanged, because
-    // no key-management service has been chosen (E-1). It is written as a
-    // separate column so the shape is right, and recorded as unverified rather
-    // than described as encrypted.
+    // Until 2026-08-30 the encryption here was NOT real -- it stored the bytes
+    // unchanged, and said so, because no key-management service had been chosen
+    // (E-1). `SecretBox` was already encrypting TOTP secrets at rest by then,
+    // so the reason had expired while the placeholder had not. It is AES-256-GCM
+    // now, under its own key.
     const digest = createHash('sha256').update(input.pushToken, 'utf8').digest('hex');
 
     const deviceId = await this.notifications.registerDevice({
       accountId: callerAccount(request),
       platform: input.platform,
       pushTokenDigest: digest,
-      pushTokenEncrypted: Buffer.from(input.pushToken, 'utf8'),
+      pushTokenEncrypted: Buffer.from(this.pushTokens.seal(input.pushToken), 'utf8'),
       ...(input.appVersion === undefined ? {} : { appVersion: input.appVersion }),
       ...(input.locale === undefined ? {} : { locale: input.locale }),
     });

@@ -86,6 +86,12 @@ create table devices (
   platform            text        not null check (platform in ('android', 'ios')),
   -- A credential for reaching the device. Stored as a digest for lookup and
   -- encrypted for use; never returned by any endpoint.
+  --
+  -- "Encrypted" was aspirational until 2026-08-30: the column held the raw
+  -- token, because no key had been chosen for it. It is AES-256-GCM under
+  -- PUSH_TOKEN_ENCRYPTION_KEY now. Rows written before that date hold plaintext
+  -- and will fail to open -- which is the correct outcome, since a token that
+  -- old is likely stale anyway and the device re-registers on next launch.
   push_token_digest   text        not null,
   push_token_encrypted bytea      not null,
   app_version         text,

@@ -10,6 +10,7 @@ const validEnv = (): NodeJS.ProcessEnv => ({
   JWT_SIGNING_KEY: 'a-test-signing-key-of-at-least-32-chars',
   PASSWORD_PEPPER: 'a-test-pepper-of-at-least-32-characters',
   TOTP_ENCRYPTION_KEY: 'a-test-totp-key-of-at-least-32-characters',
+  PUSH_TOKEN_ENCRYPTION_KEY: 'a-push-key-of-at-least-thirty-two-chars',
 });
 
 describe('configuration', () => {
@@ -115,6 +116,7 @@ describe('choosing an object store', () => {
     JWT_SIGNING_KEY: 'a-signing-key-of-at-least-thirty-two-ch',
     PASSWORD_PEPPER: 'a-pepper-of-at-least-thirty-two-charact',
     TOTP_ENCRYPTION_KEY: 'a-totp-key-of-at-least-thirty-two-chars',
+    PUSH_TOKEN_ENCRYPTION_KEY: 'a-push-key-of-at-least-thirty-two-chars',
   };
 
   it('defaults to the filesystem store', () => {
@@ -168,6 +170,7 @@ describe('choosing a malware scanner', () => {
     JWT_SIGNING_KEY: 'a-signing-key-of-at-least-thirty-two-ch',
     PASSWORD_PEPPER: 'a-pepper-of-at-least-thirty-two-charact',
     TOTP_ENCRYPTION_KEY: 'a-totp-key-of-at-least-thirty-two-chars',
+    PUSH_TOKEN_ENCRYPTION_KEY: 'a-push-key-of-at-least-thirty-two-chars',
   };
 
   it('defaults to the local stub', () => {
@@ -188,5 +191,38 @@ describe('choosing a malware scanner', () => {
     expect(loadConfig({
       ...base, EBPCO_ENVIRONMENT: 'production', MALWARE_SCANNER_DRIVER: 'clamav',
     }).MALWARE_SCANNER_DRIVER).toBe('clamav');
+  });
+});
+
+describe('the push-token key', () => {
+  const base = {
+    DATABASE_URL: 'postgres://ebpco@db.internal:5432/ebpco',
+    OBJECT_STORE_ENDPOINT: 'https://ap-south-1.linodeobjects.com',
+    OBJECT_STORE_BUCKET: 'ebpco-documents',
+    MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
+    JWT_SIGNING_KEY: 'a-signing-key-of-at-least-thirty-two-ch',
+    PASSWORD_PEPPER: 'a-pepper-of-at-least-thirty-two-charact',
+    TOTP_ENCRYPTION_KEY: 'a-totp-key-of-at-least-thirty-two-chars',
+  };
+
+  it('is required outside development', () => {
+    // A push token is the ability to send a notification to a citizen's phone
+    // as the LGU. A leaked database that yields live tokens hands someone a
+    // phishing channel into a phone they trust.
+    expect(() => loadConfig({ ...base, EBPCO_ENVIRONMENT: 'staging' }))
+      .toThrow(/PUSH_TOKEN_ENCRYPTION_KEY/);
+  });
+
+  it('must not be the same key as TOTP’s', () => {
+    // Different things: TOTP guards an officer's second factor, this guards
+    // sending in the LGU's name. One key would make a compromise of either a
+    // compromise of both — asserted because sharing one is the shortcut
+    // somebody will otherwise take when adding the variable to a server.
+    const config = loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'staging',
+      PUSH_TOKEN_ENCRYPTION_KEY: 'a-push-key-of-at-least-thirty-two-chars',
+    });
+
+    expect(config.PUSH_TOKEN_ENCRYPTION_KEY).not.toBe(config.TOTP_ENCRYPTION_KEY);
   });
 });

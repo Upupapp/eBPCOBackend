@@ -7,6 +7,8 @@ import { NotificationsController } from './transport/notifications.controller';
 import { StaffNotificationService } from './application/staff-notification.service';
 import { StaffNotificationsController } from './transport/staff-notifications.controller';
 import { StructuredLogger } from '../../common/logging/logger';
+import { AppConfig, CONFIG } from '../../config/app-config';
+import { SecretBox } from '../identity/domain/secret-box';
 
 /**
  * The applicant's feed, their preferences, and the plan for delivering each
@@ -20,6 +22,13 @@ import { StructuredLogger } from '../../common/logging/logger';
  */
 @Module({
   providers: [
+    {
+      // One box, built once from the key. Constructing it per request would
+      // re-derive the key material on every device registration for no gain.
+      provide: SecretBox,
+      inject: [CONFIG],
+      useFactory: (config: AppConfig) => new SecretBox(config.PUSH_TOKEN_ENCRYPTION_KEY),
+    },
     {
       provide: StaffNotificationService,
       inject: [SQL_CLIENT, StructuredLogger],
