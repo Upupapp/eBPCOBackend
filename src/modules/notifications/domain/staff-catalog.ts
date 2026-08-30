@@ -47,6 +47,31 @@ export function awaitingYou(
   };
 }
 
+/**
+ * An Order of Payment has fallen due with nothing paid against it.
+ *
+ * Names the Order number rather than the applicant, same as `awaitingYou`: a
+ * worklist is read at a counter on a shared screen, and the reference is enough
+ * to open the record where access is checked and logged.
+ *
+ * Says what is true and NOT what to do about it. The sweep deliberately does
+ * not expire the application -- ending someone's application because a date
+ * passed while nobody looked is a decision the LGU takes -- and a notice
+ * instructing an officer to expire it would make the cron entry that decision
+ * by another route.
+ */
+export function assessmentOverdue(
+  orderNumber: string, reference: string, applicationId: string,
+): StaffNotice {
+  return {
+    type: 'assessment-overdue',
+    title: `${orderNumber} is overdue`,
+    body: `Order of Payment ${orderNumber} on application ${reference} passed its due date `
+      + 'with nothing paid against it. The applicant has been told.',
+    deepLink: `/staff/applications/${applicationId}`,
+  };
+}
+
 export function workflowChanged(): StaffNotice {
   return {
     type: 'workflow-changed',

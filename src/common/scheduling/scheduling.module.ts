@@ -12,6 +12,7 @@ import { ComplianceModule } from '../../modules/compliance/compliance.module';
 import { DocumentService } from '../../modules/documents/application/document.service';
 import { NotificationService } from '../../modules/notifications/application/notification.service';
 import { NotificationsModule } from '../../modules/notifications/notifications.module';
+import { StaffNotificationService } from '../../modules/notifications/application/staff-notification.service';
 import { Job, JobRunner } from './job-runner';
 import { Scheduler } from './scheduler';
 import {
@@ -50,11 +51,13 @@ export const SCHEDULER = Symbol('EBPCO_SCHEDULER');
       inject: [
         JOB_RUNNER, SQL_CLIENT, StructuredLogger, DRAIN_STATE, CONFIG,
         DocumentService, AuditService, NotificationService, DataExportService,
+        StaffNotificationService,
       ],
       useFactory: (
         runner: JobRunner, db: SqlClient, logger: StructuredLogger, drain: DrainState,
         config: AppConfig, documents: DocumentService, audit: AuditService,
         notifications: NotificationService, dataExports: DataExportService,
+        staffNotices: StaffNotificationService,
       ): Scheduler => {
         const jobs: Job[] = [
           retentionJob(documents, config.DOCUMENT_RETENTION_DAYS),
@@ -63,7 +66,7 @@ export const SCHEDULER = Symbol('EBPCO_SCHEDULER');
           operationalPurgeJob(db),
           dataExportJob(dataExports, db),
           dataExportExpiryJob(dataExports),
-          overdueAssessmentJob(db),
+          overdueAssessmentJob(db, staffNotices),
         ];
         return new Scheduler(runner, jobs, logger, drain, config.SCHEDULER_TICK_SECONDS);
       },

@@ -6,6 +6,10 @@ import { DocumentService } from '../../modules/documents/application/document.se
 import { NotificationService } from '../../modules/notifications/application/notification.service';
 import { DataExportService } from '../../modules/compliance/application/data-export.service';
 import { deepLinkFor, entryFor } from '../../modules/notifications/domain/catalog';
+import { LifecycleStatus } from '../../modules/applications/domain/lifecycle';
+import { loadTransitions } from '../../modules/applications/domain/transition-repository';
+import { assessmentOverdue } from '../../modules/notifications/domain/staff-catalog';
+import { StaffNotificationService } from '../../modules/notifications/application/staff-notification.service';
 
 /**
  * The four jobs, and what each is allowed to claim about itself.
@@ -173,8 +177,26 @@ export function operationalPurgeJob(db: SqlClient, clock: () => Date = () => new
  * so an Order that has already produced one is skipped. The check is against
  * the notification rows rather than a flag, because the notification IS the
  * record of having told them.
+ *
+ * ── And the office is told too, since 2026-08-30 ────────────────────────
+ *
+ * `assessment-overdue` was seeded as a staff notice type on the day the staff
+ * worklist was built and never emitted by anything. The consequence was that an
+ * applicant who simply stopped paying produced a notice to THEM and silence in
+ * the office: the application sat at Assessed, which routes to nobody by design
+ * because in the ordinary course the applicant is the one acting. Nothing ever
+ * told an officer that had stopped being true.
+ *
+ * Written in the SAME transaction as the applicant's notice, so the two cannot
+ * disagree about whether an Order went overdue. Once per Order for free: the
+ * query above skips any Order that already produced a `payment-overdue`, so
+ * this branch never runs twice for the same one.
  */
-export function overdueAssessmentJob(db: SqlClient, clock: () => Date = () => new Date()): Job {
+export function overdueAssessmentJob(
+  db: SqlClient,
+  staffNotices: StaffNotificationService,
+  clock: () => Date = () => new Date(),
+): Job {
   return {
     name: 'overdue-assessments',
     leaseSeconds: 300,
@@ -183,8 +205,10 @@ export function overdueAssessmentJob(db: SqlClient, clock: () => Date = () => ne
 
       const due = await db.query<{
         id: string; application_id: string; account_id: string; number: string;
+        reference_number: string; lifecycle_status: LifecycleStatus;
       }>(
-        `select o.id, o.application_id, acc.id as account_id, o.number
+        `select o.id, o.application_id, acc.id as account_id, o.number,
+                a.reference_number, a.lifecycle_status
            from orders_of_payment o
            join applications a on a.id = o.application_id
            join applicants ap on ap.id = a.applicant_id
@@ -229,6 +253,20 @@ export function overdueAssessmentJob(db: SqlClient, clock: () => Date = () => ne
                deepLinkFor(entry, order.application_id)],
             );
           }
+
+          // Read inside the transaction, and read at all rather than using the
+          // compiled table: since D-5 the rules are configuration, and an LGU
+          // that moved `Assessed -> Expired` to a different scope expects this
+          // notice to follow it.
+          await staffNotices.announceStall({
+            tx,
+            applicationId: order.application_id,
+            status: order.lifecycle_status,
+            rules: await loadTransitions(tx),
+            notice: assessmentOverdue(
+              order.number, order.reference_number, order.application_id,
+            ),
+          });
         });
       }
 

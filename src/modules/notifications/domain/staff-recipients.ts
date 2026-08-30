@@ -54,6 +54,31 @@ export interface RecipientDecision {
     | 'nobody-holds-it';
 }
 
+/**
+ * Who must decide once the APPLICANT has run out of time.
+ *
+ * The first STAFF move out, which is exactly the search that was wrong in
+ * `recipientsFor` and is right here -- and the difference is the whole reason
+ * both functions exist.
+ *
+ * `recipientsFor` answers "who is waiting". At `Assessed` the answer is nobody:
+ * the applicant is paying, and the only staff moves are Cancel and Expire, so
+ * telling an officer their queue has work would invite them to cancel someone
+ * doing exactly what was asked.
+ *
+ * This answers a different question -- "the applicant has STOPPED, who decides
+ * what happens now" -- and there Cancel and Expire are precisely the moves in
+ * question. The premise has changed, so the same search gives the right answer.
+ */
+export function recipientsWhenApplicantStalls(
+  status: LifecycleStatus,
+  rules: readonly TransitionRule[],
+): RecipientDecision {
+  const next = rules.find((rule) => rule.from === status && rule.actors.includes('staff'));
+  if (next === undefined) return { roles: [], awaiting: null, reason: 'terminal' };
+  return decide(next, status);
+}
+
 export function recipientsFor(
   status: LifecycleStatus,
   rules: readonly TransitionRule[],
@@ -75,6 +100,10 @@ export function recipientsFor(
     return { roles: [], awaiting: null, reason: 'awaiting-applicant' };
   }
 
+  return decide(next, status);
+}
+
+function decide(next: TransitionRule, status: LifecycleStatus): RecipientDecision {
   const awaiting = { to: next.to, requires: next.requires };
   const holders = (Object.keys(ROLE_SCOPES) as StaffRole[])
     .filter((role) => ROLE_SCOPES[role].includes(next.requires))

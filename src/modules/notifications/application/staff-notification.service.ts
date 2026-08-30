@@ -2,7 +2,7 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { StaffRole } from '../../identity/domain/account';
 import { LifecycleStatus, TransitionRule } from '../../applications/domain/lifecycle';
 import { StaffNotice, awaitingYou } from '../domain/staff-catalog';
-import { recipientsFor } from '../domain/staff-recipients';
+import { recipientsFor, recipientsWhenApplicantStalls } from '../domain/staff-recipients';
 
 /**
  * Writing to an officer's worklist. TAB 14, owner decision D-7.
@@ -75,6 +75,38 @@ export class StaffNotificationService {
     // the role has no enabled account at all, which is the case worth naming.
     if (written === 0 && !await this.anyoneHolds(tx, decision.roles)) {
       this.onNobodyToTell(status, decision.roles);
+    }
+    return written;
+  }
+
+  /**
+   * Tells whoever must now decide, because the applicant has stopped.
+   *
+   * Routed by `recipientsWhenApplicantStalls` rather than `recipientsFor`: at
+   * `Assessed` nobody is waiting in the ordinary course, and that is exactly
+   * the status an overdue Order sits in.
+   */
+  async announceStall(options: {
+    tx: SqlClient;
+    applicationId: string;
+    status: LifecycleStatus;
+    rules: readonly TransitionRule[];
+    notice: StaffNotice;
+  }): Promise<number> {
+    const decision = recipientsWhenApplicantStalls(options.status, options.rules);
+    if (decision.roles.length === 0) {
+      this.onNobodyToTell(options.status, decision.roles);
+      return 0;
+    }
+
+    let written = 0;
+    for (const role of decision.roles) {
+      // No actor to exclude: a scheduled sweep is not an officer, and there is
+      // nobody who already knows.
+      written += await this.writeTo(options.tx, role, options.notice, options.applicationId, null);
+    }
+    if (written === 0 && !await this.anyoneHolds(options.tx, decision.roles)) {
+      this.onNobodyToTell(options.status, decision.roles);
     }
     return written;
   }

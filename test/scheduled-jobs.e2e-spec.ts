@@ -18,6 +18,7 @@ import { DocumentService } from '../src/modules/documents/application/document.s
 import { DataExportService } from '../src/modules/compliance/application/data-export.service';
 import { dataExportExpiryJob, dataExportJob } from '../src/common/scheduling/jobs';
 import { ObjectStore } from '../src/modules/documents/domain/object-store';
+import { StaffNotificationService } from '../src/modules/notifications/application/staff-notification.service';
 
 /**
  * The four jobs, driven by the scheduler, against a real database.
@@ -31,6 +32,8 @@ import { ObjectStore } from '../src/modules/documents/domain/object-store';
 const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
 
 let db: SqlClient;
+/** The sweep tells the office too, since 2026-08-30. */
+let staffNotices: StaffNotificationService;
 let lines: string[];
 let now: Date;
 
@@ -40,6 +43,7 @@ const ACCOUNT = randomUUID();
 
 beforeEach(async () => {
   db = await PgliteClient.create();
+  staffNotices = new StaffNotificationService(db);
   await migrate(db, loadMigrations(MIGRATIONS_DIR));
   lines = [];
   now = new Date('2026-08-20T05:00:00Z');
@@ -299,7 +303,7 @@ describe('every seeded job has something to run it', () => {
       operationalPurgeJob(db, () => now),
       dataExportJob(new DataExportService(db, store, () => now), db),
       dataExportExpiryJob(new DataExportService(db, store, () => now)),
-      overdueAssessmentJob(db, () => now),
+      overdueAssessmentJob(db, staffNotices, () => now),
     ].map((job) => job.name).sort();
 
     expect(registered).toEqual(seeded);
@@ -437,10 +441,93 @@ describe('the overdue Order of Payment sweep', () => {
       [applicationId],
     )).rows[0]?.n ?? 0);
 
+  /** Walks an application forward the way the database will accept it. */
+  const advanceTo = async (applicationId: string, target: string): Promise<void> => {
+    const path = ['Received', 'Document Verification', 'Under Evaluation', 'Assessed'];
+    for (const status of path) {
+      await db.query('update applications set lifecycle_status = $1 where id = $2',
+        [status, applicationId]);
+      if (status === target) return;
+    }
+  };
+
+  const staffNoticesFor = async (applicationId: string) =>
+    (await db.query<{ routed_to_role: string; title: string; body: string }>(
+      `select routed_to_role, title, body from staff_notifications
+        where application_id = $1 and type = 'assessment-overdue'`,
+      [applicationId],
+    )).rows;
+
+  it('tells the office too, not only the applicant', async () => {
+    // `assessment-overdue` was seeded as a staff notice type the day the
+    // worklist was built and emitted by nothing. So an applicant who simply
+    // stopped paying produced a notice to THEM and silence in the office: the
+    // application sits at Assessed, which routes to nobody by design because in
+    // the ordinary course the applicant is the one acting.
+    const { applicationId, orderId } = await overdue(3);
+    await advanceTo(applicationId, 'Assessed');
+    const assessor = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff','assessor-overdue@lgu.gov.ph','assessor-overdue@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+      [assessor],
+    );
+    await db.query("insert into account_roles (account_id, role) values ($1,'assessor')", [assessor]);
+
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
+
+    const staff = await staffNoticesFor(applicationId);
+    expect(staff).toHaveLength(1);
+    // The assessor, because `Assessed -> Expired` is theirs to make. Routed by
+    // the same rule as every other staff notice, so an LGU that moves that
+    // transition to another scope moves this notice with it.
+    expect(staff[0]!.routed_to_role).toBe('assessor');
+
+    const order = await db.query<{ number: string }>(
+      'select number from orders_of_payment where id = $1', [orderId],
+    );
+    expect(staff[0]!.title).toContain(order.rows[0]!.number);
+    // Names the Order, not the applicant: a worklist is read at a counter on a
+    // shared screen.
+    expect(`${staff[0]!.title} ${staff[0]!.body}`).not.toMatch(/Maria|Santos|@example/);
+  });
+
+  it('tells the office once, however often the job runs', async () => {
+    const { applicationId } = await overdue(3);
+    await advanceTo(applicationId, 'Assessed');
+    const assessor = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff','assessor-once@lgu.gov.ph','assessor-once@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+      [assessor],
+    );
+    await db.query("insert into account_roles (account_id, role) values ($1,'assessor')", [assessor]);
+
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
+
+    expect(await staffNoticesFor(applicationId)).toHaveLength(1);
+  });
+
+  it('does not expire the application, even though it now tells someone who could', async () => {
+    // The sweep says what is true and leaves the decision alone. A notice that
+    // instructed an officer to expire would make the cron entry that decision
+    // by another route.
+    const { applicationId } = await overdue(3);
+    await advanceTo(applicationId, 'Assessed');
+
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
+
+    const status = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    expect(status.rows[0]?.lifecycle_status).toBe('Assessed');
+  });
+
   it('notifies the applicant when the due date has passed with nothing settled', async () => {
     const { applicationId } = await overdue(3);
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     expect(await notices(applicationId)).toBe(1);
   });
@@ -456,7 +543,7 @@ describe('the overdue Order of Payment sweep', () => {
     // test passed with the once-only guard deleted until that was noticed,
     // which is a test asserting something it never exercised.
     for (let i = 0; i < 3; i += 1) {
-      await runner().runIfDue(overdueAssessmentJob(db, () => now));
+      await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
       now = new Date(now.getTime() + 7 * 3_600_000);
     }
 
@@ -466,7 +553,7 @@ describe('the overdue Order of Payment sweep', () => {
   it('says nothing when the fee has been paid, whenever it was paid', async () => {
     const { applicationId } = await overdue(30, { paid: true });
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     expect(await notices(applicationId)).toBe(0);
   });
@@ -476,7 +563,7 @@ describe('the overdue Order of Payment sweep', () => {
     // debt anybody owes.
     const { applicationId } = await overdue(30, { superseded: true });
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     expect(await notices(applicationId)).toBe(0);
   });
@@ -484,7 +571,7 @@ describe('the overdue Order of Payment sweep', () => {
   it('says nothing before the due date', async () => {
     const { applicationId } = await overdue(-5);
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     expect(await notices(applicationId)).toBe(0);
   });
@@ -492,7 +579,7 @@ describe('the overdue Order of Payment sweep', () => {
   it('marks unverified proof Overdue, because it is not a settled fee', async () => {
     const { orderId } = await overdue(3, { withProof: true });
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     const status = await db.query<{ status: string }>(
       'select status from payments where order_of_payment_id = $1', [orderId],
@@ -506,7 +593,7 @@ describe('the overdue Order of Payment sweep', () => {
     // a decision the LGU takes, not a consequence of a cron entry.
     const { applicationId } = await overdue(3);
 
-    await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     const status = await db.query<{ lifecycle_status: string }>(
       'select lifecycle_status from applications where id = $1', [applicationId],
@@ -515,7 +602,7 @@ describe('the overdue Order of Payment sweep', () => {
   });
 
   it('reports nothing to do rather than pretending it swept', async () => {
-    const result = await runner().runIfDue(overdueAssessmentJob(db, () => now));
+    const result = await runner().runIfDue(overdueAssessmentJob(db, staffNotices, () => now));
 
     expect(JSON.stringify(result)).toMatch(/nothing overdue|Order/);
   });
