@@ -260,6 +260,9 @@ describe('security headers', () => {
       EBPCO_ENVIRONMENT: 'production',
       OBJECT_STORE_DRIVER: 's3',
       OBJECT_STORE_REGION: 'ap-south-1',
+      // Production also refuses the scanner stub. Nothing in this test uploads
+      // anything; this is what a production configuration has to contain.
+      MALWARE_SCANNER_DRIVER: 'clamav',
     }));
     try {
       const response = await app.inject({ method: 'GET', url: '/health' });

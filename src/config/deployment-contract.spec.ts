@@ -173,12 +173,11 @@ describe('required configuration that nothing reads', () => {
    * notices a key `loadConfig` demands and no consumer touches.
    */
   const REQUIRED_BUT_UNUSED: Readonly<Record<string, string>> = {
-    // OBJECT_STORE_ENDPOINT and OBJECT_STORE_BUCKET were here until the S3
-    // adapter landed. This test is what removed them: it fails when a listed
-    // setting gains a real consumer, so the list cannot quietly become a record
-    // of things that used to be true.
-    MALWARE_SCANNER_URL: 'no ClamAV or ICAP client exists. Uploads are checked by '
-      + 'LocalSignatureScanner, which is a stub. See docs/decisions/0009-malware-scanning.md.',
+    // OBJECT_STORE_ENDPOINT and OBJECT_STORE_BUCKET left this list when the S3
+    // adapter landed; MALWARE_SCANNER_URL left it when the ClamAV client did.
+    // This test is what removed all three: it fails when a listed setting gains
+    // a real consumer, so the list cannot quietly become a record of things
+    // that used to be true.
     DOCS_ENABLED: 'validated but inert: boot is refused if it is true in production, and no '
       + 'route serves documentation whether it is true or false. There is no OpenAPI document '
       + 'in this repository -- the contract is the recorded response samples. An operator who '

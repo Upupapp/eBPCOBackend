@@ -137,9 +137,14 @@ describe('choosing an object store', () => {
   it('accepts production once the S3 driver is configured', () => {
     // The other half: proving the refusal above is about the driver and not
     // about production being unbootable for some unrelated reason.
+    //
+    // `MALWARE_SCANNER_DRIVER` is here because production also refuses the
+    // scanner stub. A production configuration is deliberately hard to
+    // assemble, and this test asserting it can still be assembled AT ALL is
+    // what keeps that from becoming "production cannot boot".
     expect(loadConfig({
       ...base, EBPCO_ENVIRONMENT: 'production', OBJECT_STORE_DRIVER: 's3',
-      OBJECT_STORE_REGION: 'ap-south-1',
+      OBJECT_STORE_REGION: 'ap-south-1', MALWARE_SCANNER_DRIVER: 'clamav',
     }).OBJECT_STORE_DRIVER).toBe('s3');
   });
 
@@ -149,5 +154,39 @@ describe('choosing an object store', () => {
     expect(() => loadConfig({
       ...base, EBPCO_ENVIRONMENT: 'staging', OBJECT_STORE_DRIVER: 's3',
     })).toThrow(/OBJECT_STORE_REGION/);
+  });
+});
+
+describe('choosing a malware scanner', () => {
+  const base = {
+    DATABASE_URL: 'postgres://ebpco@db.internal:5432/ebpco',
+    OBJECT_STORE_ENDPOINT: 'https://ap-south-1.linodeobjects.com',
+    OBJECT_STORE_BUCKET: 'ebpco-documents',
+    OBJECT_STORE_DRIVER: 's3',
+    OBJECT_STORE_REGION: 'ap-south-1',
+    MALWARE_SCANNER_URL: 'http://scanner.internal:3310',
+    JWT_SIGNING_KEY: 'a-signing-key-of-at-least-thirty-two-ch',
+    PASSWORD_PEPPER: 'a-pepper-of-at-least-thirty-two-charact',
+    TOTP_ENCRYPTION_KEY: 'a-totp-key-of-at-least-thirty-two-chars',
+  };
+
+  it('defaults to the local stub', () => {
+    expect(loadConfig({ ...base, EBPCO_ENVIRONMENT: 'development' }).MALWARE_SCANNER_DRIVER)
+      .toBe('local');
+  });
+
+  it('REFUSES to boot in production on the stub', () => {
+    // An unauthenticated public uploads these files and LGU officers open them
+    // on government workstations. A scanner with no signature database reports
+    // everything it does not recognise as clean.
+    expect(() => loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'production', MALWARE_SCANNER_DRIVER: 'local',
+    })).toThrow(/MALWARE_SCANNER_DRIVER/);
+  });
+
+  it('accepts production with clamav', () => {
+    expect(loadConfig({
+      ...base, EBPCO_ENVIRONMENT: 'production', MALWARE_SCANNER_DRIVER: 'clamav',
+    }).MALWARE_SCANNER_DRIVER).toBe('clamav');
   });
 });

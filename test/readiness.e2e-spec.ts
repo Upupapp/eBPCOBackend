@@ -1,6 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { join } from 'node:path';
+import { AddressInfo, createServer } from 'node:net';
 
 import { createApp } from '../src/bootstrap';
 import { PgliteClient } from '../src/persistence/pglite-client';
@@ -40,11 +41,15 @@ interface Report {
   checks: { name: string; status: string; detail: string | null }[];
 }
 
-async function build(): Promise<void> {
+async function build(overrides: NodeJS.ProcessEnv = {}): Promise<void> {
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(join(__dirname, '../db/migrations')));
-  app = await createApp(loadConfig(ENV), new StructuredLogger('error', () => undefined), db);
+  app = await createApp(
+    loadConfig({ ...ENV, ...overrides }), new StructuredLogger('error', () => undefined), db,
+  );
   await app.init();
+  // `onApplicationBootstrap` is where the public-bucket probe runs, and
+  // `app.init()` alone does not fire it.
   await app.getHttpAdapter().getInstance().ready();
 }
 
@@ -212,3 +217,49 @@ function response(result: { json: <T>() => T }, name: string): { status: string;
   if (found === undefined) throw new Error(`no ${name} check in the readiness report`);
   return found;
 }
+
+describe('the document dependencies are really probed', () => {
+  /**
+   * Both of these checks reported `up` unconditionally until 2026-08-30 --
+   * placeholders that called nothing. `/ready` said the store and the scanner
+   * were healthy whatever was true of them, which is worse than having no
+   * check: it is a claim a load balancer acts on.
+   *
+   * Written as end-to-end tests because unit tests of the pieces did not catch
+   * it. `isReachable` and `isPubliclyReadable` were both correct and both
+   * called by nobody; only asking `/ready` what it says can tell the two apart.
+   */
+  it('reports the scanner DOWN when clamd is not listening, and stays ready', async () => {
+    // Port 1 on loopback: refused immediately.
+    await build({ MALWARE_SCANNER_DRIVER: 'clamav', MALWARE_SCANNER_URL: 'http://127.0.0.1:1' });
+
+    const report = (await ready()).json<Report>();
+    const scanner = report.checks.find((check) => check.name === 'malwareScanner');
+
+    expect(scanner?.status).toBe('down');
+    expect(scanner?.detail).toMatch(/held/);
+    // Non-critical on purpose: taking the instance out of rotation because the
+    // scanner is down turns a partial outage into a total one. Uploads are
+    // accepted and held; everything else still works.
+    expect(report.status).not.toBe('unavailable');
+  });
+
+  it('reports the scanner up when clamd answers', async () => {
+    const clamd = createServer((socket) => {
+      socket.on('data', () => { socket.write('PONG\0'); socket.end(); });
+    });
+    await new Promise<void>((resolve) => clamd.listen(0, '127.0.0.1', resolve));
+    const port = (clamd.address() as AddressInfo).port;
+
+    try {
+      await build({
+        MALWARE_SCANNER_DRIVER: 'clamav', MALWARE_SCANNER_URL: `http://127.0.0.1:${port}`,
+      });
+
+      expect((await ready()).json<Report>().checks
+        .find((check) => check.name === 'malwareScanner')?.status).toBe('up');
+    } finally {
+      await new Promise<void>((resolve) => { clamd.close(() => { resolve(); }); });
+    }
+  });
+});

@@ -127,6 +127,14 @@ const schema = z
       .transform((value) => value ?? 'filesystem'),
 
     /**
+     * Which malware scanner to build. Named, not inferred, for the same reason
+     * the object store's driver is: a mistyped variable must not silently
+     * select the stub, because the stub says every file is clean.
+     */
+    MALWARE_SCANNER_DRIVER: z.enum(['local', 'clamav']).optional()
+      .transform((value) => value ?? 'local'),
+
+    /**
      * The region an S3-compatible endpoint expects.
      *
      * No default. Linode Object Storage, MinIO and AWS all want different
@@ -252,6 +260,21 @@ const schema = z
     // chosen it for. It is not acceptable for citizens' identity documents and
     // land titles, so production refuses to boot rather than accepting them
     // somewhere they will not survive.
+    // `LocalSignatureScanner` has no signature database and no heuristics: it
+    // detects EICAR and a few executable magic numbers, and would not recognise
+    // a weaponised PDF. An unauthenticated public uploads these files and LGU
+    // officers open them on government workstations, so production refuses to
+    // boot on the stub rather than acting as a delivery channel into the LGU
+    // network with a green tick on every file.
+    if (config.EBPCO_ENVIRONMENT === 'production' && config.MALWARE_SCANNER_DRIVER !== 'clamav') {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MALWARE_SCANNER_DRIVER'],
+        message: 'must be "clamav" in production — the local scanner has no signature database '
+          + 'and reports every file it does not recognise as clean',
+      });
+    }
+
     if (config.EBPCO_ENVIRONMENT === 'production' && config.OBJECT_STORE_DRIVER !== 's3') {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

@@ -1,4 +1,4 @@
-import { Global, Module } from '@nestjs/common';
+import { Global, Inject, Module, OnApplicationBootstrap } from '@nestjs/common';
 
 import { AppConfig, CONFIG } from '../../config/app-config';
 import { StructuredLogger } from '../../common/logging/logger';
@@ -14,6 +14,7 @@ import { DocumentsController } from './transport/documents.controller';
 import { AuditService } from '../compliance/application/audit.service';
 import { documentSecurityEvent } from '../compliance/domain/security-events';
 import { S3ObjectStore, s3ClientFor } from './infrastructure/s3-object-store';
+import { ClamAvScanner, clamAvAddress } from './infrastructure/clamav-scanner';
 
 export const OBJECT_STORE = Symbol('EBPCO_OBJECT_STORE');
 export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
@@ -30,9 +31,8 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
 
     {
       provide: MALWARE_SCANNER,
-      // Replaced by ClamAV or an ICAP service in any real deployment. See
-      // docs/decisions/0009-malware-scanning.md.
-      useFactory: (): MalwareScanner => new LocalSignatureScanner(),
+      inject: [CONFIG],
+      useFactory: malwareScannerFor,
     },
     {
       provide: DocumentService,
@@ -70,26 +70,86 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
   controllers: [DocumentsController],
   exports: [DocumentService, OBJECT_STORE, MALWARE_SCANNER],
 })
-export class DocumentsModule {
-  constructor(readiness: ReadinessService, logger: StructuredLogger) {
-    readiness.register({
+export class DocumentsModule implements OnApplicationBootstrap {
+  /**
+   * Whether the bucket answered a stranger, probed ONCE at startup.
+   *
+   * Once, not per probe: the readiness endpoint is polled continuously, and an
+   * outbound anonymous request per poll would be a request per second against
+   * the bucket forever. The port's own words are "checked on every deploy",
+   * and a process start is a deploy.
+   *
+   * `null` until the probe has run. Reported as `up` in that window rather than
+   * down -- refusing traffic during the first seconds of every start would turn
+   * a check into an outage.
+   */
+  private bucketIsPublic: boolean | null = null;
+
+  constructor(
+    private readonly readiness: ReadinessService,
+    private readonly logger: StructuredLogger,
+    @Inject(OBJECT_STORE) private readonly store: ObjectStore,
+    @Inject(MALWARE_SCANNER) private readonly scanner: MalwareScanner,
+  ) {
+    this.readiness.register({
       name: 'objectStore',
       // Critical: without it no document can be uploaded or read, and every
       // permit application needs documents.
       critical: true,
-      check: () => Promise.resolve({ state: 'up' }),
+      check: () => Promise.resolve(
+        this.bucketIsPublic === true
+          ? {
+            state: 'down' as const,
+            detail: 'the document bucket answered an anonymous request. Applicants\' identity '
+              + 'documents are readable by anyone who can guess a key; this instance will not '
+              + 'serve until the bucket is made private.',
+          }
+          : { state: 'up' as const },
+      ),
     });
 
-    readiness.register({
+    this.readiness.register({
       name: 'malwareScanner',
       // NOT critical, deliberately. Taking the instance out of rotation because
       // the scanner is down turns a partial outage into a total one: uploads
       // are held unscanned and unreadable, and everything else still works.
       critical: false,
-      check: () => Promise.resolve({ state: 'up' }),
+      check: async () => (await this.scanner.isReachable()
+        ? { state: 'up' as const }
+        : {
+          // `down`, and non-critical, which the readiness service treats as
+          // "reported but still serving" -- exactly the shape of this outage:
+          // uploads are accepted and held, and nothing else is affected.
+          state: 'down' as const,
+          detail: `${this.scanner.name} is unreachable; uploads are being accepted and held `
+            + 'unscanned rather than served or refused',
+        }),
     });
+  }
 
-    logger.info('document service ready', { scanner: 'local-signature-scanner' });
+  /**
+   * The public-bucket probe, at startup.
+   *
+   * Both readiness checks reported `state: 'up'` unconditionally until
+   * 2026-08-30 -- they were placeholders that never called anything, so
+   * `/ready` said the scanner and the store were healthy whatever was true of
+   * them. `isPubliclyReadable` had no caller anywhere, despite the port saying
+   * it is "checked on every deploy".
+   */
+  async onApplicationBootstrap(): Promise<void> {
+    this.bucketIsPublic = await this.store.isPubliclyReadable();
+    if (this.bucketIsPublic) {
+      this.logger.error('the document bucket is readable without credentials', {
+        consequence: 'applicants\' identity documents and land titles are exposed to anyone '
+          + 'who can guess an object key; this instance is reporting itself NOT READY',
+      });
+    }
+
+    this.logger.info('document service ready', {
+      objectStore: this.store.constructor.name,
+      scanner: this.scanner.name,
+      scannerReachable: await this.scanner.isReachable(),
+    });
   }
 }
 
@@ -127,4 +187,23 @@ export function objectStoreFor(config: AppConfig): ObjectStore {
   // Production refuses to boot on this branch -- see app-config -- so reaching
   // it means development, or a staging environment somebody chose it for.
   return new FilesystemObjectStore(config.OBJECT_STORE_LOCAL_PATH, config.JWT_SIGNING_KEY);
+}
+
+/**
+ * Which scanner the service runs on.
+ *
+ * Exported and named for the reason the object store's factory is: an inline
+ * factory is unreachable from a test, and a break-check that pointed this at
+ * the stub while the driver said `clamav` would pass the whole suite. A stub
+ * that reports every file clean is not a thing to select by accident.
+ */
+export function malwareScannerFor(config: AppConfig): MalwareScanner {
+  if (config.MALWARE_SCANNER_DRIVER === 'clamav') {
+    const { host, port } = clamAvAddress(config.MALWARE_SCANNER_URL);
+    return new ClamAvScanner(host, port);
+  }
+
+  // Production refuses to boot on this branch -- see app-config -- so reaching
+  // it means development, or a staging environment somebody chose it for.
+  return new LocalSignatureScanner();
 }
