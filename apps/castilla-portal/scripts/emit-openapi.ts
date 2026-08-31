@@ -9,7 +9,7 @@ import {
   announcementSummarySchema, formListSchema, formRevisionsSchema, officialListSchema,
   officialSchema,
   permitCatalogueSchema, permitDetailSchema, permitSummarySchema, profileFieldSchema,
-  storedFormSchema,
+  searchResponseSchema, searchResultSchema, storedFormSchema,
 } from '../src/http/contract';
 
 /**
@@ -104,6 +104,29 @@ const document = {
         responses: {
           200: { description: 'The permit', content: { 'application/json': { schema: { $ref: '#/components/schemas/PermitDetail' } } } },
           404: { description: 'No permit is published with that slug', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/search': {
+      get: {
+        summary: 'Search offices and permits',
+        description:
+          'PostgreSQL full-text search, not a substring match. An office is found by its own '
+          + 'fields AND by the names of the permits it issues — which is why \'zoning\' returns '
+          + 'the Planning Office, an office that contains the word in none of its own fields. '
+          + 'Content the read API withholds is never indexed: search is not a side channel '
+          + 'around the publication gate. `q` accepts the syntax a search box implies — quoted '
+          + 'phrases, `or`, a leading minus.',
+        parameters: [
+          { name: 'q', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'type', in: 'query', required: false, schema: { type: 'string', enum: ['office', 'permit'] } },
+          { name: 'facet', in: 'query', required: false, schema: { type: 'string' },
+            description: 'An office category or a permit office-group. Composes with `q`.' },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', maximum: 50, default: 20 } },
+        ],
+        responses: {
+          200: { description: 'Matches, most relevant first', content: { 'application/json': { schema: { $ref: '#/components/schemas/SearchResponse' } } } },
+          400: { description: 'No query, or an unknown type', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
         },
       },
     },
@@ -217,6 +240,8 @@ const document = {
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      SearchResult: zodToJsonSchema(searchResultSchema, { target: 'openApi3' }),
+      SearchResponse: zodToJsonSchema(searchResponseSchema, { target: 'openApi3' }),
       AnnouncementSummary: zodToJsonSchema(announcementSummarySchema, { target: 'openApi3' }),
       AnnouncementDetail: zodToJsonSchema(announcementDetailSchema, { target: 'openApi3' }),
       AnnouncementList: zodToJsonSchema(announcementListSchema, { target: 'openApi3' }),

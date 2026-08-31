@@ -168,3 +168,18 @@ export const announcementListSchema = z.object({
 export const announcementCountSchema = z.object({
   count: z.number().int().min(0),
 }).strict();
+
+export const searchResultSchema = z.object({
+  entityType: z.enum(['office', 'permit']),
+  slug: z.string().min(1),
+  title: z.string().min(1),
+  // Enough context to render a result row without a follow-up call.
+  summary: z.string().min(1),
+  facet: z.string().min(1).optional(),
+  score: z.number(),
+}).strict();
+
+export const searchResponseSchema = z.object({
+  results: z.array(searchResultSchema),
+  total: z.number().int().min(0),
+}).strict();

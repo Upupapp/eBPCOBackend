@@ -142,6 +142,75 @@
         }
       }
     },
+    "/search": {
+      "get": {
+        "summary": "Search offices and permits",
+        "description": "PostgreSQL full-text search, not a substring match. An office is found by its own fields AND by the names of the permits it issues — which is why 'zoning' returns the Planning Office, an office that contains the word in none of its own fields. Content the read API withholds is never indexed: search is not a side channel around the publication gate. `q` accepts the syntax a search box implies — quoted phrases, `or`, a leading minus.",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "type",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "office",
+                "permit"
+              ]
+            }
+          },
+          {
+            "name": "facet",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "An office category or a permit office-group. Composes with `q`."
+          },
+          {
+            "name": "limit",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matches, most relevant first",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SearchResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "No query, or an unknown type",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/announcements": {
       "get": {
         "summary": "Published announcements",
@@ -589,6 +658,101 @@
           "position",
           "office",
           "initials"
+        ],
+        "additionalProperties": false
+      },
+      "SearchResult": {
+        "type": "object",
+        "properties": {
+          "entityType": {
+            "type": "string",
+            "enum": [
+              "office",
+              "permit"
+            ]
+          },
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "summary": {
+            "type": "string",
+            "minLength": 1
+          },
+          "facet": {
+            "type": "string",
+            "minLength": 1
+          },
+          "score": {
+            "type": "number"
+          }
+        },
+        "required": [
+          "entityType",
+          "slug",
+          "title",
+          "summary",
+          "score"
+        ],
+        "additionalProperties": false
+      },
+      "SearchResponse": {
+        "type": "object",
+        "properties": {
+          "results": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "entityType": {
+                  "type": "string",
+                  "enum": [
+                    "office",
+                    "permit"
+                  ]
+                },
+                "slug": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "summary": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "facet": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "score": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "entityType",
+                "slug",
+                "title",
+                "summary",
+                "score"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "results",
+          "total"
         ],
         "additionalProperties": false
       },

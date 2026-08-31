@@ -15,7 +15,8 @@
     "contract:check": "ts-node --transpile-only scripts/emit-openapi.ts --check",
     "vocabulary:sync": "ts-node --transpile-only scripts/sync-permit-vocabulary.ts",
     "vocabulary:check": "ts-node --transpile-only scripts/sync-permit-vocabulary.ts --check",
-    "forms:import": "ts-node --transpile-only scripts/import-forms.ts"
+    "forms:import": "ts-node --transpile-only scripts/import-forms.ts",
+    "search:reindex": "ts-node --transpile-only scripts/reindex-search.ts"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",
