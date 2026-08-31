@@ -12,7 +12,22 @@ export interface AccountRepository {
   findById(id: string): Promise<Account | null>;
   /** Lookup is by normalised email; see `normaliseEmail`. */
   findByEmail(email: string): Promise<Account | null>;
-  save(account: Account): Promise<void>;
+  /**
+   * Persists an account and, for an applicant, their profile — TOGETHER.
+   *
+   * `profile` is a parameter rather than a field on `Account` for the reason
+   * `profileOf` is separate: these fields exist only for applicants, and an
+   * `Account` carrying them for every officer invites a caller to read them
+   * without checking `kind`.
+   *
+   * It must be written in the SAME transaction as the account. Until
+   * 2026-08-31 it was not written at all: registration validated a first name,
+   * a last name and a mobile number, then discarded all three, and the account
+   * it created could never file anything — every write path refused it with
+   * "This account has no applicant profile". An account that exists and cannot
+   * act is worse than a registration that failed, because it looks like success.
+   */
+  save(account: Account, profile?: ApplicantProfile): Promise<void>;
   updatePasswordHash(id: string, passwordHash: string): Promise<void>;
   /** Stamped after a sign-in has passed every check, including MFA. */
   recordSignIn(id: string, at: Date): Promise<void>;

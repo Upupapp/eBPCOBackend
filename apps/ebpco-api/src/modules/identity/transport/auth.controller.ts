@@ -144,7 +144,15 @@ export class AuthController {
   @HttpCode(HttpStatus.ACCEPTED)
   async register(@Body() body: unknown): Promise<void> {
     const input = parse(registration, body);
-    const result = await this.identity.register(input);
+    // `mobileNumber` is validated above and was, until 2026-08-31, discarded
+    // here — the service did not even accept it.
+    const result = await this.identity.register({
+      email: input.email,
+      password: input.password,
+      firstName: input.firstName,
+      lastName: input.lastName,
+      mobileNumber: input.mobileNumber,
+    });
 
     // A weak password IS reported: that is the caller's own input, not a fact
     // about who else has an account.

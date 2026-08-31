@@ -109,6 +109,40 @@ describe('accounts', () => {
       expect(found?.passwordHash).toBe(account.passwordHash);
     });
 
+    /**
+     * The defect this pins: registration validated a first name, a last name
+     * and a mobile number, then discarded all three. The account it created
+     * could never file — every applicant write path refused it with "This
+     * account has no applicant profile" — and no route existed to add one.
+     *
+     * In the contract suite rather than beside one implementation, because the
+     * in-memory repository would have kept passing while PostgreSQL stayed
+     * broken. That asymmetry is exactly what this suite exists to catch.
+     */
+    it('saves an applicant profile alongside the account', async () => {
+      const account = anAccount({ kind: 'applicant' });
+
+      await harness.accounts.save(account, {
+        firstName: 'Maria', lastName: 'Santos', mobileNumber: '09171234567',
+      });
+
+      const profile = await harness.accounts.profileOf(account.id);
+      expect(profile).toEqual({
+        firstName: 'Maria', lastName: 'Santos', mobileNumber: '09171234567',
+      });
+    });
+
+    it('leaves a staff account without a profile', async () => {
+      // The other half. `profileOf` returning null for an officer is the
+      // designed answer, not an omission, and a save that invented a profile
+      // for every account would make the null impossible to reach.
+      const account = anAccount({ kind: 'staff' });
+
+      await harness.accounts.save(account);
+
+      expect(await harness.accounts.profileOf(account.id)).toBeNull();
+    });
+
     it('returns null for an id that does not exist', async () => {
       expect(await harness.accounts.findById(randomUUID())).toBeNull();
     });

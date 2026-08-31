@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 import { AccountRepository, ApplicantProfile, normaliseEmail } from '../application/account.repository';
 import { Account, StaffRole } from '../domain/account';
 import { SqlClient } from '../../../persistence/sql-client';
@@ -46,26 +48,46 @@ export class PostgresAccountRepository implements AccountRepository {
     return this.toAccount(result.rows[0]);
   }
 
-  async save(account: Account): Promise<void> {
+  async save(account: Account, profile?: ApplicantProfile): Promise<void> {
     await this.db.transaction(async (tx) => {
       await tx.query(
         `insert into accounts (id, kind, email, email_normalised, password_hash,
+                               mobile_number,
                                email_verified_at, mobile_verified_at, disabled_at, created_at)
-         values ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+         values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
          on conflict (id) do update set
            email             = excluded.email,
            email_normalised  = excluded.email_normalised,
            password_hash     = excluded.password_hash,
+           -- Only when one is supplied. An update that omits the profile must
+           -- not blank a mobile number the account already verified.
+           mobile_number     = coalesce(excluded.mobile_number, accounts.mobile_number),
            email_verified_at = excluded.email_verified_at,
            mobile_verified_at= excluded.mobile_verified_at,
            disabled_at       = excluded.disabled_at,
            updated_at        = now()`,
         [
           account.id, account.kind, account.email, normaliseEmail(account.email),
-          account.passwordHash, account.emailVerifiedAt, account.mobileVerifiedAt,
+          account.passwordHash, profile?.mobileNumber ?? null,
+          account.emailVerifiedAt, account.mobileVerifiedAt,
           account.disabledAt, account.createdAt,
         ],
       );
+
+      // The applicant row, in the SAME transaction. An account without one
+      // exists and cannot act: every applicant write path refuses it with
+      // "This account has no applicant profile", and there is no route that
+      // creates one afterwards.
+      if (profile !== undefined) {
+        await tx.query(
+          `insert into applicants (id, account_id, first_name, last_name)
+           values ($1, $2, $3, $4)
+           on conflict (account_id) do update set
+             first_name = excluded.first_name,
+             last_name  = excluded.last_name`,
+          [randomUUID(), account.id, profile.firstName, profile.lastName],
+        );
+      }
 
       // Roles are replaced wholesale rather than diffed: the caller supplies the
       // complete set, and a diff would silently keep a role the caller dropped.

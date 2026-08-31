@@ -163,11 +163,22 @@ export class IdentityService {
    * Returns nothing whether or not the address was already in use. The
    * verification email is what differs, and only its recipient sees that.
    */
+  /**
+   * Registering an applicant.
+   *
+   * The name and mobile number are not decoration on the password check. Until
+   * 2026-08-31 they were exactly that: validated, fed to the password policy so
+   * a passphrase could not contain the person's own name, and then dropped. The
+   * account that resulted could never file anything — every applicant write
+   * path refuses an account with no profile, and no route existed to add one —
+   * so registration was not a usable way into this service.
+   */
   async register(input: {
     email: string;
     password: string;
     firstName: string;
     lastName: string;
+    mobileNumber?: string | null;
   }): Promise<{ accepted: boolean; rejections: readonly PasswordRejection[] }> {
     // The password is checked before the address is looked up, because a weak
     // password must be reported to the person choosing it -- that is not an
@@ -193,6 +204,13 @@ export class IdentityService {
         totpSecret: null,
         disabledAt: null,
         createdAt: now,
+      }, {
+        // In the same call, and therefore the same transaction. An account
+        // without a profile is an account that exists and cannot act, which is
+        // worse than a registration that failed because it looks like success.
+        firstName: input.firstName,
+        lastName: input.lastName,
+        mobileNumber: input.mobileNumber ?? null,
       });
     }
 

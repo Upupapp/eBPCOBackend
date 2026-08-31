@@ -15,9 +15,13 @@ export class InMemoryAccountRepository implements AccountRepository {
     return Promise.resolve(id === undefined ? null : (this.byId.get(id) ?? null));
   }
 
-  save(account: Account): Promise<void> {
+  save(account: Account, profile?: ApplicantProfile): Promise<void> {
     this.byId.set(account.id, account);
     this.idByEmail.set(normaliseEmail(account.email), account.id);
+    // Written here for the same reason the Postgres one writes it in its
+    // transaction: an account saved without its profile is an account that
+    // cannot act, and the shared contract suite holds both to that.
+    if (profile !== undefined) this.profiles.set(account.id, profile);
     return Promise.resolve();
   }
 
