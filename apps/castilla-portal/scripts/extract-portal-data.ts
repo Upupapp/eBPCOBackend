@@ -181,6 +181,24 @@ function entitiesIn(source: ts.SourceFile): ExtractedEntity[] {
         });
         return;
       }
+
+      // Any other module-level constant — most importantly one initialised by a
+      // helper call, such as
+      // `const BUILDING_AND_OCCUPANCY_CHECKLIST = formFile('...')`.
+      //
+      // It is not exported, and it was being dropped: four permits reference it
+      // for their checklist link, so all four resolved to null and the download
+      // link would simply not have existed. Captured as an expression, resolved
+      // where meaning is decided, like every other helper here.
+      if (ts.isVariableStatement(node.parent.parent)) {
+        found.push({
+          source: constName, ordinal: 0,
+          fields: { value: valueOf(init, source) },
+          comment: statementCommentFor(node, source),
+          fieldComments: {},
+        });
+        return;
+      }
     }
     ts.forEachChild(node, visit);
   };

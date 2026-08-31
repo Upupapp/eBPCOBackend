@@ -75,3 +75,41 @@ export const officialListSchema = z.object({
 
 export type MunicipalityProfileResponse = z.infer<typeof municipalityProfileSchema>;
 export type OfficialListResponse = z.infer<typeof officialListSchema>;
+
+/**
+ * A permit's confirmation state travels WITH the record rather than gating it.
+ * All 19 are 'pending' today, and withholding them would publish an empty
+ * catalogue — a worse lie than an honest 'not yet verified'.
+ */
+export const permitSummarySchema = z.object({
+  slug: z.string().min(1),
+  name: z.string().min(1),
+  description: z.string().min(1),
+  confirmationState: z.enum(['pending', 'confirmed']),
+}).strict();
+
+export const permitCatalogueSchema = z.object({
+  groups: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+    permits: z.array(permitSummarySchema),
+  }).strict()),
+}).strict();
+
+export const permitDetailSchema = permitSummarySchema.extend({
+  group: z.object({ id: z.string().min(1), label: z.string().min(1) }).strict(),
+  // `slug` is absent for the two BFP permits: the Bureau of Fire Protection is
+  // a national agency with no municipal office page to link to.
+  issuingOffice: z.object({
+    name: z.string().min(1),
+    slug: z.string().min(1).optional(),
+  }).strict(),
+  requirements: z.array(z.string().min(1)),
+  validity: z.string().min(1),
+  processNote: z.string().min(1).optional(),
+  formUrl: z.string().startsWith('/assets/permits/').optional(),
+  checklistUrl: z.string().startsWith('/assets/permits/').optional(),
+}).strict();
+
+export type PermitCatalogueResponse = z.infer<typeof permitCatalogueSchema>;
+export type PermitDetailResponse = z.infer<typeof permitDetailSchema>;

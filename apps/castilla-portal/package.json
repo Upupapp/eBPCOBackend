@@ -8,11 +8,13 @@
     "lint": "eslint src scripts test --max-warnings 0",
     "extract:portal": "ts-node --transpile-only scripts/extract-portal-data.ts",
     "test": "node --experimental-vm-modules node_modules/.bin/jest --config jest.config.js",
-    "verify": "npm run typecheck && npm run lint && npm run contract:check && npm run test",
+    "verify": "npm run typecheck && npm run lint && npm run contract:check && npm run vocabulary:check && npm run test",
     "start": "node dist/src/main.js",
     "build": "tsc -p tsconfig.json",
     "contract:emit": "ts-node --transpile-only scripts/emit-openapi.ts",
-    "contract:check": "ts-node --transpile-only scripts/emit-openapi.ts --check"
+    "contract:check": "ts-node --transpile-only scripts/emit-openapi.ts --check",
+    "vocabulary:sync": "ts-node --transpile-only scripts/sync-permit-vocabulary.ts",
+    "vocabulary:check": "ts-node --transpile-only scripts/sync-permit-vocabulary.ts --check"
   },
   "devDependencies": {
     "@electric-sql/pglite": "^0.5.8",

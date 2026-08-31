@@ -1,0 +1,55 @@
+{
+  "_comment": "Pinned by scripts/sync-permit-vocabulary.ts. Do not hand-edit. If the two lists disagree with each other or with src/permits/vocabulary.ts, that disagreement is the finding.",
+  "admin": {
+    "repo": "ebpco-admin",
+    "file": "src/app/core/domain/permit.model.ts",
+    "commit": "8cabc0cd48c3df59d37c9adf3bf11a8338564f2d",
+    "names": [
+      "Building Permit – New Construction",
+      "Building Permit – Renovation / Alteration",
+      "Building Permit – Addition / Extension",
+      "Demolition Permit",
+      "Zoning / Locational Clearance",
+      "Architectural Permit",
+      "Civil / Structural Permit",
+      "Electrical Permit",
+      "Mechanical Permit",
+      "Sanitary Permit",
+      "Plumbing Permit",
+      "Electronics Permit",
+      "Interior Design Permit",
+      "Fencing Permit",
+      "Sign Permit",
+      "Excavation Permit",
+      "FSEC for Building Permit (BFP)",
+      "Certificate of Occupancy",
+      "FSIC for Occupancy Permit (BFP)"
+    ]
+  },
+  "portal": {
+    "repo": "Upupapp/eBPCO-Website",
+    "file": "castilla-lgu-portal/src/app/core/data/permits.data.ts",
+    "commit": "f20597ff3fe75076a2433b9434668a5105e036a2",
+    "names": [
+      "Building Permit – New Construction",
+      "Building Permit – Renovation / Alteration",
+      "Building Permit – Addition / Extension",
+      "Demolition Permit",
+      "Zoning / Locational Clearance",
+      "Architectural Permit",
+      "Civil / Structural Permit",
+      "Electrical Permit",
+      "Mechanical Permit",
+      "Sanitary Permit",
+      "Plumbing Permit",
+      "Electronics Permit",
+      "Interior Design Permit",
+      "Fencing Permit",
+      "Sign Permit",
+      "Excavation Permit",
+      "FSEC for Building Permit (BFP)",
+      "Certificate of Occupancy",
+      "FSIC for Occupancy Permit (BFP)"
+    ]
+  }
+}

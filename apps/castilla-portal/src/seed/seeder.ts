@@ -62,6 +62,28 @@ function labelOf(entity: ExtractedEntity): string {
   return '?';
 }
 
+/**
+ * The bundled asset a `formFile('X')` call or a checklist constant points at.
+ *
+ * Returns null for anything it cannot read, so an unrecognised expression
+ * leaves the column NULL and the API omits the link — never a half-built path
+ * that 404s on a citizen looking for a government form.
+ */
+function assetPath(data: ExtractedPortalData, value: unknown): string | null {
+  if (typeof value === 'string') return value.startsWith('/assets/permits/') ? value : null;
+
+  const expression = expressionOf(value);
+  if (expression === null) return null;
+
+  const direct = /^formFile\(\s*'([^']+)'\s*\)$/.exec(expression);
+  if (direct !== null) return `/assets/permits/${direct[1]!}`;
+
+  // A named constant such as BUILDING_AND_OCCUPANCY_CHECKLIST, which is itself
+  // a formFile(...) call. Resolved one hop, then re-read.
+  const named = resolveConstValue(data, expression);
+  return named === null ? null : assetPath(data, named);
+}
+
 export class Seeder {
   private writes = 0;
 
@@ -268,6 +290,34 @@ export class Seeder {
       await this.replaceOrdered(
         'permit_requirements', 'permit_id', id, 'requirement',
         (p.fields['requirements'] as unknown[] | undefined) ?? [],
+      );
+
+      // `formFile('X')` and the BUILDING_AND_OCCUPANCY_CHECKLIST const, both
+      // resolved HERE rather than in the extractor, for the same reason every
+      // other helper is: what a call means is a seeding decision, and burying
+      // it in an AST walk hides it. A permit with no form keeps NULL — 5 of the
+      // 19 publish none, and that is a fact about the LGU.
+      // A NULL here must mean "the LGU publishes none", never "the seeder could
+      // not read the expression". The two are indistinguishable in the column,
+      // so the difference is caught before it gets there.
+      const formUrl = assetPath(data, p.fields['formUrl']);
+      const checklistUrl = assetPath(data, p.fields['checklistUrl']);
+      for (const [field, raw, resolved] of [
+        ['formUrl', p.fields['formUrl'], formUrl],
+        ['checklistUrl', p.fields['checklistUrl'], checklistUrl],
+      ] as const) {
+        if (raw !== undefined && raw !== null && resolved === null) {
+          unplaced.push(
+            `${slug}: ${field} is ${JSON.stringify(raw)}, which this seeder could not resolve `
+            + 'to a bundled asset; the link would silently not exist');
+        }
+      }
+
+      await this.upsert(
+        `update permits set form_url = $2, checklist_url = $3
+          where id = $1 and (form_url is distinct from $2
+                          or checklist_url is distinct from $3)`,
+        [id, formUrl, checklistUrl],
       );
       // All 19 are unconfirmed: the requirements reflect general Philippine LGU
       // practice and have not been checked against Castilla's own charter.
@@ -526,13 +576,23 @@ function slugify(name: string): string {
 }
 
 /** `OBO_OFFICE_SLUG` and friends are module constants the extractor recorded. */
-function resolveConst(data: ExtractedPortalData, expression: string): string | null {
+/**
+ * The value a named module constant holds.
+ *
+ * Returns it UNRESOLVED — a string for a plain constant, an `__expression` for
+ * one initialised by a helper call. The caller decides how far to follow it,
+ * because a constant pointing at another helper is exactly the case that was
+ * silently dropping four permits' checklist links.
+ */
+function resolveConstValue(data: ExtractedPortalData, expression: string): unknown {
   for (const entities of Object.values(data.files)) {
     const match = entities.find((e) => e.source === expression);
-    if (match !== undefined) {
-      const value = match.fields['value'];
-      if (typeof value === 'string') return value;
-    }
+    if (match !== undefined) return match.fields['value'];
   }
   return null;
+}
+
+function resolveConst(data: ExtractedPortalData, expression: string): string | null {
+  const value = resolveConstValue(data, expression);
+  return typeof value === 'string' ? value : null;
 }

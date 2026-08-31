@@ -5,7 +5,8 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
   municipalityProfileSchema, officeDetailSchema, officeListSchema, officeSummarySchema,
-  officialListSchema, officialSchema, profileFieldSchema,
+  officialListSchema, officialSchema, permitCatalogueSchema, permitDetailSchema,
+  permitSummarySchema, profileFieldSchema,
 } from '../src/http/contract';
 
 /**
@@ -72,6 +73,37 @@ const document = {
         },
       },
     },
+    '/permits': {
+      get: {
+        summary: 'The permit catalogue',
+        description:
+          'All 19 permits, grouped by issuing-office group. Each carries its own '
+          + '`confirmationState`: unlike offices and officials, an unconfirmed permit is SERVED '
+          + 'with its state attached rather than withheld — all 19 are currently `pending`, and '
+          + 'withholding them would publish an empty catalogue and tell a citizen the '
+          + 'municipality issues no permits. Grouping reorders relative to the flat catalogue '
+          + '(Zoning sits between engineering permits), but order WITHIN each group is canonical.',
+        responses: {
+          200: { description: 'The catalogue', content: { 'application/json': { schema: { $ref: '#/components/schemas/PermitCatalogue' } } } },
+        },
+      },
+    },
+    '/permits/{slug}': {
+      get: {
+        summary: 'One permit in full',
+        description:
+          'Requirements in published order, validity, an optional process note, and the '
+          + 'application form and checklist where the LGU bundles them — 5 of the 19 publish no '
+          + 'form, and those omit the key rather than sending a broken link. `issuingOffice.slug` '
+          + 'is absent for the two BFP permits: the Bureau of Fire Protection is a national '
+          + 'agency with no municipal office page.',
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'The permit', content: { 'application/json': { schema: { $ref: '#/components/schemas/PermitDetail' } } } },
+          404: { description: 'No permit is published with that slug', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
     '/offices/{slug}': {
       get: {
         summary: 'One office in full',
@@ -89,6 +121,9 @@ const document = {
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      PermitSummary: zodToJsonSchema(permitSummarySchema, { target: 'openApi3' }),
+      PermitCatalogue: zodToJsonSchema(permitCatalogueSchema, { target: 'openApi3' }),
+      PermitDetail: zodToJsonSchema(permitDetailSchema, { target: 'openApi3' }),
       OfficialList: zodToJsonSchema(officialListSchema, { target: 'openApi3' }),
       ProfileField: zodToJsonSchema(profileFieldSchema, { target: 'openApi3' }),
       MunicipalityProfile: zodToJsonSchema(municipalityProfileSchema, { target: 'openApi3' }),

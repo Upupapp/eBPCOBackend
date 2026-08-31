@@ -1,7 +1,7 @@
 {
   "_comment": "Extracted by scripts/extract-portal-data.ts from the commit below. Do not hand-edit: re-run the script.",
   "repo": "Upupapp/eBPCO-Website",
-  "commit": "921fd32042798eedf4321b57f4f1abe2b3a58da1",
+  "commit": "f20597ff3fe75076a2433b9434668a5105e036a2",
   "dataDir": "castilla-lgu-portal/src/app/core/data",
   "files": {
     "municipality.data.ts": [
@@ -171,12 +171,56 @@
         "fieldComments": {}
       },
       {
+        "source": "ABOUT_OVERVIEW",
+        "ordinal": 0,
+        "fields": {
+          "value": {
+            "__expression": "'Castilla is a coastal municipality in the province of Sorsogon, in the Bicol Region of the Philippines. ' +\n  'This portal brings together public information about the municipality, its local government leadership, ' +\n  'and the offices that serve residents, businesses, and visitors.'"
+          }
+        },
+        "comment": null,
+        "fieldComments": {}
+      },
+      {
+        "source": "HISTORY_TEXT",
+        "ordinal": 0,
+        "fields": {
+          "value": {
+            "__expression": "'Before 1827, the settlement that became Castilla was a barrio of Bulabog (in what is now Sorsogon City), ' +\n  'formed from the nearby settlements of Inarihan, Capuy, Macalaya, and Cumadcad. Spanish Dominican friars had ' +\n  'founded the original town along the western coast of Sorsogon Bay, and in 1827 it was formalized as an ' +\n  'independent town under the old Provincia de Albay. Don Eugenio Santos Martinez, a wealthy Spanish landowner ' +\n  'native to Castilla, Spain, recommended both relocating the seat of government and renaming the town in honor ' +\n  'of his hometown — itself the birthplace of Queen Isabella I of Castile (r. 1451–1504). Castilla received its ' +\n  'own parish in 1876, with Father Teodosio Homillano as its first priest; the church’s inauguration fell on the ' +\n  'Feast of Saint John the Baptist, June 24, still celebrated locally today. When Sorsogon was separated into its ' +\n  'own province in 1894, Castilla was annexed as one of its constituent towns.'"
+          }
+        },
+        "comment": "Sourced 2026-08-23 from the official LGU Castilla history page (castillasorsogon.gov.ph/history-of-castilla) via a cross-referencing community mirror (marvelos.wixsite.com/castillasorsogon/history), since the official domain blocks automated fetching — facts corroborated against independent web-search results before being written here.",
+        "fieldComments": {}
+      },
+      {
         "source": "VISION_PLACEHOLDER",
         "ordinal": 0,
         "fields": {
           "value": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla."
         },
         "comment": "Found only as a truncated fragment (\"A premier agri-ecotourism…\") in search results — the official page (castillasorsogon.gov.ph/vision-and-mission) blocks automated fetching, so the complete statement could not be verified. Left as a placeholder rather than publishing an incomplete quote.",
+        "fieldComments": {}
+      },
+      {
+        "source": "MISSION_TEXT",
+        "ordinal": 0,
+        "fields": {
+          "value": {
+            "__expression": "'To pursue a holistic development of Castilla in an ecologically-sound environment through the convergent ' +\n  'efforts in the provision of quality basic services and equitable distribution of resources and opportunities.'"
+          }
+        },
+        "comment": "Sourced 2026-08-23 from the official LGU Castilla Vision and Mission page (castillasorsogon.gov.ph/vision-and-mission), via search-result extraction since the page itself blocks automated fetching. Unlike the Vision statement, this sentence was returned complete (no truncation marker).",
+        "fieldComments": {}
+      },
+      {
+        "source": "SEAL_DESCRIPTION",
+        "ordinal": 0,
+        "fields": {
+          "value": {
+            "__expression": "'The official seal of Castilla — \"Sagisag ng Bayan ng Castilla\" — features a mountain range, a coconut palm, ' +\n  'farm produce, and a leaping dolphin over a coastline, framed by a golden rope border, with the municipality’s ' +\n  'name and \"Sorsogon\" inscribed along the rim. A full official description of the seal’s symbolism is pending ' +\n  'confirmation from LGU Castilla.'"
+          }
+        },
+        "comment": "Description below is a plain visual transcription of the elements actually present in the official seal artwork used on this portal — it does not assert heraldic or symbolic meaning, which is left to the official LGU description once available.",
         "fieldComments": {}
       }
     ],
@@ -1158,6 +1202,18 @@
           "value": "Bureau of Fire Protection – Castilla Fire Station"
         },
         "comment": null,
+        "fieldComments": {},
+        "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
+      },
+      {
+        "source": "BUILDING_AND_OCCUPANCY_CHECKLIST",
+        "ordinal": 0,
+        "fields": {
+          "value": {
+            "__expression": "formFile('Building-Permit-and-Occupancy-Checklist.pdf')"
+          }
+        },
+        "comment": "The one combined checklist the LGU publishes, covering both stages.",
         "fieldComments": {},
         "fileComment": "Condensed, citizen-facing catalog of the 19-item permit/service list also standardized in the Web Admin (`requirements-catalog.ts`) and mobile apps. Names and order are canonical and must match those apps verbatim. Content here is a plain-language summary, not the full legal-citation checklist — see permit.model.ts's `isPlaceholder` doc comment for the sourcing caveat that applies to every entry below."
       },
