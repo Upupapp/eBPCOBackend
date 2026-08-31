@@ -93,6 +93,20 @@ const PUBLIC_ROUTES = new Set([
   // It is on this list because this test refused it, correctly, the moment the
   // route existed. Adding a line here should always be a deliberate act.
   'GET /documents/content',
+
+  // Asking to be given staff access. Public BECAUSE the person asking has no
+  // account yet — that is the whole point: `/auth/register` mints an applicant
+  // and can never mint staff, so there has to be some way to ask, and it cannot
+  // require the credential it exists to obtain.
+  //
+  // What makes it safe to have on this list is not that it is harmless but that
+  // it CANNOT CREATE AN ACCOUNT. It writes a row a super admin must act on, and
+  // test/access-request-flow.e2e-spec.ts asserts that raising one creates no
+  // account, no role, no level and no allow-list. It is also the only
+  // unauthenticated write in the admin surface, so it is rate-limited per
+  // address AND per IP, and it answers 202 identically whether or not the
+  // address is known — matching /auth/register's anti-enumeration.
+  'POST /auth/access-request',
 ]);
 
 describe('deny by default', () => {

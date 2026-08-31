@@ -90,8 +90,87 @@ const PERMIT_RECORD = 'PD 1096 and the LGU records schedule: a permit record is 
   + 'that a structure was authorised, and outlives the applicant’s relationship with the LGU';
 const SERVICE_DELIVERY = 'performance of a public task (RA 11032 service delivery)';
 const ACCOUNTABILITY = 'accountability under NPC Circular 16-01 — who did what to whose record';
+const ACCESS_ADMINISTRATION = 'administering staff access to a public service: knowing who '
+  + 'asked for authority over permit records, who granted it, and over which forms';
+const ABUSE_PREVENTION = 'refusing abuse of the one unauthenticated write in the admin '
+  + 'surface (RA 10173 s.12(f), legitimate interest in the security of the service)';
 
 export const REGISTER: Readonly<Record<string, TableRegister>> = {
+  /**
+   * A request to be given staff access. Personal data about someone who may
+   * NEVER become an account — which is what makes this table its own retention
+   * question rather than an extension of `accounts`.
+   *
+   * A refused request holds a name, an email, a mobile number and a written
+   * justification about a person the LGU has no ongoing relationship with. It
+   * is kept operationally, not for an account lifetime, because there is no
+   * account to tie it to and "we keep it forever in case they ask again" is not
+   * a basis.
+   */
+  access_requests: {
+    id: structural,
+    full_name: direct('operational', ACCESS_ADMINISTRATION),
+    email: direct('operational', ACCESS_ADMINISTRATION),
+    email_normalised: direct('operational', 'derived from email, same basis'),
+    mobile: direct('operational', ACCESS_ADMINISTRATION),
+    // Where they work. Identifies a person when combined with a small office,
+    // which every office in a municipality of 60,635 people is.
+    office_position: direct('operational', ACCESS_ADMINISTRATION),
+    requested_level: none('operational'),
+    // Free text the requester wrote. May contain anything, including more
+    // personal data about them or about someone else.
+    justification: content('operational', ACCESS_ADMINISTRATION),
+    status: none('operational'),
+    raised_at: none('operational'),
+    decided_at: none('operational'),
+    // Who decided. An accountability record about a staff member, not the
+    // requester — hence the audit retention and the different basis.
+    decided_by: linkable('audit', ACCOUNTABILITY),
+    // Why it was refused. Written by a super admin ABOUT the requester.
+    decision_reason: content('operational', ACCOUNTABILITY),
+    // Operational, not account-lifetime, and the distinction is load-bearing.
+    // This column only ever points at a STAFF account, and erasure refuses
+    // staff accounts outright — so 'account-lifetime' would promise a deletion
+    // that can never fire, and would force `access_requests` onto the erasure
+    // list where it does not belong. The row is purged with the rest of the
+    // request record.
+    created_account_id: linkable('operational', ACCESS_ADMINISTRATION),
+  },
+
+  access_request_permit_types: {
+    request_id: linkable('operational', ACCESS_ADMINISTRATION),
+    permit_type: none('operational'),
+  },
+
+  /**
+   * Rate-limiting evidence for the one unauthenticated write in the admin
+   * surface. An IP address is personal data under RA 10173, and this table
+   * exists solely to refuse abuse — so it is operational and purged, never kept
+   * against a person.
+   */
+  access_request_attempts: {
+    id: structural,
+    email_normalised: direct('operational', ABUSE_PREVENTION),
+    ip_address: direct('operational', ABUSE_PREVENTION),
+    at: none('operational'),
+  },
+
+  /** Which forms an officer may work on. About a staff member's duties. */
+  staff_permit_access: {
+    account_id: linkable('account-lifetime', ACCESS_ADMINISTRATION),
+    permit_type: none('account-lifetime'),
+    granted_by: linkable('audit', ACCOUNTABILITY),
+    granted_at: none('audit'),
+  },
+
+  /** An officer's access level. About their duties, not their person. */
+  staff_access: {
+    account_id: linkable('account-lifetime', ACCESS_ADMINISTRATION),
+    level: none('account-lifetime'),
+    assigned_by: linkable('audit', ACCOUNTABILITY),
+    assigned_at: none('audit'),
+  },
+
   accounts: {
     id: linkable('account-lifetime', SERVICE_DELIVERY),
     kind: none('account-lifetime'),
@@ -586,7 +665,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
 
   // ---- Reference data. About the LGU's process, not about any person. -------
 
-  permit_types: { permit_type: none(), service_domain: none() },
+  // `retired_at` records that the LGU stopped issuing a permit type. About the
+  // municipality's services, not about any person.
+  permit_types: { permit_type: none(), service_domain: none(), retired_at: none() },
   lifecycle_statuses: {
     status: none(), sequence: none(), terminal: none(),
     applicant_status: none(), requires_applicant_action: none(),

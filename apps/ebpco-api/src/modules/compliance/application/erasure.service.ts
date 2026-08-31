@@ -99,6 +99,17 @@ export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = 
   { table: 'password_reset_tickets', column: 'account_id' },
   { table: 'idempotency_keys', column: 'account_id' },
   { table: 'account_roles', column: 'account_id' },
+  // Access assignments. `account-lifetime` in the register, so they go with the
+  // account — and they must, because leaving an allow-list behind would keep a
+  // record of which permit types a departed officer worked on, tied to their
+  // account id, after an erasure that reported success.
+  //
+  // The GRANT rows naming them as `granted_by` are a different question and are
+  // deliberately not here: those are accountability records about a staff
+  // member's act, retained under NPC Circular 16-01, and erasing them would
+  // remove the evidence of who gave somebody else authority.
+  { table: 'staff_permit_access', column: 'account_id' },
+  { table: 'staff_access', column: 'account_id' },
 ];
 
 export class ErasureService {

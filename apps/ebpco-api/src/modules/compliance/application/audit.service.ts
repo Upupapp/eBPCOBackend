@@ -32,7 +32,13 @@ export type AuditOutcome = 'allowed' | 'denied' | 'failed';
 
 export interface AuditInput {
   readonly action: string;
-  readonly subjectType: 'application' | 'document' | 'payment' | 'order-of-payment' | 'account' | 'export';
+  readonly subjectType:
+    | 'application' | 'document' | 'payment' | 'order-of-payment' | 'account' | 'export'
+    // A request to be granted staff access. Its own subject type because at the
+    // moment it is raised there IS no account — recording it against one would
+    // mean inventing a subject that does not exist, and a rejected request
+    // never acquires one.
+    | 'access-request';
   readonly subjectId: string | null;
   readonly outcome: AuditOutcome;
   readonly actorAccountId?: string | null;

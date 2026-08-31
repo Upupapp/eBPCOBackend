@@ -35,6 +35,20 @@ export const SECURITY_ACTIONS = {
   mfaFailed: 'mfa.failed',
   documentSecurity: 'document.security-event',
   authorisationRefused: 'authorisation.refused',
+
+  // ── Access administration ───────────────────────────────────────────
+  //
+  // Who was given authority over permit records, by whom, and over which
+  // forms. These belong on the SECURITY stream rather than the access one:
+  // 'someone signed in' is routine, and 'someone was granted the power to
+  // decide applications' is the event a reviewer is actually looking for.
+  accessRequested: 'access.requested',
+  accessApproved: 'access.approved',
+  accessRejected: 'access.rejected',
+  accessLevelChanged: 'access.level-changed',
+  accessFormsChanged: 'access.forms-changed',
+  accessDisabled: 'access.disabled',
+  accessEnabled: 'access.enabled',
 } as const;
 
 export type SecurityAction = (typeof SECURITY_ACTIONS)[keyof typeof SECURITY_ACTIONS];
@@ -48,6 +62,13 @@ export const ACCESS_ACTIONS: readonly SecurityAction[] = [
 
 export const SECURITY_STREAM_ACTIONS: readonly SecurityAction[] = [
   SECURITY_ACTIONS.authorisationRefused,
+  SECURITY_ACTIONS.accessRequested,
+  SECURITY_ACTIONS.accessApproved,
+  SECURITY_ACTIONS.accessRejected,
+  SECURITY_ACTIONS.accessLevelChanged,
+  SECURITY_ACTIONS.accessFormsChanged,
+  SECURITY_ACTIONS.accessDisabled,
+  SECURITY_ACTIONS.accessEnabled,
   SECURITY_ACTIONS.sessionRefused,
   SECURITY_ACTIONS.sessionReplayDetected,
   SECURITY_ACTIONS.mfaFailed,

@@ -23,6 +23,11 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
 import { AuditService } from '../compliance/application/audit.service';
 import { StaffDirectoryService } from './application/staff-directory.service';
 import { StaffDirectoryController } from './transport/staff-directory.controller';
+import { AccessRequestService } from './application/access-request.service';
+import { StaffAccessService } from './application/staff-access.service';
+import {
+  AccessRequestController, StaffAccessRequestsController,
+} from './transport/access-request.controller';
 import { ContactVerificationService } from './application/contact-verification.service';
 import { ContactsController } from './transport/contacts.controller';
 import { MfaController } from './transport/mfa.controller';
@@ -43,7 +48,7 @@ import { RefusalRecorder } from './application/refusal-recorder';
 @Module({
   imports: [ComplianceModule],
   controllers: [AuthController, MeController, StaffDirectoryController, ContactsController,
-    MfaController],
+    MfaController, AccessRequestController, StaffAccessRequestsController],
   providers: [
     {
       provide: PASSWORD_RESET_REPOSITORY,
@@ -72,6 +77,20 @@ import { RefusalRecorder } from './application/refusal-recorder';
       provide: StaffDirectoryService,
       inject: [SQL_CLIENT, AuditService],
       useFactory: (db: SqlClient, audit: AuditService) => new StaffDirectoryService(db, audit),
+    },
+    // Becoming staff is a request a super admin approves. Provided beside the
+    // directory rather than in a module of its own: they are two halves of one
+    // question — who may act on permit records — and separating them would let
+    // one grow a rule the other does not honour.
+    {
+      provide: AccessRequestService,
+      inject: [SQL_CLIENT, AuditService],
+      useFactory: (db: SqlClient, audit: AuditService) => new AccessRequestService(db, audit),
+    },
+    {
+      provide: StaffAccessService,
+      inject: [SQL_CLIENT, AuditService],
+      useFactory: (db: SqlClient, audit: AuditService) => new StaffAccessService(db, audit),
     },
     {
       provide: AccountStatusReader,
