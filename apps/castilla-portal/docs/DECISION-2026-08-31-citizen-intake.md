@@ -19,15 +19,22 @@ data is collected by this website.
 
 ## A note on terminology
 
-**"Citizen", "applicant" and "business owner" are the same people.** They are one
-user type at different moments: the same person reads the public website to find
-out which permit they need, and later files that permit through the eBPCO
-system. This document says "citizen" because that is the role someone is in when
-they are reading a public information page, not because it describes a different
-audience from the one the permit system serves.
+The system has exactly **three user types**, settled by the owner on
+2026-08-31:
 
-The distinction that matters here is therefore between **surfaces**, not between
-people. The eBPCO transaction system necessarily collects personal data — it
+| Type | Account | Who |
+|---|---|---|
+| **PUBLIC** | none | anyone reading this website |
+| **CITIZEN** | yes | the person filing permits — the single word for what was also called *applicant* or *business owner* |
+| **ADMIN** | yes | LGU staff, with sub-types by access level |
+
+**"Citizen" is the canonical word.** PUBLIC and CITIZEN are the same human at
+different moments: reading this site to find out which permit they need, then
+signing in to the eBPCO system to file it.
+
+This website serves **PUBLIC and ADMIN, never CITIZEN** — there are no citizen
+accounts here and, per this decision, no citizen intake. The distinction that
+matters is therefore between **surfaces**, not between people. The eBPCO transaction system necessarily collects personal data — it
 cannot process a building permit otherwise — and it does so under its own
 notice, its own retention rules and its own authentication. The public
 information website collects nothing, and this decision keeps it that way. The

@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Castilla LGU Portal — public content API",
-    "version": "0.1.0",
-    "description": "Public read API for the Municipality of Castilla, Sorsogon. Content the LGU has not confirmed is OMITTED from responses rather than returned as null or as a placeholder string: an absent key means the municipality has not verified that fact."
+    "version": "0.2.0",
+    "description": "API for the Municipality of Castilla, Sorsogon.\n\nTHREE USER TYPES. **PUBLIC** reads this site with no account and is served every endpoint outside /staff and /session. **CITIZEN** — the single word for what is also called an applicant or a business owner — files permits through the separate eBPCO system and has NO account here; this site collects nothing from them, by a recorded decision. **ADMIN** is LGU staff, with sub-types by access level, and reaches /staff.\n\nContent the LGU has not confirmed is OMITTED rather than returned as null or as a placeholder string: an absent key means the municipality has not verified that fact. A field that is absent when unconfirmed is `optional` in these schemas and never `nullable`, because those describe different situations to a generated client.\n\nSee contract/CHANGELOG.md for what changed and whether it breaks a client."
   },
   "servers": [
     {
@@ -131,6 +131,376 @@
           },
           "404": {
             "description": "No permit is published with that slug",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/workflow/backlog": {
+      "get": {
+        "summary": "What the LGU still has to confirm",
+        "description": "Grouped by entity, not by field: a person confirming an office's contact does telephone, email, location and hours in one sitting, and a flat list describes the same backlog as four times the work. Requires `content:read`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The backlog"
+          },
+          "404": {
+            "description": "No valid session"
+          }
+        }
+      }
+    },
+    "/staff/workflow/proposals": {
+      "post": {
+        "summary": "Propose a change",
+        "description": "A proposal changes NOTHING a citizen can read until it is confirmed — that is what makes the four-eyes rule meaningful rather than merely delaying harm. The proposer is taken from the session and MUST NOT be sent in the body; an undeclared key is refused outright. Requires `content:propose`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Proposal recorded"
+          },
+          "400": {
+            "description": "Malformed, or an undeclared key",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "A proposal is already open for this field",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/workflow/proposals/{id}/confirm": {
+      "post": {
+        "summary": "Confirm a proposal",
+        "description": "Refused when the confirmer is the proposer, for a contact field or an official's name — a change to a real person needs two people. Enforced in authorisation before the handler AND in the domain. Requires `content:confirm`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Confirmed"
+          },
+          "403": {
+            "description": "Four-eyes, or the role lacks content:confirm",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such proposal, or no valid session"
+          },
+          "409": {
+            "description": "Already decided, or another confirmation won the race",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/workflow/revert": {
+      "post": {
+        "summary": "Return a confirmed field to pending",
+        "description": "Keeps the value and its provenance: reverting says \"we are no longer standing behind this\", not \"we never knew it\". Requires `content:confirm`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RevertRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Reverted"
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "Not currently confirmed",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/announcements": {
+      "post": {
+        "summary": "Draft an announcement",
+        "description": "Creates it as a DRAFT: nothing is served until it is published. The body is plain text and markup is refused — the HTML a browser receives is rendered server-side at read time. Requires `announcements:publish`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnnouncementDraft"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Drafted"
+          },
+          "400": {
+            "description": "Malformed, or the body contains markup",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "That slug is taken",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/announcements/{slug}/publish": {
+      "post": {
+        "summary": "Publish, or schedule",
+        "description": "A `publishAt` in the future is a SCHEDULE — the read queries compare it to the clock, so the notice appears on its own minute with no deploy and no job running. Requires `announcements:publish`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "publishAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  },
+                  "expiresAt": {
+                    "type": "string",
+                    "format": "date-time"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Published or scheduled"
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "Withdrawn, or the expiry precedes publication",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/announcements/{slug}": {
+      "delete": {
+        "summary": "Withdraw an announcement",
+        "description": "Stops being served; never deleted. The database refuses a withdrawal with no event naming who did it. Requires `announcements:publish`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "slug",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Withdrawn"
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "Already withdrawn, or no such announcement",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/staff/pages/{key}": {
+      "put": {
+        "summary": "Replace a narrative page",
+        "description": "Archives the prior text as a revision BEFORE overwriting, and returns the page to `pending` because nobody has sourced the new words. Requires `pages:edit`.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PageEdit"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Replaced"
+          },
+          "404": {
+            "description": "No valid session"
+          },
+          "409": {
+            "description": "No such page",
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -886,6 +1256,120 @@
         ],
         "additionalProperties": false
       },
+      "ProposalRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entityType",
+          "entityId",
+          "fieldName",
+          "proposedValue",
+          "sourceDescription",
+          "sourcedOn",
+          "method"
+        ],
+        "properties": {
+          "entityType": {
+            "type": "string"
+          },
+          "entityId": {
+            "type": "string"
+          },
+          "fieldName": {
+            "type": "string"
+          },
+          "proposedValue": {
+            "type": "string"
+          },
+          "sourceDescription": {
+            "type": "string",
+            "minLength": 8,
+            "description": "A source someone else could check. 'LGU' is not a source."
+          },
+          "sourcedOn": {
+            "type": "string",
+            "format": "date"
+          },
+          "method": {
+            "type": "string",
+            "enum": [
+              "direct-read",
+              "search-extraction",
+              "official-document"
+            ]
+          }
+        }
+      },
+      "RevertRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "entityType",
+          "entityId",
+          "fieldName"
+        ],
+        "properties": {
+          "entityType": {
+            "type": "string"
+          },
+          "entityId": {
+            "type": "string"
+          },
+          "fieldName": {
+            "type": "string"
+          }
+        }
+      },
+      "AnnouncementDraft": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "title",
+          "body",
+          "category"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string",
+            "description": "Plain text. Markup is refused."
+          },
+          "category": {
+            "type": "string"
+          },
+          "attachmentFormId": {
+            "type": "string",
+            "format": "uuid"
+          }
+        }
+      },
+      "PageEdit": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "title",
+          "body",
+          "isPlaceholder"
+        ],
+        "properties": {
+          "title": {
+            "type": "string"
+          },
+          "body": {
+            "type": "string"
+          },
+          "isPlaceholder": {
+            "type": "boolean"
+          }
+        }
+      },
       "Session": {
         "type": "object",
         "required": [
@@ -1391,8 +1875,7 @@
           },
           "limit": {
             "type": "integer",
-            "exclusiveMinimum": true,
-            "minimum": 0
+            "exclusiveMinimum": 0
           },
           "offset": {
             "type": "integer",
@@ -1441,13 +1924,11 @@
           },
           "byteSize": {
             "type": "integer",
-            "exclusiveMinimum": true,
-            "minimum": 0
+            "exclusiveMinimum": 0
           },
           "pageCount": {
             "type": "integer",
-            "exclusiveMinimum": true,
-            "minimum": 0
+            "exclusiveMinimum": 0
           },
           "checksum": {
             "type": "string",
@@ -1499,13 +1980,11 @@
                 },
                 "byteSize": {
                   "type": "integer",
-                  "exclusiveMinimum": true,
-                  "minimum": 0
+                  "exclusiveMinimum": 0
                 },
                 "pageCount": {
                   "type": "integer",
-                  "exclusiveMinimum": true,
-                  "minimum": 0
+                  "exclusiveMinimum": 0
                 },
                 "checksum": {
                   "type": "string",
@@ -1564,13 +2043,11 @@
                 },
                 "byteSize": {
                   "type": "integer",
-                  "exclusiveMinimum": true,
-                  "minimum": 0
+                  "exclusiveMinimum": 0
                 },
                 "pageCount": {
                   "type": "integer",
-                  "exclusiveMinimum": true,
-                  "minimum": 0
+                  "exclusiveMinimum": 0
                 },
                 "checksum": {
                   "type": "string",

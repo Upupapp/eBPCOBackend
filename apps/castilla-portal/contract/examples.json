@@ -1,0 +1,755 @@
+{
+  "GET /offices": {
+    "offices": [
+      {
+        "slug": "office-of-the-mayor",
+        "name": "Office of the Municipal Mayor",
+        "category": "executive",
+        "shortDescription": "Leads the executive administration of the municipality and oversees all local government operations."
+      },
+      {
+        "slug": "office-of-the-vice-mayor",
+        "name": "Office of the Municipal Vice Mayor",
+        "category": "executive",
+        "shortDescription": "Presides over the Sangguniang Bayan and assumes executive duties in the Mayor’s absence."
+      },
+      {
+        "slug": "sangguniang-bayan",
+        "name": "Sangguniang Bayan",
+        "category": "executive",
+        "shortDescription": "The municipality’s legislative council, responsible for enacting local ordinances and resolutions."
+      },
+      {
+        "slug": "municipal-administrator",
+        "name": "Municipal Administrator",
+        "category": "administrative",
+        "shortDescription": "Coordinates the day-to-day management of municipal departments on behalf of the Mayor."
+      },
+      {
+        "slug": "municipal-treasurer",
+        "name": "Municipal Treasurer's Office",
+        "category": "finance",
+        "shortDescription": "Manages collection, custody, and disbursement of municipal funds."
+      },
+      {
+        "slug": "municipal-assessor",
+        "name": "Municipal Assessor's Office",
+        "category": "finance",
+        "shortDescription": "Handles the appraisal and assessment of real properties for taxation purposes."
+      },
+      {
+        "slug": "municipal-accounting",
+        "name": "Municipal Accounting Office",
+        "category": "finance",
+        "shortDescription": "Maintains municipal financial records and processes payment vouchers."
+      },
+      {
+        "slug": "municipal-budget",
+        "name": "Municipal Budget Office",
+        "category": "finance",
+        "shortDescription": "Prepares and administers the annual municipal budget."
+      },
+      {
+        "slug": "municipal-planning-development",
+        "name": "Municipal Planning and Development Office",
+        "category": "development",
+        "shortDescription": "Formulates the municipality’s development plans, programs, and investment priorities."
+      },
+      {
+        "slug": "municipal-engineering",
+        "name": "Municipal Engineering Office",
+        "category": "development",
+        "shortDescription": "Oversees public infrastructure planning, construction, and maintenance."
+      },
+      {
+        "slug": "municipal-civil-registrar",
+        "name": "Municipal Civil Registrar",
+        "category": "administrative",
+        "shortDescription": "Handles civil registration records including birth, marriage, and death certificates."
+      },
+      {
+        "slug": "municipal-health",
+        "name": "Municipal Health Office",
+        "category": "social-services",
+        "shortDescription": "Delivers primary healthcare services and public health programs to residents."
+      },
+      {
+        "slug": "municipal-social-welfare",
+        "name": "Municipal Social Welfare and Development Office",
+        "category": "social-services",
+        "shortDescription": "Administers social welfare programs for vulnerable and disadvantaged residents."
+      },
+      {
+        "slug": "municipal-agriculture",
+        "name": "Municipal Agriculture Office",
+        "category": "development",
+        "shortDescription": "Supports local farmers and fisherfolk through extension services and programs."
+      },
+      {
+        "slug": "municipal-environment-natural-resources",
+        "name": "Municipal Environment and Natural Resources Office",
+        "category": "development",
+        "shortDescription": "Oversees environmental protection, waste management, and natural resource programs."
+      },
+      {
+        "slug": "municipal-disaster-risk-reduction",
+        "name": "Municipal Disaster Risk Reduction and Management Office",
+        "category": "public-safety",
+        "shortDescription": "Coordinates disaster preparedness, response, and risk reduction efforts."
+      },
+      {
+        "slug": "business-permits-licensing",
+        "name": "Business Permits and Licensing Office",
+        "category": "administrative",
+        "shortDescription": "Processes business permit applications, renewals, and licensing requirements."
+      },
+      {
+        "slug": "human-resource-management",
+        "name": "Human Resource Management Office",
+        "category": "administrative",
+        "shortDescription": "Manages municipal personnel administration, recruitment, and employee welfare."
+      },
+      {
+        "slug": "general-services",
+        "name": "General Services Office",
+        "category": "administrative",
+        "shortDescription": "Manages municipal property, procurement support, and general facilities upkeep."
+      }
+    ]
+  },
+  "GET /offices/{slug}": {
+    "slug": "municipal-engineering",
+    "name": "Municipal Engineering Office",
+    "category": "development",
+    "shortDescription": "Oversees public infrastructure planning, construction, and maintenance.",
+    "aboutText": "The Municipal Engineering Office plans, designs, and supervises the construction and maintenance of municipal infrastructure such as roads, buildings, and public facilities.",
+    "services": [
+      "Infrastructure project design and supervision",
+      "Building permit technical evaluation",
+      "Public works maintenance planning"
+    ],
+    "relatedOffices": [
+      {
+        "slug": "municipal-planning-development",
+        "name": "Municipal Planning and Development Office"
+      },
+      {
+        "slug": "general-services",
+        "name": "General Services Office"
+      }
+    ],
+    "issuedPermits": [
+      {
+        "slug": "building-permit-new-construction",
+        "name": "Building Permit – New Construction"
+      },
+      {
+        "slug": "building-permit-renovation-alteration",
+        "name": "Building Permit – Renovation / Alteration"
+      },
+      {
+        "slug": "building-permit-addition-extension",
+        "name": "Building Permit – Addition / Extension"
+      },
+      {
+        "slug": "demolition-permit",
+        "name": "Demolition Permit"
+      },
+      {
+        "slug": "architectural-permit",
+        "name": "Architectural Permit"
+      },
+      {
+        "slug": "civil-structural-permit",
+        "name": "Civil / Structural Permit"
+      },
+      {
+        "slug": "electrical-permit",
+        "name": "Electrical Permit"
+      },
+      {
+        "slug": "mechanical-permit",
+        "name": "Mechanical Permit"
+      },
+      {
+        "slug": "sanitary-permit",
+        "name": "Sanitary Permit"
+      },
+      {
+        "slug": "plumbing-permit",
+        "name": "Plumbing Permit"
+      },
+      {
+        "slug": "electronics-permit",
+        "name": "Electronics Permit"
+      },
+      {
+        "slug": "interior-design-permit",
+        "name": "Interior Design Permit"
+      },
+      {
+        "slug": "fencing-permit",
+        "name": "Fencing Permit"
+      },
+      {
+        "slug": "sign-permit",
+        "name": "Sign Permit"
+      },
+      {
+        "slug": "excavation-permit",
+        "name": "Excavation Permit"
+      },
+      {
+        "slug": "certificate-of-occupancy",
+        "name": "Certificate of Occupancy"
+      }
+    ],
+    "head": {
+      "name": "Jesus D. Abitria Jr.",
+      "position": "Municipal Engineer"
+    }
+  },
+  "GET /officials": {
+    "officials": [
+      {
+        "slug": "isagani-bong-b-mendoza",
+        "name": "Isagani \"Bong\" B. Mendoza",
+        "position": "Municipal Mayor",
+        "office": "Office of the Municipal Mayor",
+        "initials": "IM",
+        "photoUrl": "assets/officials/mayor-isagani-mendoza.jpg"
+      },
+      {
+        "slug": "jesus-boy-agarap",
+        "name": "Jesus \"Boy\" Agarap",
+        "position": "Municipal Vice Mayor",
+        "office": "Office of the Municipal Vice Mayor",
+        "initials": "JA"
+      },
+      {
+        "slug": "camille-mendoza",
+        "name": "Camille Mendoza",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "CM"
+      },
+      {
+        "slug": "vicente-manata",
+        "name": "Vicente Manata",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "VM"
+      },
+      {
+        "slug": "erick-navas",
+        "name": "Erick Navas",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "EN"
+      },
+      {
+        "slug": "joel-agripa",
+        "name": "Joel Agripa",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "JA"
+      },
+      {
+        "slug": "allan-canon",
+        "name": "Allan Canon",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "AC"
+      },
+      {
+        "slug": "kap-luna-luna",
+        "name": "Kap Luna Luna",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "LL"
+      },
+      {
+        "slug": "kap-budoy-mirandilla",
+        "name": "Kap Budoy Mirandilla",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "BM"
+      },
+      {
+        "slug": "ian-llona",
+        "name": "Ian Llona",
+        "position": "Sangguniang Bayan Member",
+        "office": "Sangguniang Bayan",
+        "initials": "IL"
+      },
+      {
+        "slug": "hon-ronard-l-lladones",
+        "name": "Hon. Ronard L. Lladones",
+        "position": "SK Federation President",
+        "office": "Sangguniang Bayan",
+        "initials": "RL"
+      }
+    ]
+  },
+  "GET /municipality/profile": {
+    "fields": [
+      {
+        "label": "Province",
+        "value": "Sorsogon"
+      },
+      {
+        "label": "Region",
+        "value": "Region V — Bicol Region"
+      },
+      {
+        "label": "Country",
+        "value": "Republic of the Philippines"
+      },
+      {
+        "label": "Income Classification",
+        "value": "3rd class municipality"
+      },
+      {
+        "label": "Number of Barangays",
+        "value": "34",
+        "count": 34
+      },
+      {
+        "label": "Population",
+        "value": "60,635 (2020 Census)",
+        "count": 60635,
+        "countSuffix": "(2020 Census)"
+      },
+      {
+        "label": "Land Area",
+        "value": "186.20 km²",
+        "count": 186.2,
+        "countSuffix": "km²",
+        "countDecimals": 2
+      },
+      {
+        "label": "ZIP Code",
+        "value": "4713"
+      },
+      {
+        "label": "PSGC Code",
+        "value": "0506206000"
+      },
+      {
+        "label": "Founding / Establishment",
+        "value": "1827"
+      },
+      {
+        "label": "Demonym",
+        "value": "Castillano"
+      }
+    ]
+  },
+  "GET /permits": {
+    "groups": [
+      {
+        "id": "engineering",
+        "label": "Office of the Building Official",
+        "permits": [
+          {
+            "slug": "building-permit-new-construction",
+            "name": "Building Permit – New Construction",
+            "description": "Required before starting construction of a new building or structure, confirming that plans meet the National Building Code and local zoning rules.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "building-permit-renovation-alteration",
+            "name": "Building Permit – Renovation / Alteration",
+            "description": "Covers renovation or alteration work on an existing building that changes its structure, layout, or utilities.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "building-permit-addition-extension",
+            "name": "Building Permit – Addition / Extension",
+            "description": "Covers adding floor area or extending an existing structure, such as a new floor or wing.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "demolition-permit",
+            "name": "Demolition Permit",
+            "description": "Required before tearing down all or part of an existing structure.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "architectural-permit",
+            "name": "Architectural Permit",
+            "description": "Covers the architectural design aspect of a construction project.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "civil-structural-permit",
+            "name": "Civil / Structural Permit",
+            "description": "Covers the structural design and civil works aspect of a construction project.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "electrical-permit",
+            "name": "Electrical Permit",
+            "description": "Covers the electrical installation aspect of a construction project.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "mechanical-permit",
+            "name": "Mechanical Permit",
+            "description": "Covers mechanical systems such as elevators, HVAC, and other mechanical equipment installations.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "sanitary-permit",
+            "name": "Sanitary Permit",
+            "description": "Covers sanitary and plumbing systems within a building, such as waste and water lines.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "plumbing-permit",
+            "name": "Plumbing Permit",
+            "description": "Covers the plumbing layout and fixtures of a building.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "electronics-permit",
+            "name": "Electronics Permit",
+            "description": "Covers electronics and communications wiring/equipment installed within a building.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "interior-design-permit",
+            "name": "Interior Design Permit",
+            "description": "Covers interior design and fit-out work within a building.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "fencing-permit",
+            "name": "Fencing Permit",
+            "description": "Required before constructing a perimeter fence or wall.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "sign-permit",
+            "name": "Sign Permit",
+            "description": "Required for billboards, signages, and similar structures, especially elevated or free-standing signs.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "excavation-permit",
+            "name": "Excavation Permit",
+            "description": "Required before excavation or ground preparation work on a site.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "certificate-of-occupancy",
+            "name": "Certificate of Occupancy",
+            "description": "Certifies that a completed building may be legally occupied or used, issued after final inspection.",
+            "confirmationState": "pending"
+          }
+        ]
+      },
+      {
+        "id": "zoning",
+        "label": "Zoning / Planning",
+        "permits": [
+          {
+            "slug": "zoning-locational-clearance",
+            "name": "Zoning / Locational Clearance",
+            "description": "Confirms that a proposed project or business location is consistent with the municipality’s zoning ordinance and land use plan. Usually the first step before applying for a Building Permit.",
+            "confirmationState": "pending"
+          }
+        ]
+      },
+      {
+        "id": "bfp",
+        "label": "Bureau of Fire Protection",
+        "permits": [
+          {
+            "slug": "fsec-building-permit",
+            "name": "FSEC for Building Permit (BFP)",
+            "description": "The Fire Safety Evaluation Clearance (FSEC) is issued by the Bureau of Fire Protection before a Building Permit is granted, confirming that building plans meet fire safety requirements under the Fire Code of the Philippines.",
+            "confirmationState": "pending"
+          },
+          {
+            "slug": "fsic-occupancy-permit",
+            "name": "FSIC for Occupancy Permit (BFP)",
+            "description": "The Fire Safety Inspection Certificate (FSIC) is issued by the Bureau of Fire Protection after construction, confirming that the completed building matches its approved fire safety plans (FSEC) before it can be occupied.",
+            "confirmationState": "pending"
+          }
+        ]
+      }
+    ]
+  },
+  "GET /permits/{slug}": {
+    "slug": "demolition-permit",
+    "name": "Demolition Permit",
+    "description": "Required before tearing down all or part of an existing structure.",
+    "confirmationState": "pending",
+    "group": {
+      "id": "engineering",
+      "label": "Office of the Building Official"
+    },
+    "issuingOffice": {
+      "name": "Office of the Building Official (Municipal Engineering Office)",
+      "slug": "municipal-engineering"
+    },
+    "requirements": [
+      "Method of demolition / work plan",
+      "Structural safety assessment",
+      "Utility disconnection clearance (water, power, etc.)",
+      "PRC license and PTR of the engineer of record"
+    ],
+    "validity": "6 months from date of issuance"
+  },
+  "GET /pages": {
+    "pages": [
+      {
+        "key": "history",
+        "title": "History of Castilla",
+        "body": "Before 1827, the settlement that became Castilla was a barrio of Bulabog (in what is now Sorsogon City), formed from the nearby settlements of Inarihan, Capuy, Macalaya, and Cumadcad. Spanish Dominican friars had founded the original town along the western coast of Sorsogon Bay, and in 1827 it was formalized as an independent town under the old Provincia de Albay. Don Eugenio Santos Martinez, a wealthy Spanish landowner native to Castilla, Spain, recommended both relocating the seat of government and renaming the town in honor of his hometown — itself the birthplace of Queen Isabella I of Castile (r. 1451–1504). Castilla received its own parish in 1876, with Father Teodosio Homillano as its first priest; the church’s inauguration fell on the Feast of Saint John the Baptist, June 24, still celebrated locally today. When Sorsogon was separated into its own province in 1894, Castilla was annexed as one of its constituent towns.",
+        "state": "confirmed",
+        "isPlaceholder": false,
+        "updatedAt": "2026-08-31T03:10:55.252Z",
+        "sourceNote": "portal 55c1cfa: HISTORY_TEXT"
+      },
+      {
+        "key": "vision",
+        "title": "Vision",
+        "body": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla.",
+        "state": "pending",
+        "isPlaceholder": true,
+        "updatedAt": "2026-08-31T03:10:55.252Z",
+        "sourceNote": "portal 55c1cfa: VISION_PLACEHOLDER"
+      },
+      {
+        "key": "mission",
+        "title": "Mission",
+        "body": "To pursue a holistic development of Castilla in an ecologically-sound environment through the convergent efforts in the provision of quality basic services and equitable distribution of resources and opportunities.",
+        "state": "confirmed",
+        "isPlaceholder": false,
+        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "sourceNote": "portal 55c1cfa: MISSION_TEXT"
+      },
+      {
+        "key": "seal-description",
+        "title": "The Municipal Seal",
+        "body": "The official seal of Castilla — \"Sagisag ng Bayan ng Castilla\" — features a mountain range, a coconut palm, farm produce, and a leaping dolphin over a coastline, framed by a golden rope border, with the municipality’s name and \"Sorsogon\" inscribed along the rim. A full official description of the seal’s symbolism is pending confirmation from LGU Castilla.",
+        "state": "pending",
+        "isPlaceholder": true,
+        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "sourceNote": "portal 55c1cfa: SEAL_DESCRIPTION"
+      },
+      {
+        "key": "privacy-policy",
+        "title": "Privacy Policy",
+        "body": "This information portal is primarily a read-only public resource and does not currently collect personal data through forms or accounts. Once LGU Castilla publishes an official privacy policy, it will replace this placeholder notice.",
+        "state": "pending",
+        "isPlaceholder": true,
+        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "sourceNote": "portal 55c1cfa: src/app/pages/privacy/privacy.html"
+      }
+    ]
+  },
+  "GET /pages/{key}": {
+    "key": "vision",
+    "title": "Vision",
+    "body": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla.",
+    "state": "pending",
+    "isPlaceholder": true,
+    "updatedAt": "2026-08-31T03:10:55.252Z",
+    "sourceNote": "portal 55c1cfa: VISION_PLACEHOLDER"
+  },
+  "GET /pages/{key}/revisions": {
+    "revisions": []
+  },
+  "GET /forms": {
+    "forms": [
+      {
+        "id": "d8c9d1fd-514f-4ab1-8f28-d841d495e818",
+        "familySlug": "building-permit-unified-application-form",
+        "originalFilename": "Building-Permit-Unified-Application-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 502007,
+        "pageCount": 2,
+        "checksum": "4ed2bfc0ca9d4d58db33951946dc4022b6f6e7edd5dce1997e05ed0d3773cd09",
+        "isCurrent": true
+      },
+      {
+        "id": "68f8cd09-06b8-4efe-b232-bb7905e8d526",
+        "familySlug": "building-permit-and-occupancy-checklist",
+        "originalFilename": "Building-Permit-and-Occupancy-Checklist.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 123552,
+        "pageCount": 1,
+        "checksum": "4a82f6cdcf459db711a66fe668020196c249f094a033b8136aecdcfcee274489",
+        "isCurrent": true
+      },
+      {
+        "id": "0beb003d-3655-4642-8f3c-d0a00a9dfd92",
+        "familySlug": "civil-structural-permit-form",
+        "originalFilename": "Civil-Structural-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 188376,
+        "pageCount": 2,
+        "checksum": "62615eb39076d8291b63a3be8bfda1b1642a3e31812a839aae585f52077948b5",
+        "isCurrent": true
+      },
+      {
+        "id": "b80be000-f61a-4f99-831e-14ad84d0968a",
+        "familySlug": "electrical-permit-form",
+        "originalFilename": "Electrical-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 147816,
+        "pageCount": 2,
+        "checksum": "8cfdc3075dcff04d39e9f1c00b30c8954c78647a44b8f5ea75c87887741ae0d9",
+        "isCurrent": true
+      },
+      {
+        "id": "77ca60aa-9941-40b4-9338-4b152b47e4e3",
+        "familySlug": "electronics-permit-form",
+        "originalFilename": "Electronics-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 717839,
+        "pageCount": 2,
+        "checksum": "ad4f74835f460562170e9e82ac1e67157500c9a39706606cb5190c5268703083",
+        "isCurrent": true
+      },
+      {
+        "id": "cef4f34d-b746-46e6-9838-a6c45ddfd22f",
+        "familySlug": "excavation-permit-form",
+        "originalFilename": "Excavation-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 1320053,
+        "pageCount": 2,
+        "checksum": "b397bfccf13a22c2a11d98528eaad263d565c797e06e2a4573f3a97154ed7cf6",
+        "isCurrent": true
+      },
+      {
+        "id": "f92d1349-f76e-41ea-90b9-a07a0849a2a4",
+        "familySlug": "fsec-for-building-permit-bfp",
+        "originalFilename": "FSEC-for-Building-Permit-BFP.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 248824,
+        "pageCount": 1,
+        "checksum": "76732ab198112885db2389b718fc8f463200f68ec18592910d030aa96094183b",
+        "isCurrent": true,
+        "revisionLabel": "BFP-QSF-FSED-001 REV.02 (08.24.20)"
+      },
+      {
+        "id": "70dc60e7-a815-43dc-8255-a53a86279224",
+        "familySlug": "fsic-for-occupancy-permit-bfp",
+        "originalFilename": "FSIC-for-Occupancy-Permit-BFP.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 201566,
+        "pageCount": 1,
+        "checksum": "f414c0fb2d949c51e3a02e6cf5f639e3718c920b0363c2f36580b9615886c92a",
+        "isCurrent": true,
+        "revisionLabel": "BFP-QSF-FSED-002 REV.02 (08.24.20)"
+      },
+      {
+        "id": "ef94781f-d2bb-499f-89e6-b4f2650905f7",
+        "familySlug": "fencing-permit-form",
+        "originalFilename": "Fencing-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 626738,
+        "pageCount": 2,
+        "checksum": "02ec3f57cb8f376471cf0e5bce425652cbc2dea6cf702fe48d5687439ae65bf8",
+        "isCurrent": true
+      },
+      {
+        "id": "bd6c71ae-cbed-41eb-9792-3a4c2e7894fb",
+        "familySlug": "mechanical-permit-form",
+        "originalFilename": "Mechanical-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 1311322,
+        "pageCount": 2,
+        "checksum": "f1d6420e49222e1a817f2899f721779936a29b44e9ac1a96a829c57cf9078a13",
+        "isCurrent": true
+      },
+      {
+        "id": "95a56b80-66cd-475d-9736-4719bbd999b3",
+        "familySlug": "plumbing-permit-form",
+        "originalFilename": "Plumbing-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 126848,
+        "pageCount": 2,
+        "checksum": "48871c51559f5cf057fddd97276d87f713f26640af499d45ac8906fb7f17e58d",
+        "isCurrent": true
+      },
+      {
+        "id": "b5a365dd-90b9-4036-8973-53dca2b3ecc1",
+        "familySlug": "sanitary-permit-form",
+        "originalFilename": "Sanitary-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 106609,
+        "pageCount": 2,
+        "checksum": "6561202fd5aa337afbae04c07f8315b652db0eb7b5f0aaaea9650ca7132e0899",
+        "isCurrent": true
+      },
+      {
+        "id": "2261414d-4d3d-42d0-aaa0-3b5c3d71d2a0",
+        "familySlug": "zoning-locational-clearance-form",
+        "originalFilename": "Zoning-Locational-Clearance-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 229179,
+        "pageCount": 1,
+        "checksum": "e8396d6189db40e1ea2101dff39276297a10b2d1a5561626c8cf643be1c7b553",
+        "isCurrent": true,
+        "revisionLabel": "FM-MPD-01, Updated as of August 2024"
+      }
+    ]
+  },
+  "GET /forms/{familySlug}/revisions": {
+    "revisions": [
+      {
+        "id": "b5a365dd-90b9-4036-8973-53dca2b3ecc1",
+        "familySlug": "sanitary-permit-form",
+        "originalFilename": "Sanitary-Permit-Form.pdf",
+        "contentType": "application/pdf",
+        "byteSize": 106609,
+        "pageCount": 2,
+        "checksum": "6561202fd5aa337afbae04c07f8315b652db0eb7b5f0aaaea9650ca7132e0899",
+        "isCurrent": true
+      }
+    ]
+  },
+  "GET /search": {
+    "results": [
+      {
+        "entityType": "permit",
+        "slug": "zoning-locational-clearance",
+        "title": "Zoning / Locational Clearance",
+        "summary": "Confirms that a proposed project or business location is consistent with the municipality’s zoning ordinance and land use plan. Usually the first step before applying for a Building Permit.",
+        "score": 0.6822294,
+        "facet": "zoning"
+      },
+      {
+        "entityType": "permit",
+        "slug": "building-permit-new-construction",
+        "title": "Building Permit – New Construction",
+        "summary": "Required before starting construction of a new building or structure, confirming that plans meet the National Building Code and local zoning rules.",
+        "score": 0.24317084,
+        "facet": "engineering"
+      },
+      {
+        "entityType": "office",
+        "slug": "municipal-planning-development",
+        "title": "Municipal Planning and Development Office",
+        "summary": "Formulates the municipality’s development plans, programs, and investment priorities.",
+        "score": 0.12158542,
+        "facet": "development"
+      }
+    ],
+    "total": 3
+  },
+  "GET /announcements": {
+    "announcements": [],
+    "total": 0,
+    "limit": 20,
+    "offset": 0
+  },
+  "GET /announcements/count": {
+    "count": 0
+  }
+}

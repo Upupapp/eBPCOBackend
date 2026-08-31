@@ -21,15 +21,42 @@ import {
  * is invisible until a client trusts the document. `npm run contract:check`
  * fails the gate if this file is stale.
  */
+/**
+ * OpenAPI 3.1 IS JSON Schema 2020-12, where `exclusiveMinimum` is a NUMBER.
+ *
+ * zod-to-json-schema's `openApi3` target — and, in this version, its
+ * `jsonSchema2020-12` target too — emit the OpenAPI 3.0 form
+ * (`exclusiveMinimum: true` beside `minimum: 0`), which is invalid under 3.1
+ * and which a 3.1 client generator reads wrongly. `jsonSchema7` produces the
+ * numeric form that both drafts accept. Caught by validating the document's own
+ * schemas with Ajv rather than by reading it.
+ */
+const SCHEMA_TARGET = { target: 'jsonSchema7' } as const;
+
+/** `$schema` is a document-level keyword and is not valid inside a component. */
+function withoutDialect(schema: unknown): unknown {
+  if (typeof schema !== 'object' || schema === null) return schema;
+  const { $schema: _dialect, ...rest } = schema as Record<string, unknown>;
+  return rest;
+}
+
 const document = {
   openapi: '3.1.0',
   info: {
     title: 'Castilla LGU Portal — public content API',
-    version: '0.1.0',
+    version: '0.2.0',
     description:
-      'Public read API for the Municipality of Castilla, Sorsogon. Content the LGU has not '
-      + 'confirmed is OMITTED from responses rather than returned as null or as a placeholder '
-      + 'string: an absent key means the municipality has not verified that fact.',
+      'API for the Municipality of Castilla, Sorsogon.\n\n'
+      + 'THREE USER TYPES. **PUBLIC** reads this site with no account and is served every '
+      + 'endpoint outside /staff and /session. **CITIZEN** — the single word for what is also '
+      + 'called an applicant or a business owner — files permits through the separate eBPCO '
+      + 'system and has NO account here; this site collects nothing from them, by a recorded '
+      + 'decision. **ADMIN** is LGU staff, with sub-types by access level, and reaches /staff.\n\n'
+      + 'Content the LGU has not confirmed is OMITTED rather than returned as null or as a '
+      + 'placeholder string: an absent key means the municipality has not verified that fact. '
+      + 'A field that is absent when unconfirmed is `optional` in these schemas and never '
+      + '`nullable`, because those describe different situations to a generated client.\n\n'
+      + 'See contract/CHANGELOG.md for what changed and whether it breaks a client.',
   },
   servers: [{ url: 'https://castilla-ebpco.online/api' }],
   paths: {
@@ -105,6 +132,142 @@ const document = {
         responses: {
           200: { description: 'The permit', content: { 'application/json': { schema: { $ref: '#/components/schemas/PermitDetail' } } } },
           404: { description: 'No permit is published with that slug', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/staff/workflow/backlog': {
+      get: {
+        summary: 'What the LGU still has to confirm',
+        description:
+          'Grouped by entity, not by field: a person confirming an office\'s contact does '
+          + 'telephone, email, location and hours in one sitting, and a flat list describes the '
+          + 'same backlog as four times the work. Requires `content:read`.',
+        security: [{ bearer: [] }],
+        responses: { 200: { description: 'The backlog' }, 404: { description: 'No valid session' } },
+      },
+    },
+    '/staff/workflow/proposals': {
+      post: {
+        summary: 'Propose a change',
+        description:
+          'A proposal changes NOTHING a citizen can read until it is confirmed — that is what '
+          + 'makes the four-eyes rule meaningful rather than merely delaying harm. The proposer '
+          + 'is taken from the session and MUST NOT be sent in the body; an undeclared key is '
+          + 'refused outright. Requires `content:propose`.',
+        security: [{ bearer: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/ProposalRequest' } } } },
+        responses: {
+          201: { description: 'Proposal recorded' },
+          400: { description: 'Malformed, or an undeclared key', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          409: { description: 'A proposal is already open for this field', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
+        },
+      },
+    },
+    '/staff/workflow/proposals/{id}/confirm': {
+      post: {
+        summary: 'Confirm a proposal',
+        description:
+          'Refused when the confirmer is the proposer, for a contact field or an official\'s '
+          + 'name — a change to a real person needs two people. Enforced in authorisation before '
+          + 'the handler AND in the domain. Requires `content:confirm`.',
+        security: [{ bearer: [] }],
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string', format: 'uuid' } }],
+        responses: {
+          200: { description: 'Confirmed' },
+          403: { description: 'Four-eyes, or the role lacks content:confirm', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          409: { description: 'Already decided, or another confirmation won the race', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No such proposal, or no valid session' },
+        },
+      },
+    },
+    '/staff/workflow/revert': {
+      post: {
+        summary: 'Return a confirmed field to pending',
+        description:
+          'Keeps the value and its provenance: reverting says "we are no longer standing behind '
+          + 'this", not "we never knew it". Requires `content:confirm`.',
+        security: [{ bearer: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/RevertRequest' } } } },
+        responses: {
+          200: { description: 'Reverted' },
+          409: { description: 'Not currently confirmed', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
+        },
+      },
+    },
+    '/staff/announcements': {
+      post: {
+        summary: 'Draft an announcement',
+        description:
+          'Creates it as a DRAFT: nothing is served until it is published. The body is plain '
+          + 'text and markup is refused — the HTML a browser receives is rendered server-side at '
+          + 'read time. Requires `announcements:publish`.',
+        security: [{ bearer: [] }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/AnnouncementDraft' } } } },
+        responses: {
+          201: { description: 'Drafted' },
+          400: { description: 'Malformed, or the body contains markup', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          409: { description: 'That slug is taken', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
+        },
+      },
+    },
+    '/staff/announcements/{slug}/publish': {
+      post: {
+        summary: 'Publish, or schedule',
+        description:
+          'A `publishAt` in the future is a SCHEDULE — the read queries compare it to the clock, '
+          + 'so the notice appears on its own minute with no deploy and no job running. Requires '
+          + '`announcements:publish`.',
+        security: [{ bearer: [] }],
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: false, content: { 'application/json': { schema: {
+          type: 'object', additionalProperties: false,
+          properties: {
+            publishAt: { type: 'string', format: 'date-time' },
+            expiresAt: { type: 'string', format: 'date-time' },
+          },
+        } } } },
+        responses: {
+          200: { description: 'Published or scheduled' },
+          409: { description: 'Withdrawn, or the expiry precedes publication', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
+        },
+      },
+    },
+    '/staff/announcements/{slug}': {
+      delete: {
+        summary: 'Withdraw an announcement',
+        description:
+          'Stops being served; never deleted. The database refuses a withdrawal with no event '
+          + 'naming who did it. Requires `announcements:publish`.',
+        security: [{ bearer: [] }],
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: false, content: { 'application/json': { schema: {
+          type: 'object', additionalProperties: false,
+          properties: { reason: { type: 'string' } },
+        } } } },
+        responses: {
+          200: { description: 'Withdrawn' },
+          409: { description: 'Already withdrawn, or no such announcement', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
+        },
+      },
+    },
+    '/staff/pages/{key}': {
+      put: {
+        summary: 'Replace a narrative page',
+        description:
+          'Archives the prior text as a revision BEFORE overwriting, and returns the page to '
+          + '`pending` because nobody has sourced the new words. Requires `pages:edit`.',
+        security: [{ bearer: [] }],
+        parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/PageEdit' } } } },
+        responses: {
+          200: { description: 'Replaced' },
+          409: { description: 'No such page', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+          404: { description: 'No valid session' },
         },
       },
     },
@@ -337,10 +500,50 @@ const document = {
       },
     },
     schemas: {
-      OfficeSummary: zodToJsonSchema(officeSummarySchema, { target: 'openApi3' }),
-      OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
-      OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
-      Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      OfficeSummary: withoutDialect(zodToJsonSchema(officeSummarySchema, SCHEMA_TARGET)),
+      OfficeList: withoutDialect(zodToJsonSchema(officeListSchema, SCHEMA_TARGET)),
+      OfficeDetail: withoutDialect(zodToJsonSchema(officeDetailSchema, SCHEMA_TARGET)),
+      Official: withoutDialect(zodToJsonSchema(officialSchema, SCHEMA_TARGET)),
+      ProposalRequest: {
+        type: 'object', additionalProperties: false,
+        required: ['entityType', 'entityId', 'fieldName', 'proposedValue',
+                   'sourceDescription', 'sourcedOn', 'method'],
+        properties: {
+          entityType: { type: 'string' }, entityId: { type: 'string' },
+          fieldName: { type: 'string' }, proposedValue: { type: 'string' },
+          sourceDescription: { type: 'string', minLength: 8,
+            description: "A source someone else could check. 'LGU' is not a source." },
+          sourcedOn: { type: 'string', format: 'date' },
+          method: { type: 'string', enum: ['direct-read', 'search-extraction', 'official-document'] },
+        },
+      },
+      RevertRequest: {
+        type: 'object', additionalProperties: false,
+        required: ['entityType', 'entityId', 'fieldName'],
+        properties: {
+          entityType: { type: 'string' }, entityId: { type: 'string' },
+          fieldName: { type: 'string' },
+        },
+      },
+      AnnouncementDraft: {
+        type: 'object', additionalProperties: false,
+        required: ['slug', 'title', 'body', 'category'],
+        properties: {
+          slug: { type: 'string', pattern: '^[a-z0-9-]+$' },
+          title: { type: 'string' },
+          body: { type: 'string', description: 'Plain text. Markup is refused.' },
+          category: { type: 'string' },
+          attachmentFormId: { type: 'string', format: 'uuid' },
+        },
+      },
+      PageEdit: {
+        type: 'object', additionalProperties: false,
+        required: ['title', 'body', 'isPlaceholder'],
+        properties: {
+          title: { type: 'string' }, body: { type: 'string' },
+          isPlaceholder: { type: 'boolean' },
+        },
+      },
       Session: {
         type: 'object',
         required: ['token', 'account'],
@@ -359,25 +562,25 @@ const document = {
           },
         },
       },
-      ContentPage: zodToJsonSchema(contentPageSchema, { target: 'openApi3' }),
-      PageList: zodToJsonSchema(pageListSchema, { target: 'openApi3' }),
-      PageRevision: zodToJsonSchema(pageRevisionSchema, { target: 'openApi3' }),
-      PageRevisions: zodToJsonSchema(pageRevisionsSchema, { target: 'openApi3' }),
-      SearchResult: zodToJsonSchema(searchResultSchema, { target: 'openApi3' }),
-      SearchResponse: zodToJsonSchema(searchResponseSchema, { target: 'openApi3' }),
-      AnnouncementSummary: zodToJsonSchema(announcementSummarySchema, { target: 'openApi3' }),
-      AnnouncementDetail: zodToJsonSchema(announcementDetailSchema, { target: 'openApi3' }),
-      AnnouncementList: zodToJsonSchema(announcementListSchema, { target: 'openApi3' }),
-      AnnouncementCount: zodToJsonSchema(announcementCountSchema, { target: 'openApi3' }),
-      StoredForm: zodToJsonSchema(storedFormSchema, { target: 'openApi3' }),
-      FormList: zodToJsonSchema(formListSchema, { target: 'openApi3' }),
-      FormRevisions: zodToJsonSchema(formRevisionsSchema, { target: 'openApi3' }),
-      PermitSummary: zodToJsonSchema(permitSummarySchema, { target: 'openApi3' }),
-      PermitCatalogue: zodToJsonSchema(permitCatalogueSchema, { target: 'openApi3' }),
-      PermitDetail: zodToJsonSchema(permitDetailSchema, { target: 'openApi3' }),
-      OfficialList: zodToJsonSchema(officialListSchema, { target: 'openApi3' }),
-      ProfileField: zodToJsonSchema(profileFieldSchema, { target: 'openApi3' }),
-      MunicipalityProfile: zodToJsonSchema(municipalityProfileSchema, { target: 'openApi3' }),
+      ContentPage: withoutDialect(zodToJsonSchema(contentPageSchema, SCHEMA_TARGET)),
+      PageList: withoutDialect(zodToJsonSchema(pageListSchema, SCHEMA_TARGET)),
+      PageRevision: withoutDialect(zodToJsonSchema(pageRevisionSchema, SCHEMA_TARGET)),
+      PageRevisions: withoutDialect(zodToJsonSchema(pageRevisionsSchema, SCHEMA_TARGET)),
+      SearchResult: withoutDialect(zodToJsonSchema(searchResultSchema, SCHEMA_TARGET)),
+      SearchResponse: withoutDialect(zodToJsonSchema(searchResponseSchema, SCHEMA_TARGET)),
+      AnnouncementSummary: withoutDialect(zodToJsonSchema(announcementSummarySchema, SCHEMA_TARGET)),
+      AnnouncementDetail: withoutDialect(zodToJsonSchema(announcementDetailSchema, SCHEMA_TARGET)),
+      AnnouncementList: withoutDialect(zodToJsonSchema(announcementListSchema, SCHEMA_TARGET)),
+      AnnouncementCount: withoutDialect(zodToJsonSchema(announcementCountSchema, SCHEMA_TARGET)),
+      StoredForm: withoutDialect(zodToJsonSchema(storedFormSchema, SCHEMA_TARGET)),
+      FormList: withoutDialect(zodToJsonSchema(formListSchema, SCHEMA_TARGET)),
+      FormRevisions: withoutDialect(zodToJsonSchema(formRevisionsSchema, SCHEMA_TARGET)),
+      PermitSummary: withoutDialect(zodToJsonSchema(permitSummarySchema, SCHEMA_TARGET)),
+      PermitCatalogue: withoutDialect(zodToJsonSchema(permitCatalogueSchema, SCHEMA_TARGET)),
+      PermitDetail: withoutDialect(zodToJsonSchema(permitDetailSchema, SCHEMA_TARGET)),
+      OfficialList: withoutDialect(zodToJsonSchema(officialListSchema, SCHEMA_TARGET)),
+      ProfileField: withoutDialect(zodToJsonSchema(profileFieldSchema, SCHEMA_TARGET)),
+      MunicipalityProfile: withoutDialect(zodToJsonSchema(municipalityProfileSchema, SCHEMA_TARGET)),
       Problem: {
         type: 'object',
         description: 'RFC 9457 Problem Details.',
