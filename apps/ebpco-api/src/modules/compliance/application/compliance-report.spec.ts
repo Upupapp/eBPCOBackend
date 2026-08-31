@@ -77,21 +77,21 @@ const run = (calendar = complete, now = new Date('2026-09-15T02:00:00Z')) =>
 
 describe('what the report counts', () => {
   it('counts an application finished inside its pledge as compliant', async () => {
-    await charter('Fencing', 'Simple', 3);
+    await charter('Fencing Permit', 'Simple', 3);
     // Filed Wed 19th, released Tue 25th: the third working day, since Friday
     // the 21st is a holiday.
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-19T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-19T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
 
     const report = await run();
 
     expect(report.totalMeasured).toBe(1);
-    expect(report.rows[0]).toMatchObject({ permitType: 'Fencing', withinPledge: 1, beyondPledge: 0 });
+    expect(report.rows[0]).toMatchObject({ permitType: 'Fencing Permit', withinPledge: 1, beyondPledge: 0 });
     expect(report.overallComplianceRate).toBe(1);
   });
 
   it('counts one finished beyond its pledge as non-compliant', async () => {
-    await charter('Fencing', 'Simple', 3);
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-19T02:00:00Z' });
+    await charter('Fencing Permit', 'Simple', 3);
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-19T02:00:00Z' });
 
     const report = await run();
 
@@ -101,14 +101,14 @@ describe('what the report counts', () => {
 
   it('reconciles against a hand-computed mix', async () => {
     // Acceptance criterion. Three within, one beyond, expected rate 0.75.
-    await charter('Fencing', 'Simple', 3);
+    await charter('Fencing Permit', 'Simple', 3);
     for (const [submitted, completed] of [
       ['2026-08-03T02:00:00Z', '2026-08-06T02:00:00Z'],
       ['2026-08-04T02:00:00Z', '2026-08-07T02:00:00Z'],
       ['2026-08-05T02:00:00Z', '2026-08-10T02:00:00Z'],
       ['2026-08-06T02:00:00Z', '2026-08-20T02:00:00Z'],
     ] as const) {
-      await application({ permitType: 'Fencing', submittedAt: submitted, completedAt: completed });
+      await application({ permitType: 'Fencing Permit', submittedAt: submitted, completedAt: completed });
     }
 
     const report = await run();
@@ -120,10 +120,10 @@ describe('what the report counts', () => {
   });
 
   it('groups by permit type and classification', async () => {
-    await charter('Fencing', 'Simple', 3);
-    await charter('New Construction', 'Complex', 7);
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-06T02:00:00Z' });
-    await application({ permitType: 'New Construction', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-12T02:00:00Z' });
+    await charter('Fencing Permit', 'Simple', 3);
+    await charter('Building Permit – New Construction', 'Complex', 7);
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-06T02:00:00Z' });
+    await application({ permitType: 'Building Permit – New Construction', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-12T02:00:00Z' });
 
     const report = await run();
 
@@ -137,7 +137,7 @@ describe('what the report refuses to count', () => {
     // No charter entry means no promise, and a promise nobody made cannot be
     // broken. This is M-08 showing through: with the schedule unloaded, every
     // application lands here.
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-30T02:00:00Z' });
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-30T02:00:00Z' });
 
     const report = await run();
 
@@ -149,8 +149,8 @@ describe('what the report refuses to count', () => {
   it('does not put an LGU in the missed column on an approximate date', async () => {
     // The worst error this report could make. A proclamation issued later can
     // add working days, and a date that could still move is not evidence.
-    await charter('Fencing', 'Simple', 3);
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
+    await charter('Fencing Permit', 'Simple', 3);
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
 
     const report = await run(incomplete);
 
@@ -161,8 +161,8 @@ describe('what the report refuses to count', () => {
 
   it('reports a null rate rather than 100% when nothing is measurable', async () => {
     // A rate computed over zero applications reads as perfect compliance.
-    await charter('Fencing', 'Simple', 3);
-    await application({ permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
+    await charter('Fencing Permit', 'Simple', 3);
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-25T02:00:00Z' });
 
     const report = await run(incomplete);
 
@@ -171,8 +171,8 @@ describe('what the report refuses to count', () => {
   });
 
   it('counts nothing outside the reporting window', async () => {
-    await charter('Fencing', 'Simple', 3);
-    await application({ permitType: 'Fencing', submittedAt: '2026-06-03T02:00:00Z', completedAt: '2026-06-06T02:00:00Z' });
+    await charter('Fencing Permit', 'Simple', 3);
+    await application({ permitType: 'Fencing Permit', submittedAt: '2026-06-03T02:00:00Z', completedAt: '2026-06-06T02:00:00Z' });
 
     expect((await run()).totalMeasured).toBe(0);
   });
@@ -182,9 +182,9 @@ describe('the applicant’s own delay is not the LGU’s', () => {
   it('excludes time the applicant held a deficiency', async () => {
     // RA 11032 excludes it, and counting it would attribute the applicant's
     // delay to the LGU.
-    await charter('Fencing', 'Simple', 3);
+    await charter('Fencing Permit', 'Simple', 3);
     const id = await application({
-      permitType: 'Fencing', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-28T02:00:00Z',
+      permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-28T02:00:00Z',
     });
     await db.query(
       `insert into application_transitions (application_id, from_status, to_status, occurred_at)

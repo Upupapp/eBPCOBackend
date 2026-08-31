@@ -110,7 +110,7 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<void> {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
                                  application_action, lifecycle_status, location, submitted_at, created_by)
-       values ($1,$2,$3,$4,'Fencing','New','Submitted',$5, now(), $6)`,
+       values ($1,$2,$3,$4,'Fencing Permit','New','Submitted',$5, now(), $6)`,
       [id, `E-BPCO-2026-${String(sequence).padStart(6, '0')}`, applicant, business,
        `${sequence * 10} Rizal Street, Poblacion`, account],
     );
@@ -127,7 +127,7 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<void> {
   for (const [line, amount] of [['filing', 50_000], ['processing', 120_000], ['structural', 512_000]] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
       [line, amount],
     );
   }

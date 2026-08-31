@@ -41,7 +41,7 @@ async function seedWorld(): Promise<void> {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1, 'BP-2026-000001', $2, 'Fencing', 'New', 'Submitted', now(), $3)`,
+     values ($1, 'BP-2026-000001', $2, 'Fencing Permit', 'New', 'Submitted', now(), $3)`,
     [APPLICATION, APPLICANT, CITIZEN],
   );
 }
@@ -111,7 +111,7 @@ describe('the lifecycle is enforced by the database', () => {
       db.query(
         `insert into applications (reference_number, applicant_id, permit_type, application_action,
                                    lifecycle_status, submitted_at, created_by)
-         values ('BP-2026-000002', $1, 'Fencing', 'New', 'Approved', now(), $2)`,
+         values ('BP-2026-000002', $1, 'Fencing Permit', 'New', 'Approved', now(), $2)`,
         [APPLICANT, CITIZEN],
       ),
     ).rejects.toThrow(/may not be created at status/);
@@ -145,7 +145,7 @@ describe('the lifecycle is enforced by the database', () => {
       db.query(
         `insert into applications (reference_number, applicant_id, permit_type, application_action,
                                    lifecycle_status, submitted_at, created_by)
-         values ('BP-2026-000003', $1, 'Fencing', 'New', 'Draft', now(), $2)`,
+         values ('BP-2026-000003', $1, 'Fencing Permit', 'New', 'Draft', now(), $2)`,
         [APPLICANT, CITIZEN],
       ),
     ).rejects.toThrow();

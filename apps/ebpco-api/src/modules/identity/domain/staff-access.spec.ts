@@ -24,7 +24,7 @@ const ROLES: readonly StaffRole[] = [
   'building-official', 'releasing-officer', 'administrator', 'auditor', 'super-admin',
 ];
 
-const PERMIT_TYPES = ['New Construction', 'Renovation', 'Demolition', 'Electrical'];
+const PERMIT_TYPES = ['Building Permit – New Construction', 'Building Permit – Renovation / Alteration', 'Demolition Permit', 'Electrical Permit'];
 
 const access = (level: AccessLevel, permitTypes: readonly string[]): StaffAccess =>
   ({ level, permitTypes });
@@ -94,7 +94,7 @@ describe('the forms allow-list fails closed', () => {
 
   it('treats an unassigned account as no access, not all access', () => {
     expect(NO_ACCESS.permitTypes).toEqual([]);
-    expect(mayWorkOn(NO_ACCESS, 'New Construction')).toBe(false);
+    expect(mayWorkOn(NO_ACCESS, 'Building Permit – New Construction')).toBe(false);
   });
 
   it('lets view-only see every form without acting on any', () => {
@@ -114,20 +114,28 @@ describe('the forms allow-list fails closed', () => {
     // RETIRED. The grant stays readable — it explains why the officer had
     // access — and simply matches nothing live. Retirement is a flag, never a
     // delete, so the row cannot dangle.
-    const granted = access('view-edit', ['Sanitary/Plumbing']);
+    const granted = access('view-edit', ['Sanitary Permit']);
 
-    expect(mayWorkOn(granted, 'Sanitary/Plumbing')).toBe(true);
-    expect(mayWorkOn(granted, 'New Construction')).toBe(false);
+    expect(mayWorkOn(granted, 'Sanitary Permit')).toBe(true);
+    expect(mayWorkOn(granted, 'Building Permit – New Construction')).toBe(false);
   });
 
   it('is case- and whitespace-exact, because these are keys not labels', () => {
-    // Internal keys, never published names. A near-match must NOT be treated as
-    // a match: 'Fencing' and 'Fencing Permit' are different vocabularies, and
-    // an authorisation decision is the last place to be lenient about it.
-    const granted = access('view-edit', ['New Construction']);
+    // A near-match must NOT be treated as a match, and an authorisation
+    // decision is the last place to be lenient about it.
+    //
+    // This used to contrast the internal key with the published name. Since
+    // migration 033 (D-10) they are the same string, so what is left is the
+    // sharper case: the RETIRED key and the wrong casing of the live one. Both
+    // are what a stale client or a hand-edited config would send.
+    const granted = access('view-edit', ['Building Permit – New Construction']);
 
     expect(mayWorkOn(granted, 'new construction')).toBe(false);
     expect(mayWorkOn(granted, 'New Construction ')).toBe(false);
+    // The old key, and the en dash replaced by a hyphen -- the two ways this
+    // exact string is most likely to arrive wrong.
+    expect(mayWorkOn(granted, 'New Construction')).toBe(false);
+    expect(mayWorkOn(granted, 'Building Permit - New Construction')).toBe(false);
   });
 });
 
@@ -147,6 +155,6 @@ describe('level and forms answer different questions', () => {
     const granted = access(level, forms);
 
     expect(mayAct(granted)).toBe(act);
-    expect(mayWorkOn(granted, 'New Construction')).toBe(see);
+    expect(mayWorkOn(granted, 'Building Permit – New Construction')).toBe(see);
   });
 });

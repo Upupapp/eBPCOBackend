@@ -23,8 +23,8 @@ describe('the filter is a row predicate, not a list to sift', () => {
   });
 
   it('narrows a staff caller to their assigned types', () => {
-    expect(formFilterFor(staff(), access(['New Construction', 'Renovation'])))
-      .toEqual({ kind: 'permit-types', permitTypes: ['New Construction', 'Renovation'] });
+    expect(formFilterFor(staff(), access(['Building Permit – New Construction', 'Building Permit – Renovation / Alteration'])))
+      .toEqual({ kind: 'permit-types', permitTypes: ['Building Permit – New Construction', 'Building Permit – Renovation / Alteration'] });
   });
 });
 

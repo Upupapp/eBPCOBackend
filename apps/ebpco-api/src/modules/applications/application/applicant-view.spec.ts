@@ -3,7 +3,7 @@ import { ApplicationRecord, toApplicantView } from './applicant-view';
 const record = (overrides: Partial<ApplicationRecord> = {}): ApplicationRecord => ({
   id: 'app-1',
   referenceNumber: 'BP-2026-000418',
-  permitType: 'Fencing',
+  permitType: 'Fencing Permit',
   permitTypeName: 'Fencing Permit',
   serviceDomain: 'Construction Permit',
   applicationAction: 'New',

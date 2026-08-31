@@ -62,7 +62,7 @@ const get = (url: string, bearer: string) =>
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
 
 const submission = (overrides: Record<string, unknown> = {}): Record<string, unknown> => ({
-  permitType: 'Fencing',
+  permitType: 'Fencing Permit',
   applicationAction: 'New',
   location: '12 Rizal Street, Poblacion Uno',
   ...overrides,

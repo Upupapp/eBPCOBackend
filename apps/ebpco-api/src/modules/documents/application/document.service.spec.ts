@@ -64,7 +64,7 @@ beforeEach(async () => {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,'BP-2026-000001',$2,'Fencing','New','Submitted',now(),$3)`,
+     values ($1,'BP-2026-000001',$2,'Fencing Permit','New','Submitted',now(),$3)`,
     [APPLICATION, applicantId, OWNER_ACCOUNT],
   );
 });
@@ -482,7 +482,7 @@ describe('retention', () => {
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
        values ($1,'BP-2026-000099',(select applicant_id from applications where id = $2),
-               'Fencing','New','Submitted',now(),$3)`,
+               'Fencing Permit','New','Submitted',now(),$3)`,
       [recentApplication, APPLICATION, OWNER_ACCOUNT],
     );
     const recentDocument = randomUUID();

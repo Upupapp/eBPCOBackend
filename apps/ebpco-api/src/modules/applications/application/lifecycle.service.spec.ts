@@ -48,7 +48,7 @@ async function seed(): Promise<void> {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1, 'BP-2026-000001', $2, 'Fencing', 'New', 'Submitted', now(), $3)`,
+     values ($1, 'BP-2026-000001', $2, 'Fencing Permit', 'New', 'Submitted', now(), $3)`,
     [APPLICATION, APPLICANT, APPLICANT_ACCOUNT],
   );
 }

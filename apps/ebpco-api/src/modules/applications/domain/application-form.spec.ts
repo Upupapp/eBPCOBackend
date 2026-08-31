@@ -120,6 +120,6 @@ describe('semantic schemas', () => {
     // registry existing while empty is what makes the absence visible and typed
     // rather than an omission somebody has to notice.
     expect(Object.keys(FORM_SCHEMAS)).toEqual([]);
-    expect(schemaFor('Fencing')).toBeUndefined();
+    expect(schemaFor('Fencing Permit')).toBeUndefined();
   });
 });

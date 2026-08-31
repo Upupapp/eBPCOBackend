@@ -31,7 +31,7 @@ let joseApplicant: string;
 const maria: Caller = { accountId: MARIA, kind: 'applicant', scopes: APPLICANT_SCOPES };
 
 const submission = (overrides: Partial<Submission> = {}): Submission => ({
-  permitType: 'Fencing',
+  permitType: 'Fencing Permit',
   applicationAction: 'New',
   businessId: null,
   location: '12 Rizal Street, Poblacion Uno',
@@ -168,7 +168,7 @@ describe('replay, which is what the offline queue does', () => {
     await submissions.submit({ caller: maria, submission: submission(), idempotencyKey: key });
 
     const different = await submissions.submit({
-      caller: maria, submission: submission({ permitType: 'Demolition' }), idempotencyKey: key,
+      caller: maria, submission: submission({ permitType: 'Demolition Permit' }), idempotencyKey: key,
     });
 
     expect(different.ok).toBe(false);
@@ -306,8 +306,8 @@ describe('the pledge an applicant is given', () => {
     await db.query(
       `insert into charter_entries (id, permit_type, classification, pledged_working_days,
                                     effective_from, effective_to, fee_schedule_version, legal_basis)
-       values ($1,'Fencing','Simple',7,'2026-01-01','2027-01-01','2026.1','Charter 2026'),
-              ($2,'Fencing','Complex',20,'2027-01-01',null,'2027.1','Charter 2027')`,
+       values ($1,'Fencing Permit','Simple',7,'2026-01-01','2027-01-01','2026.1','Charter 2026'),
+              ($2,'Fencing Permit','Complex',20,'2027-01-01',null,'2027.1','Charter 2027')`,
       [older, newer],
     );
 

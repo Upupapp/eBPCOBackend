@@ -95,7 +95,7 @@ async function loadSchedule(): Promise<void> {
   ] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1', 'Fencing', $1, $2, $3)`,
+       values ('2026.1', 'Fencing Permit', $1, $2, $3)`,
       [line, amount, basis],
     );
   }
@@ -124,7 +124,7 @@ beforeEach(async () => {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,'BP-2026-000001',$2,'Fencing','New','Submitted',now(),$3)`,
+     values ($1,'BP-2026-000001',$2,'Fencing Permit','New','Submitted',now(),$3)`,
     [APPLICATION, applicantId, APPLICANT_ACCOUNT],
   );
 });
@@ -154,7 +154,7 @@ describe('a fee cannot be invented', () => {
     );
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1', 'Demolition', 'filing', 50000, 'Ordinance s.3')`,
+       values ('2026.1', 'Demolition Permit', 'filing', 50000, 'Ordinance s.3')`,
     );
 
     const result = await workflow.draft({ applicationId: APPLICATION, officer: assessor });
@@ -169,7 +169,7 @@ describe('a fee cannot be invented', () => {
     );
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2027.1', 'Fencing', 'filing', 50000, 'Ordinance s.3')`,
+       values ('2027.1', 'Fencing Permit', 'filing', 50000, 'Ordinance s.3')`,
     );
 
     expect((await workflow.draft({ applicationId: APPLICATION, officer: assessor })).ok).toBe(false);
@@ -556,7 +556,7 @@ describe('reconciliation', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
+       values ($1,$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
       [application, `BP-2026-${receipt}`, applicantRow.rows[0]?.id, APPLICANT_ACCOUNT],
     );
     await approvedAssessment(application);
@@ -680,7 +680,7 @@ describe('the Order of Payment number', () => {
       await db.query(
         `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                    lifecycle_status, submitted_at, created_by)
-         values ($1,$2,(select applicant_id from applications where id = $3),'Fencing','New',
+         values ($1,$2,(select applicant_id from applications where id = $3),'Fencing Permit','New',
                  'Submitted',now(),$4)`,
         [application, `BP-2026-EXTRA-${i}`, APPLICATION, APPLICANT_ACCOUNT],
       );

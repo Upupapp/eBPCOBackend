@@ -60,7 +60,7 @@ const WALK_IN = {
     firstName: 'Maria', lastName: 'Santos',
     email: 'maria.walkin@example.ph', mobileNumber: '+639171234567',
   },
-  permitType: 'Fencing',
+  permitType: 'Fencing Permit',
   applicationAction: 'New' as const,
   location: '12 Rizal Street, Poblacion',
 };
@@ -450,7 +450,7 @@ describe('what a renewal renews', () => {
     await expect(db.query(
       `insert into applications (reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ('E-BPCO-2026-999999', $1, 'Fencing', 'Renewal', 'Submitted', now(), $2)`,
+       values ('E-BPCO-2026-999999', $1, 'Fencing Permit', 'Renewal', 'Submitted', now(), $2)`,
       [applicant.rows[0]?.id, officerId],
     )).rejects.toThrow(/renewal_names_what_it_renews/);
   });

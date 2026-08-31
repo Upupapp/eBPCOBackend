@@ -101,7 +101,7 @@ async function file(reference: string, target: LifecycleStatus): Promise<string>
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
+     values ($1,$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
     [id, reference, applicantId, APPLICANT_ACCOUNT],
   );
   let current: LifecycleStatus = 'Submitted';
@@ -582,7 +582,7 @@ describe('opening one application', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
                                  application_action, lifecycle_status, submitted_at, created_by)
-       values ($1,'BP-9',$2,$3,'Fencing','New','Submitted',now(),$4)`,
+       values ($1,'BP-9',$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
       [id, applicantId, businessId, APPLICANT_ACCOUNT],
     );
 

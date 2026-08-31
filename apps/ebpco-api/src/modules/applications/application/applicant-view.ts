@@ -28,19 +28,26 @@ export interface ApplicationRecord {
   readonly referenceNumber: string;
   readonly permitType: string;
   /**
-   * The published name for `permitType`, or null when there is no agreed one.
+   * The published name for `permitType` -- now always equal to it.
    *
-   * `permitType` is this service's internal key -- 'Fencing', 'Civil/Structural'.
-   * The admin portal and the public portal both publish a different, longer
-   * vocabulary -- 'Fencing Permit', 'Civil / Structural Permit'. Serving the
-   * published name here means a client binds to it directly instead of casting
-   * the key into a union that does not contain it.
+   * This field existed because there were two vocabularies: this service keyed
+   * its records on short internal names ('Fencing', 'Civil/Structural') while
+   * the admin portal and the public portal published longer ones, and a client
+   * binding to the published name had to cast the key into a union that did not
+   * contain it. It could be null, because six internal keys had no agreed
+   * published name.
    *
-   * Null is a real answer: six internal keys have no agreed published name, and
-   * echoing the key back in a field that promises one would be the same defect
-   * one layer down.
+   * D-10 ended that. Since migration 033 the office's published name IS the
+   * key, so there is one vocabulary, nothing to translate, and no null: the
+   * type is narrowed to `string` because the old value is no longer reachable,
+   * not merely unlikely.
+   *
+   * Kept rather than removed because both citizen clients and the admin portal
+   * read it today, and the ruling was that the backend moves and the front ends
+   * do not. Redundant, and the one field here worth retiring once no client
+   * reads it.
    */
-  readonly permitTypeName: string | null;
+  readonly permitTypeName: string;
   readonly serviceDomain: string;
   readonly applicationAction: string;
   readonly lifecycleStatus: LifecycleStatus;

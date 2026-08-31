@@ -125,7 +125,7 @@ async function file(status: LifecycleStatus = 'Submitted'): Promise<string> {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, location, submitted_at, created_by)
-     values ($1,$2,$3,'Fencing','New','Submitted','12 Rizal Street', now(), $4)`,
+     values ($1,$2,$3,'Fencing Permit','New','Submitted','12 Rizal Street', now(), $4)`,
     [id, `E-BPCO-2026-${String(sequence).padStart(6, '0')}`, applicantId, applicantAccount],
   );
   // Walked, not jumped. The database enforces the transition table too, so

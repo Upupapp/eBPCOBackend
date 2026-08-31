@@ -81,11 +81,11 @@ describe('redaction', () => {
   });
 
   it('keeps fields that carry no personal data', () => {
-    expect(redact({ status: 422, route: '/applications/:id', durationMs: 12, permitType: 'Fencing' })).toEqual({
+    expect(redact({ status: 422, route: '/applications/:id', durationMs: 12, permitType: 'Fencing Permit' })).toEqual({
       status: 422,
       route: '/applications/:id',
       durationMs: 12,
-      permitType: 'Fencing',
+      permitType: 'Fencing Permit',
     });
   });
 

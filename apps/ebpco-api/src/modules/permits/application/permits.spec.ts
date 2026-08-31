@@ -32,7 +32,7 @@ const EDGES: ReadonlyArray<readonly [LifecycleStatus, LifecycleStatus]> = [
   ['Permit Generated', 'Ready for Release'],
 ];
 
-async function file(reference: string, target: LifecycleStatus, permitType = 'Fencing'): Promise<string> {
+async function file(reference: string, target: LifecycleStatus, permitType = 'Fencing Permit'): Promise<string> {
   const id = randomUUID();
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
@@ -121,7 +121,7 @@ describe('the permit number', () => {
   it('says what kind of permit it is', async () => {
     // An applicant reads it aloud at a counter and writes it on a form. A
     // prefix makes a misfiled permit obvious; an opaque serial does not.
-    const id = await file('BP-1', 'Approved', 'Fencing');
+    const id = await file('BP-1', 'Approved', 'Fencing Permit');
 
     const result = await permits.generate({ applicationId: id, officer: official, scope: SCOPE, conditions: [] });
 
@@ -183,8 +183,8 @@ describe('the counter behind the number', () => {
   it('counts each permit type separately', async () => {
     // An LGU numbers its fencing permits and its new-construction permits
     // independently, and restarts both in January.
-    const fence = await file('BP-1', 'Approved', 'Fencing');
-    const building = await file('BP-2', 'Approved', 'New Construction');
+    const fence = await file('BP-1', 'Approved', 'Fencing Permit');
+    const building = await file('BP-2', 'Approved', 'Building Permit – New Construction');
 
     const first = await permits.generate({ applicationId: fence, officer: official, scope: SCOPE, conditions: [] });
     const second = await permits.generate({ applicationId: building, officer: official, scope: SCOPE, conditions: [] });

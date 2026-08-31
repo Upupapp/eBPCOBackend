@@ -2,7 +2,6 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { CalendarRepository } from '../../compliance/application/calendar.repository';
 import { Classification, computePledge } from '../../compliance/domain/pledge-clock';
 import { ApplicationRecord, toApplicantView } from './applicant-view';
-import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
  * An applicant's own applications, and nothing else's.
@@ -203,11 +202,14 @@ export class ApplicantQueryService {
       id: row.id as string,
       referenceNumber: row.reference_number as string,
       permitType: row.permit_type as string,
-      // The name a citizen would recognise, beside the internal key.
-      // Additive: `permitType` keeps its meaning, so no client breaks. It exists
-      // because the admin portal was casting the key into its own published-name
-      // union with `as`, holding a value that union does not contain.
-      permitTypeName: publishedNameFor(row.permit_type as string),
+      // Kept, and now equal to `permitType`. Since migration 033 the stored key
+      // IS the office's published name, so there is one vocabulary and nothing
+      // to translate -- this field used to be the output of a lookup table that
+      // the D-10 ruling abolished. Retained rather than removed because both
+      // citizen clients and the admin portal read it today, and the ruling was
+      // that the backend moves and the front ends do not. It is redundant, and
+      // is the one thing here worth retiring once no client reads it.
+      permitTypeName: row.permit_type as string,
       serviceDomain: row.service_domain as string,
       applicationAction: row.application_action as string,
       lifecycleStatus: row.lifecycle_status as ApplicationRecord['lifecycleStatus'],

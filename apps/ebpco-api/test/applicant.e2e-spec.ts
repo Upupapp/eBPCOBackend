@@ -56,7 +56,7 @@ async function file(applicantId: string, reference: string, target: LifecycleSta
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                location, lifecycle_status, submitted_at, created_by)
-     values ($1,$2,$3,'Fencing','New','12 Rizal Street','Submitted','2026-08-10T02:00:00Z',$4)`,
+     values ($1,$2,$3,'Fencing Permit','New','12 Rizal Street','Submitted','2026-08-10T02:00:00Z',$4)`,
     [id, reference, applicantId, MARIA],
   );
   let current: LifecycleStatus = 'Submitted';

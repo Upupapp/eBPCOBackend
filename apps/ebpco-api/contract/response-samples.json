@@ -57,7 +57,7 @@
           {
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000045",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "permitTypeName": "Fencing Permit",
             "applicationAction": "New",
             "lifecycleStatus": "Approved",
@@ -85,7 +85,7 @@
           {
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000044",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "permitTypeName": "Fencing Permit",
             "applicationAction": "New",
             "lifecycleStatus": "Under Evaluation",
@@ -113,7 +113,7 @@
           {
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000043",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "permitTypeName": "Fencing Permit",
             "applicationAction": "New",
             "lifecycleStatus": "Ready for Release",
@@ -155,7 +155,7 @@
           {
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000042",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "permitTypeName": "Fencing Permit",
             "applicationAction": "New",
             "lifecycleStatus": "Submitted",
@@ -239,7 +239,7 @@
         "summary": {
           "id": "00000000-0000-4000-8000-000000000000",
           "referenceNumber": "BP-2026-000041",
-          "permitType": "Fencing",
+          "permitType": "Fencing Permit",
           "permitTypeName": "Fencing Permit",
           "applicationAction": "New",
           "lifecycleStatus": "Under Evaluation",
@@ -364,7 +364,7 @@
         "summary": {
           "id": "00000000-0000-4000-8000-000000000000",
           "referenceNumber": "BP-2026-000043",
-          "permitType": "Fencing",
+          "permitType": "Fencing Permit",
           "permitTypeName": "Fencing Permit",
           "applicationAction": "New",
           "lifecycleStatus": "Ready for Release",
@@ -821,7 +821,7 @@
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000042",
             "serviceDomain": "Construction Permit",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "applicationAction": "New",
             "businessId": null,
             "businessName": null,
@@ -849,7 +849,7 @@
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000045",
             "serviceDomain": "Construction Permit",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "applicationAction": "New",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
@@ -892,7 +892,7 @@
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000044",
             "serviceDomain": "Construction Permit",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "applicationAction": "New",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
@@ -920,7 +920,7 @@
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000043",
             "serviceDomain": "Construction Permit",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "applicationAction": "New",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
@@ -963,7 +963,7 @@
             "id": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000041",
             "serviceDomain": "Construction Permit",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "applicationAction": "New",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
@@ -1003,7 +1003,7 @@
         "id": "00000000-0000-4000-8000-000000000000",
         "referenceNumber": "BP-2026-000041",
         "serviceDomain": "Construction Permit",
-        "permitType": "Fencing",
+        "permitType": "Fencing Permit",
         "applicationAction": "New",
         "businessId": "00000000-0000-4000-8000-000000000000",
         "businessName": "Aling Nena Sari-Sari Store",
@@ -1183,7 +1183,7 @@
         "id": "00000000-0000-4000-8000-000000000000",
         "referenceNumber": "E-BPCO-2026-000001",
         "serviceDomain": "Construction Permit",
-        "permitType": "Fencing",
+        "permitType": "Fencing Permit",
         "applicationAction": "New",
         "businessId": null,
         "businessName": null,
@@ -1860,19 +1860,19 @@
             "status": "In force",
             "entries": [
               {
-                "permitType": "Fencing",
+                "permitType": "Fencing Permit",
                 "line": "filing",
                 "amountCentavos": 50000,
                 "basis": "City Ordinance 2026-004 s.3"
               },
               {
-                "permitType": "Fencing",
+                "permitType": "Fencing Permit",
                 "line": "processing",
                 "amountCentavos": 120000,
                 "basis": "City Ordinance 2026-004 s.3"
               },
               {
-                "permitType": "Fencing",
+                "permitType": "Fencing Permit",
                 "line": "structural",
                 "amountCentavos": 512000,
                 "basis": "City Ordinance 2026-004 s.3"
@@ -1979,7 +1979,7 @@
           {
             "applicationId": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000044",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "lifecycleStatus": "Under Evaluation",
             "applicantName": "Maria Santos",
             "businessId": "00000000-0000-4000-8000-000000000000",
@@ -2029,7 +2029,7 @@
           {
             "applicationId": "00000000-0000-4000-8000-000000000000",
             "referenceNumber": "BP-2026-000041",
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "lifecycleStatus": "Under Evaluation",
             "applicantName": "Maria Santos",
             "businessId": "00000000-0000-4000-8000-000000000000",
@@ -2270,7 +2270,7 @@
         "to": "2027-01-01",
         "rows": [
           {
-            "permitType": "Fencing",
+            "permitType": "Fencing Permit",
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "total": 6,

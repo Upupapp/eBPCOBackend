@@ -392,7 +392,7 @@ describe('the overdue Order of Payment sweep', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ($1,$2,$3,'Fencing','New','Submitted', now(), $4)`,
+       values ($1,$2,$3,'Fencing Permit','New','Submitted', now(), $4)`,
       [applicationId, `E-BPCO-2026-${randomUUID().slice(0, 6)}`, applicantId, accountId],
     );
     await db.query(

@@ -75,7 +75,7 @@ async function file(options: {
                                classification, created_by)
      values ($1,$2,$3,$4,$5,'New',$6,$7,$8,$9,$10)`,
     [
-      id, options.reference, applicantId, businessId, options.permitType ?? 'Fencing',
+      id, options.reference, applicantId, businessId, options.permitType ?? 'Fencing Permit',
       startAt,
       startAt === 'Draft' ? null : (options.submittedAt ?? NOW.toISOString()),
       options.charterEntryId ?? null,
@@ -146,7 +146,7 @@ async function loadCharter(pledgedWorkingDays: number): Promise<string> {
   await db.query(
     `insert into charter_entries (id, permit_type, classification, pledged_working_days,
                                   effective_from, fee_schedule_version, legal_basis)
-     values ($1,'Fencing','Simple',$2,'2026-01-01','2026.1','Citizen''s Charter 2026')`,
+     values ($1,'Fencing Permit','Simple',$2,'2026-01-01','2026.1','Citizen''s Charter 2026')`,
     [id, pledgedWorkingDays],
   );
   return id;
@@ -492,10 +492,10 @@ describe('metrics count only what the caller can open', () => {
   };
 
   it('counts only the caller’s own forms in total and byStatus', async () => {
-    await file({ reference: 'BP-1', status: 'Submitted', permitType: 'New Construction' });
-    await file({ reference: 'BP-2', status: 'Submitted', permitType: 'Renovation' });
+    await file({ reference: 'BP-1', status: 'Submitted', permitType: 'Building Permit – New Construction' });
+    await file({ reference: 'BP-2', status: 'Submitted', permitType: 'Building Permit – Renovation / Alteration' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['New Construction']);
+    await assign(caller.accountId, ['Building Permit – New Construction']);
 
     const metrics = await queue.metrics(caller);
 
@@ -507,10 +507,10 @@ describe('metrics count only what the caller can open', () => {
     // The property that matters more than any single number: a card saying 2
     // above a list showing 1 is a bug an officer reports, and a card saying 1
     // above a list showing 1 is trustworthy.
-    await file({ reference: 'BP-3', status: 'Submitted', permitType: 'New Construction' });
-    await file({ reference: 'BP-4', status: 'Submitted', permitType: 'Demolition' });
+    await file({ reference: 'BP-3', status: 'Submitted', permitType: 'Building Permit – New Construction' });
+    await file({ reference: 'BP-4', status: 'Submitted', permitType: 'Demolition Permit' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['New Construction']);
+    await assign(caller.accountId, ['Building Permit – New Construction']);
 
     const metrics = await queue.metrics(caller);
     const page = await queue.page(caller);
@@ -519,7 +519,7 @@ describe('metrics count only what the caller can open', () => {
   });
 
   it('reports nothing at all for an officer with no forms', async () => {
-    await file({ reference: 'BP-5', status: 'Submitted', permitType: 'New Construction' });
+    await file({ reference: 'BP-5', status: 'Submitted', permitType: 'Building Permit – New Construction' });
     const caller = await officer('administrator');
     await assign(caller.accountId, []);
 
@@ -537,9 +537,9 @@ describe('metrics count only what the caller can open', () => {
   it('scopes the statutory pledge figure too', async () => {
     // An officer told they have overdue applications belonging to another
     // office cannot act on the number and cannot correct it.
-    await file({ reference: 'BP-6', status: 'Submitted', permitType: 'Renovation' });
+    await file({ reference: 'BP-6', status: 'Submitted', permitType: 'Building Permit – Renovation / Alteration' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['New Construction']);
+    await assign(caller.accountId, ['Building Permit – New Construction']);
 
     const metrics = await queue.metrics(caller);
 

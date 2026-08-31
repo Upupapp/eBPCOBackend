@@ -281,7 +281,15 @@ export class PermitService {
  * prefix that says what kind of permit it is makes a misfiled one obvious; an
  * opaque serial does not.
  *
- * The keys are the permit types in `permit_types` (migration 002), verbatim.
+ * The keys are the permit types in `permit_types`, verbatim -- the office's
+ * own names since migration 033 renamed them (D-10).
+ *
+ * That rename is exactly the accident this table is built to survive. Every key
+ * here changed at once, and the fallback below is deliberately not a failure,
+ * so nothing would have thrown: every permit number issued afterwards would
+ * quietly have read PRM-2026-###### instead of BP-, FP-, SPP-. The standing
+ * test that asserts every SEEDED type appears here is what caught it, which is
+ * why that test reads the database rather than this file.
  * The first version of this table invented names — "Building Permit",
  * "Occupancy Permit" — that the reference table does not have, so every real
  * application would have fallen through to the generic prefix and no test would
@@ -292,23 +300,30 @@ export class PermitService {
  * adds must not stop a permit being issued while someone updates this file.
  */
 export const PERMIT_NUMBER_PREFIXES: Readonly<Record<string, string>> = {
-  'New Construction': 'BP',
-  Renovation: 'RNV',
-  'Addition/Extension': 'ADD',
-  Demolition: 'DMP',
-  Architectural: 'ARP',
-  'Civil/Structural': 'CSP',
-  Electrical: 'ELP',
-  Mechanical: 'MEP',
-  'Sanitary/Plumbing': 'SPP',
-  Plumbing: 'PLP',
-  Electronics: 'ECP',
-  'Interior Design': 'IDP',
-  Fencing: 'FP',
-  Sign: 'SGP',
-  Excavation: 'EXP',
+  'Building Permit – New Construction': 'BP',
+  'Building Permit – Renovation / Alteration': 'RNV',
+  'Building Permit – Addition / Extension': 'ADD',
+  'Demolition Permit': 'DMP',
+  'Architectural Permit': 'ARP',
+  'Civil / Structural Permit': 'CSP',
+  'Electrical Permit': 'ELP',
+  'Mechanical Permit': 'MEP',
+  'Sanitary Permit': 'SPP',
+  'Plumbing Permit': 'PLP',
+  'Electronics Permit': 'ECP',
+  'Interior Design Permit': 'IDP',
+  'Fencing Permit': 'FP',
+  'Sign Permit': 'SGP',
+  'Excavation Permit': 'EXP',
   'Certificate of Occupancy': 'COO',
   'Business Permit': 'BSP',
+  // The three permits another office issues (migration 033). Their prefixes
+  // are the abbreviations the BFP and the planning office already use on the
+  // paper, so a citizen reading the number aloud at a counter is saying the
+  // same thing the clerk has written on the folder.
+  'Zoning / Locational Clearance': 'ZLC',
+  'FSEC for Building Permit (BFP)': 'FSEC',
+  'FSIC for Occupancy Permit (BFP)': 'FSIC',
 };
 
 /** What an unrecognised permit type gets. Deliberately not a failure. */

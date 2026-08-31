@@ -110,7 +110,7 @@ afterEach(async () => {
 describe('publishing a checklist', () => {
   it('saves it and reads it back in the order the LGU set', async () => {
     // Not alphabetical, and not insertion order once anything has been edited.
-    const response = await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    const response = await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
 
     expect(response.statusCode).toBe(200);
     expect(response.json<{ documents: { code: string }[] }>().documents.map((d) => d.code))
@@ -120,30 +120,52 @@ describe('publishing a checklist', () => {
   it('replaces wholesale, so a document left out is a document dropped', async () => {
     // A diff API would let a client drop a requirement by forgetting to mention
     // it. Replacing makes the omission deliberate.
-    await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
 
-    await send('PUT', '/staff/config/requirements/Fencing', admin, {
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, {
       documents: [CHECKLIST.documents[0]],
     });
 
-    const listed = await send('GET', '/staff/config/requirements/Fencing', officer);
+    const listed = await send('GET', '/staff/config/requirements/Fencing%20Permit', officer);
     expect(listed.json<{ documents: unknown[] }>().documents).toHaveLength(1);
   });
 
   it('keeps an optional document on the list rather than hiding it', async () => {
     // An applicant not told about an optional document cannot choose to bring it.
-    await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
 
-    const listed = await send('GET', '/requirements/Fencing', applicant);
+    const listed = await send('GET', '/requirements/Fencing%20Permit', applicant);
     const photos = listed.json<{ documents: { code: string; required: boolean }[] }>()
       .documents.find((d) => d.code === 'photos');
     expect(photos).toMatchObject({ required: false });
   });
 
+  it('serves a permit type whose name contains a slash (D-10)', async () => {
+    // FOUR of the office's nineteen names contain a forward slash: 'Civil /
+    // Structural Permit', 'Zoning / Locational Clearance', and the Renovation
+    // and Addition building permits. Migration 033 made those names the primary
+    // key, and this route carries the permit type in the PATH.
+    //
+    // A slash in a path segment is the one character that changes what the URL
+    // MEANS rather than how it reads, so this is measured on the real router
+    // rather than reasoned about. If %2F does not route, a citizen cannot see
+    // what four of the nineteen permits require -- silently, as a 404 that
+    // looks like "no checklist published".
+    const encoded = encodeURIComponent('Civil / Structural Permit');
+    expect(encoded).toBe('Civil%20%2F%20Structural%20Permit');
+
+    const published = await send('PUT', `/staff/config/requirements/${encoded}`, admin, CHECKLIST);
+    expect(published.statusCode).toBe(200);
+
+    const listed = await send('GET', `/requirements/${encoded}`, applicant);
+    expect(listed.statusCode).toBe(200);
+    expect(listed.json<{ permitType: string }>().permitType).toBe('Civil / Structural Permit');
+  });
+
   it('refuses two documents sharing a code', async () => {
     // A code is what survives a rename. Two documents sharing one is a
     // checklist that cannot be edited afterwards.
-    const response = await send('PUT', '/staff/config/requirements/Fencing', admin, {
+    const response = await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, {
       documents: [
         { code: 'lot-plan', label: 'Lot Plan', description: '', required: true },
         { code: 'lot-plan', label: 'Lot Plan (signed)', description: '', required: true },
@@ -162,28 +184,28 @@ describe('publishing a checklist', () => {
   it('REFUSES an officer who handles applications but does not set the rules', async () => {
     // Deciding what every future applicant must bring is a different job from
     // handling one application.
-    expect((await send('PUT', '/staff/config/requirements/Fencing', officer, CHECKLIST))
+    expect((await send('PUT', '/staff/config/requirements/Fencing%20Permit', officer, CHECKLIST))
       .statusCode).toBe(403);
   });
 
   it('lets an APPLICANT read it, because a checklist they cannot see is one they discover at a counter', async () => {
-    await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
 
-    const response = await send('GET', '/requirements/Fencing', applicant);
+    const response = await send('GET', '/requirements/Fencing%20Permit', applicant);
 
     expect(response.statusCode).toBe(200);
     expect(response.json<{ documents: unknown[] }>().documents).toHaveLength(3);
   });
 
   it('still refuses an applicant the staff config path', async () => {
-    expect((await send('GET', '/staff/config/requirements/Fencing', applicant)).statusCode).toBe(403);
+    expect((await send('GET', '/staff/config/requirements/Fencing%20Permit', applicant)).statusCode).toBe(403);
   });
 });
 
 describe('what a filed application was judged against', () => {
   const file = async (): Promise<string> => {
     const response = await send('POST', '/applications', applicant, {
-      permitType: 'Fencing', applicationAction: 'New', location: '12 Rizal Street',
+      permitType: 'Fencing Permit', applicationAction: 'New', location: '12 Rizal Street',
       businessId: null, documentIds: [], form: {},
     });
     expect(response.statusCode).toBe(201);
@@ -193,7 +215,7 @@ describe('what a filed application was judged against', () => {
   };
 
   it('captures the checklist at filing', async () => {
-    await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
 
     const applicationId = await file();
 
@@ -207,10 +229,10 @@ describe('what a filed application was judged against', () => {
   it('DOES NOT REWRITE IT when the LGU changes the checklist afterwards', async () => {
     // The rule the whole design exists for. An applicant who submitted
     // everything asked of them cannot become non-compliant retroactively.
-    await send('PUT', '/staff/config/requirements/Fencing', admin, CHECKLIST);
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, CHECKLIST);
     const applicationId = await file();
 
-    await send('PUT', '/staff/config/requirements/Fencing', admin, {
+    await send('PUT', '/staff/config/requirements/Fencing%20Permit', admin, {
       documents: [
         ...CHECKLIST.documents,
         { code: 'barangay-clearance', label: 'Barangay Clearance', description: '', required: true },

@@ -64,14 +64,20 @@ describe('the schema exists and fails closed', () => {
   });
 
   it('refuses a permit type that is not a real key', async () => {
-    // The allow-list stores INTERNAL keys. A published name — 'Fencing Permit'
-    // rather than 'Fencing' — must not be storable, or a display label ends up
-    // deciding authorisation.
+    // This test used to contrast the internal key 'Fencing' with the published
+    // name 'Fencing Permit', on the rule that a display label must never decide
+    // authorisation. Migration 033 (D-10) ended that distinction: the office's
+    // published name IS the key, and there is one vocabulary.
+    //
+    // So the sentinel is now the RETIRED key. That is the live risk after the
+    // rename -- a stale client, a cached config or an un-migrated service
+    // sending 'Fencing' -- and it must not be storable, because a row here is
+    // an authorisation grant.
     const id = await staffAccount('y@castilla.gov.ph', ['evaluator']);
 
     await expect(query(
       'insert into staff_permit_access (account_id, permit_type, granted_by) values ($1,$2,$1)',
-      [id, 'Fencing Permit'])).rejects.toThrow();
+      [id, 'Fencing'])).rejects.toThrow();
   });
 });
 
@@ -105,6 +111,12 @@ describe('the backfill assigns every existing officer explicitly', () => {
     expect(unassigned).toEqual([]);
   });
 
+  // Also the guard on migration 033's grant (D-10). Inserting a permit type is
+  // not the same as opening it: the staff queue filters on staff_permit_access,
+  // so the three types 033 adds would appear in NO officer's queue and could
+  // not be transitioned by anyone -- a citizen filing the zoning clearance the
+  // ruling just enabled would file into a black hole. This test read 17 granted
+  // against 20 types until 033 granted them.
   it('gives every existing staff account every permit type, preserving today', async () => {
     // The migration must not change behaviour. Today every officer sees every
     // form; the backfill states that in data rather than leaving it implied.
@@ -243,9 +255,9 @@ describe('retirement is a flag, never a delete', () => {
     const id = await staffAccount('officer@castilla.gov.ph', ['evaluator']);
     await query(
       'insert into staff_permit_access (account_id, permit_type, granted_by) values ($1,$2,$1)',
-      [id, 'New Construction']);
+      [id, 'Building Permit – New Construction']);
 
     await expect(query(
-      "delete from permit_types where permit_type = 'New Construction'")).rejects.toThrow();
+      "delete from permit_types where permit_type = 'Building Permit – New Construction'")).rejects.toThrow();
   });
 });

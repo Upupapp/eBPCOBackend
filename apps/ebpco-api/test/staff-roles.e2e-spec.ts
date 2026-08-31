@@ -264,7 +264,7 @@ describe('the role table and the route table agree', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ($1,'BP-2026-090909',$2,'Fencing','New','Submitted', now(), $3)`,
+       values ($1,'BP-2026-090909',$2,'Fencing Permit','New','Submitted', now(), $3)`,
       [application, applicant, account],
     );
 
@@ -318,7 +318,7 @@ describe('the role table and the route table agree', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ($1,'BP-2026-090910',$2,'Fencing','New','Submitted', now(), $3)`,
+       values ($1,'BP-2026-090910',$2,'Fencing Permit','New','Submitted', now(), $3)`,
       [application, applicant, account],
     );
 

@@ -85,13 +85,13 @@ beforeEach(async () => {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                location, lifecycle_status, submitted_at, created_by)
-     values ($1,'E-BPCO-2026-000041',$2,'Fencing','New','12 Rizal Street','Submitted',$3,$4)`,
+     values ($1,'E-BPCO-2026-000041',$2,'Fencing Permit','New','12 Rizal Street','Submitted',$3,$4)`,
     [mariaApplication, mariaApplicant, NOW, MARIA],
   );
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,'E-BPCO-2026-000042',$2,'Fencing','New','Submitted',$3,$4)`,
+     values ($1,'E-BPCO-2026-000042',$2,'Fencing Permit','New','Submitted',$3,$4)`,
     [randomUUID(), joseApplicant, NOW, JOSE],
   );
   await db.query(

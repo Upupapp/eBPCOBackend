@@ -7,7 +7,6 @@ import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
 import { visibleStatusesFor } from '../domain/visibility';
 import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
-import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
  * What an officer sees, and what an officer is allowed to count.
@@ -40,19 +39,18 @@ export interface QueueRow {
   readonly referenceNumber: string;
   readonly permitType: string;
   /**
-   * The published name for `permitType`, or null when there is no agreed one.
+   * The published name for `permitType` -- now always equal to it.
    *
-   * `permitType` is this service's internal key -- 'Fencing', 'Civil/Structural'.
-   * The admin portal and the public portal both publish a different, longer
-   * vocabulary -- 'Fencing Permit', 'Civil / Structural Permit'. Serving the
-   * published name here means a client binds to it directly instead of casting
-   * the key into a union that does not contain it.
+   * There used to be two vocabularies: short internal keys here ('Fencing',
+   * 'Civil/Structural') against the longer names the admin and public portals
+   * published, bridged by a lookup table. D-10 ended that -- since migration
+   * 033 the office's published name IS the key -- so there is nothing to
+   * translate and no null, and the type is narrowed to `string`.
    *
-   * Null is a real answer: six internal keys have no agreed published name, and
-   * echoing the key back in a field that promises one would be the same defect
-   * one layer down.
+   * Kept because the admin portal and both citizen clients read it today. See
+   * the same field on ApplicationRecord in applicant-view.ts.
    */
-  readonly permitTypeName: string | null;
+  readonly permitTypeName: string;
   readonly applicationAction: string;
   readonly lifecycleStatus: LifecycleStatus;
   readonly classification: string | null;
@@ -617,11 +615,14 @@ export class StaffQueueService {
       id: row['id'] as string,
       referenceNumber: row['reference_number'] as string,
       permitType: row['permit_type'] as string,
-      // The name a citizen would recognise, beside the internal key.
-      // Additive: `permitType` keeps its meaning, so no client breaks. It exists
-      // because the admin portal was casting the key into its own published-name
-      // union with `as`, holding a value that union does not contain.
-      permitTypeName: publishedNameFor(row['permit_type'] as string),
+      // Kept, and now equal to `permitType`. Since migration 033 the stored key
+      // IS the office's published name, so there is one vocabulary and nothing
+      // to translate -- this field used to be the output of a lookup table that
+      // the D-10 ruling abolished. Retained rather than removed because both
+      // citizen clients and the admin portal read it today, and the ruling was
+      // that the backend moves and the front ends do not. It is redundant, and
+      // is the one thing here worth retiring once no client reads it.
+      permitTypeName: row['permit_type'] as string,
       applicationAction: row['application_action'] as string,
       lifecycleStatus: row['lifecycle_status'] as LifecycleStatus,
       classification: (row['classification'] as string | null) ?? null,

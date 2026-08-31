@@ -94,7 +94,7 @@ beforeEach(async () => {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,'E-BPCO-2026-000501',$2,'Fencing','New','Submitted', now(), $3)`,
+     values ($1,'E-BPCO-2026-000501',$2,'Fencing Permit','New','Submitted', now(), $3)`,
     [applicationId, applicant, account],
   );
   // Walked to where an assessor can see it. Scope visibility narrows the queue
@@ -113,7 +113,7 @@ beforeEach(async () => {
   for (const [line, amount] of [['filing', 50_000], ['processing', 120_000], ['structural', 512_000]] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
       [line, amount],
     );
   }

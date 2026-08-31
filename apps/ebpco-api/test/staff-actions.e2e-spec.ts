@@ -137,7 +137,7 @@ async function file(reference: string, target: LifecycleStatus): Promise<string>
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
+     values ($1,$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
     [id, reference, applicantId, APPLICANT_ACCOUNT],
   );
   let current: LifecycleStatus = 'Submitted';
@@ -180,7 +180,7 @@ beforeEach(async () => {
   for (const [line, amount] of [['filing', 50_000], ['processing', 120_000], ['structural', 512_000]] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
       [line, amount],
     );
   }
@@ -466,7 +466,7 @@ describe('cash across a counter', () => {
     await db.query(
       `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                  lifecycle_status, submitted_at, created_by)
-       values ($1,'BP-OWN',$2,'Fencing','New','Submitted',now(),$3)`,
+       values ($1,'BP-OWN',$2,'Fencing Permit','New','Submitted',now(),$3)`,
       [own, theirApplicant, cashier],
     );
     await db.query(

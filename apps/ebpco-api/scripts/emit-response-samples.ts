@@ -96,7 +96,7 @@ async function file(db: SqlClient, options: {
     `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
                                application_action, location, lifecycle_status, classification,
                                charter_entry_id, submitted_at, created_by)
-     values ($1,$2,$3,$4,'Fencing','New','12 Rizal Street, Poblacion Uno, Cabuyao',
+     values ($1,$2,$3,$4,'Fencing Permit','New','12 Rizal Street, Poblacion Uno, Cabuyao',
              'Submitted','Simple',$5,$6,$7)`,
     [id, options.reference, options.applicant, options.business, options.charter,
      options.submittedAt, options.applicantAccount],
@@ -197,7 +197,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
   await db.query(
     `insert into charter_entries (id, permit_type, classification, pledged_working_days,
                                   effective_from, fee_schedule_version, legal_basis)
-     values ($1,'Fencing','Simple',7,'2026-01-01','2026.1','Citizen''s Charter 2026, p.14')`,
+     values ($1,'Fencing Permit','Simple',7,'2026-01-01','2026.1','Citizen''s Charter 2026, p.14')`,
     [charter],
   );
   await db.query(`insert into holiday_calendars (year, complete) values (2026, false)`);
@@ -253,7 +253,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
   ] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
       [line, amount],
     );
   }
@@ -519,7 +519,7 @@ async function main(): Promise<void> {
   // has to interpret on replay, and a client built against a guessed shape
   // fails on a handset rather than in a log.
   await record('applicant.applications.submit', 'POST', '/applications', applicantToken, {
-    permitType: 'Fencing',
+    permitType: 'Fencing Permit',
     applicationAction: 'New',
     location: '12 Rizal Street, Poblacion Uno, Cabuyao',
     // A form, so the recorded shape shows what an application actually carries
@@ -531,7 +531,7 @@ async function main(): Promise<void> {
     },
   }, randomUUID());
   await record('problem.formTooLarge', 'POST', '/applications', applicantToken, {
-    permitType: 'Fencing', applicationAction: 'New',
+    permitType: 'Fencing Permit', applicationAction: 'New',
     form: { notes: 'x'.repeat(300_000) },
   }, randomUUID());
   await record('problem.paymentBeforeAssessment', 'POST',
@@ -540,7 +540,7 @@ async function main(): Promise<void> {
       paidOn: '2026-08-20', amountCentavos: 682_000,
     }, randomUUID());
   await record('problem.missingApplicantIdempotencyKey', 'POST', '/applications', applicantToken, {
-    permitType: 'Fencing', applicationAction: 'New',
+    permitType: 'Fencing Permit', applicationAction: 'New',
   });
 
   // The RA 10173 §18 portability right. Recorded before erasure, because that

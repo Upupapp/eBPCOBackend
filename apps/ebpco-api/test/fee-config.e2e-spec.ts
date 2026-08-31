@@ -71,7 +71,7 @@ const soon = (days = 1): string =>
 const SCHEDULE = (version: string, effectiveFrom: string): Record<string, unknown> => ({
   version, effectiveFrom, publishedBy: 'City Ordinance 2027-001',
   entries: [
-    { permitType: 'Fencing', line: 'filing', amountCentavos: 60_000, basis: 'City Ordinance 2027-001 s.3' },
+    { permitType: 'Fencing Permit', line: 'filing', amountCentavos: 60_000, basis: 'City Ordinance 2027-001 s.3' },
   ],
 });
 
@@ -91,7 +91,7 @@ beforeEach(async () => {
   );
   await db.query(
     `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-     values ('2026.1','Fencing','filing',50000,'City Ordinance 2026-004 s.3')`,
+     values ('2026.1','Fencing Permit','filing',50000,'City Ordinance 2026-004 s.3')`,
   );
 });
 
@@ -174,7 +174,7 @@ describe('publishing a fee schedule', () => {
   it('refuses a fee line with no ordinance behind it', async () => {
     const response = await send('POST', '/staff/config/fee-schedules', admin, {
       ...SCHEDULE('2027.3', soon()),
-      entries: [{ permitType: 'Fencing', line: 'filing', amountCentavos: 90_000, basis: '' }],
+      entries: [{ permitType: 'Fencing Permit', line: 'filing', amountCentavos: 90_000, basis: '' }],
     });
 
     expect(response.statusCode).toBe(400);

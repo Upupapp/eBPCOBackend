@@ -103,7 +103,7 @@ async function file(target: LifecycleStatus): Promise<{ id: string; reference: s
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
-     values ($1,$2,$3,'Fencing','New','Submitted',now(),$4)`,
+     values ($1,$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
     [id, reference, applicantId, applicantAccount],
   );
   let current: LifecycleStatus = 'Submitted';
