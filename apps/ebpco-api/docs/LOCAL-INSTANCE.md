@@ -36,13 +36,17 @@ of this service: against real PostgreSQL, `DB_POOL_MAX=10` is correct.
 
 ## Standing it up
 
+Put `DATABASE_URL` in your own `.env` — never in a tracked file. The secret
+scanner refuses a connection string carrying a password anywhere in the
+repository, which is why this page does not print one.
+
 ```sh
 # 1. A database. Port 5433 — 5432 may already be taken on a shared machine,
 #    and running 31 migrations into someone else's database is destructive.
 PGDATA_DIR=/tmp/ebpco-pg node serve.mjs      # see the note on PGDATA_DIR below
 
-# 2. Schema
-DATABASE_URL=postgres://postgres:postgres@localhost:5433/postgres npm run migrate
+# 2. Schema. DATABASE_URL comes from your .env, pointing at localhost:5433.
+npm run migrate
 
 # 3. The service
 npm run start:dev
