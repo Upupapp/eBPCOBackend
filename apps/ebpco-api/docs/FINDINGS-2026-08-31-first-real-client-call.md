@@ -117,3 +117,73 @@ Verified against the running server, not a stub:
 
 Four of six correct, one already satisfied, one actively harmful. That ratio is
 the argument for the exercise.
+
+---
+
+## D-10 — an MFA-required role locks the account out permanently
+
+**Severity: any account created with one of six roles can never sign in.**
+
+Found seeding the first super admin, and it is not specific to seeding.
+
+`MFA_REQUIRED_ROLES` holds `assessor`, `cashier`, `building-official`,
+`releasing-officer`, `administrator` and `super-admin`. At sign-in:
+
+```ts
+if (requiresMfa(account)) {
+  if (totp === undefined) return { ok: false, reason: 'mfa-required' };
+  if (!await this.verifyTotp(account, totp)) { ... return rejected; }
+}
+
+private async verifyTotp(account: Account, presented: string): Promise<boolean> {
+  if (account.totpSecret === null) return false;   // ← never enrolled
+  ...
+}
+```
+
+An account holding such a role and no enrolled secret is refused
+**unconditionally**. And enrolling one is unreachable:
+
+- `POST /me/mfa/enrol` needs a session.
+- A session comes from `/auth/token` — blocked by the above — or
+  `/auth/token/refresh`, which needs a refresh token nobody can obtain.
+- `POST /auth/password/reset` returns **204 and issues no session**, so the
+  recovery flow does not open a window either.
+
+**`POST /staff/users` creates exactly these accounts.** An administrator adding
+another administrator produces an account that is locked out from the moment it
+exists, and nothing in the response says so — it reports the officer should set
+a password through account recovery, which they can do, and it will not help.
+
+### The one path that works today
+
+Create the account with a role that does NOT require MFA, sign in, enrol through
+`/me/mfa`, then grant the MFA-required role with `PATCH /staff/users/:id`. That
+ordering is undocumented and is the opposite of what `POST /staff/users` invites.
+
+### Why nothing caught it
+
+The e2e suites issue staff tokens through `TokenService` directly rather than
+through `/auth/token`, so no test has ever signed a staff account in through the
+password path. `test/mfa.e2e-spec.ts` covers enrolment for an account that can
+already authenticate. The gap is the FIRST sign-in of an MFA-required account,
+which no test performs and every real officer must.
+
+### Fix, in preference order
+
+1. Require MFA only once enrolled, and refuse the ROUTES that matter until it
+   is — so an unenrolled officer can sign in and enrol, and can do nothing else.
+2. Or have `POST /staff/users` return an enrolment ticket, making the second
+   factor part of account creation rather than a step afterwards.
+
+`scripts/seed-super-admin.ts` works around it by completing the enrolment
+itself: it generates the secret through the same `TotpService`, computes the
+current code, activates, and prints the `otpauth://` URI once. That is correct
+for a bootstrap and is not a fix for the six roles above.
+
+### A property worth documenting either way
+
+`activate` stamps `totp_last_step`, and `verifyAtSignIn` refuses that step or
+earlier. The code used to enrol is therefore already spent, and the first
+sign-in must use the NEXT one. Presented too early it returns
+"Those credentials were not accepted", which reads as a wrong password.

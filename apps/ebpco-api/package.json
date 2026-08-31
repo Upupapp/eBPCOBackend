@@ -23,7 +23,8 @@
     "sync:permits": "ts-node --transpile-only scripts/sync-permit-vocabulary.ts",
     "audit:reachability": "ts-node --transpile-only scripts/reachability.ts",
     "audit:samples": "ts-node --transpile-only scripts/sample-coverage.ts",
-    "dev:server": "ts-node --transpile-only scripts/dev-server.ts"
+    "dev:server": "ts-node --transpile-only scripts/dev-server.ts",
+    "seed:super-admin": "ts-node --transpile-only scripts/seed-super-admin.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1121.0",

@@ -131,3 +131,32 @@ lawful. **This satisfies Apple Guideline 5.1.1(v) today.**
 
 **`POST /applications/{id}/documents/{documentId}/resubmit` does not exist** —
 404. See D-8.
+
+## The first staff account
+
+There is no path through the API to it, deliberately: `POST /staff/users` and
+`/staff/access-requests/:id/approve` both require `staff:administer`, only
+`administrator` and `super-admin` hold it, and every public route mints an
+applicant or a row somebody else must act on. A service that could bootstrap its
+own administrator over HTTP would be one anyone could.
+
+```sh
+EBPCO_SUPERADMIN_PASSWORD='…' npm run seed:super-admin
+```
+
+It refuses to run without one and refuses anything under 12 characters. It never
+invents a default: a seeded default is a known credential on every deployment
+that ever ran the script. Rerunning it changes nothing.
+
+**Keep the `otpauth://` URI it prints.** `super-admin` requires MFA and the seed
+enrols it, because an MFA-required account with no enrolled secret can never
+sign in — see D-10. The URI is shown once.
+
+**Wait for the next 30-second window before your first sign-in.** Activation
+stamps `totp_last_step` and sign-in refuses that step or earlier, so the code
+that enrolled is already spent. Used too early you get
+"Those credentials were not accepted", which reads like a wrong password.
+
+**Note if you are backing this with PGlite:** it serves ONE connection, so the
+seed cannot run while the API is up. Stop the service, seed, start it again.
+Against real PostgreSQL this does not arise.
