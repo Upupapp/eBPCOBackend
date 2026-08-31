@@ -108,6 +108,37 @@ const document = {
         },
       },
     },
+    '/session': {
+      post: {
+        summary: 'Sign in',
+        description:
+          'Returns an opaque bearer token, valid 8 hours. Every failure — wrong password, '
+          + 'unknown address, disabled account, locked out — returns the SAME 401 with the same '
+          + 'body, because any difference between them enumerates the LGU\'s staff. The real '
+          + 'reason is written to the sign-in log for the operator.',
+        requestBody: { required: true, content: { 'application/json': { schema: {
+          type: 'object', required: ['email', 'password'], additionalProperties: false,
+          properties: { email: { type: 'string' }, password: { type: 'string' } },
+        } } } },
+        responses: {
+          200: { description: 'Signed in', content: { 'application/json': { schema: { $ref: '#/components/schemas/Session' } } } },
+          401: { description: 'Not accepted', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+      get: {
+        summary: 'Who am I',
+        security: [{ bearer: [] }],
+        responses: { 200: { description: 'The signed-in account' }, 404: { description: 'No valid session' } },
+      },
+      delete: {
+        summary: 'Sign out',
+        description:
+          'Deletes the session row. The row IS the session, so replaying the token afterwards '
+          + 'cannot work — there is no denylist a later code path could forget to consult.',
+        security: [{ bearer: [] }],
+        responses: { 204: { description: 'Signed out' } },
+      },
+    },
     '/pages': {
       get: {
         summary: 'The narrative pages',
@@ -275,11 +306,38 @@ const document = {
     },
   },
   components: {
+    securitySchemes: {
+      bearer: {
+        type: 'http', scheme: 'bearer',
+        description:
+          'An opaque session token from POST /session. Staff routes live under /staff and are '
+          + 'invisible to an unauthenticated caller: they answer 404, not 401, so probing for '
+          + 'which staff endpoints exist reveals nothing.',
+      },
+    },
     schemas: {
       OfficeSummary: zodToJsonSchema(officeSummarySchema, { target: 'openApi3' }),
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      Session: {
+        type: 'object',
+        required: ['token', 'account'],
+        additionalProperties: false,
+        properties: {
+          token: { type: 'string', description: 'Opaque bearer token. Shown once; only its sha256 is stored.' },
+          account: {
+            type: 'object',
+            required: ['email', 'displayName', 'role', 'scopes'],
+            additionalProperties: false,
+            properties: {
+              email: { type: 'string' }, displayName: { type: 'string' },
+              role: { type: 'string', enum: ['viewer', 'content-editor', 'content-approver', 'announcements-publisher', 'administrator'] },
+              scopes: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
       ContentPage: zodToJsonSchema(contentPageSchema, { target: 'openApi3' }),
       PageList: zodToJsonSchema(pageListSchema, { target: 'openApi3' }),
       PageRevision: zodToJsonSchema(pageRevisionSchema, { target: 'openApi3' }),

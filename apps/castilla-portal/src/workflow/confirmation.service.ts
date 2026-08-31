@@ -224,6 +224,16 @@ export class ConfirmationService {
    * location and hours in one sitting. A flat list of 36 contact fields
    * describes the same backlog and reads as four times the work.
    */
+  /**
+   * Who proposed this, so the authorisation layer can apply the four-eyes rule
+   * before the handler runs. Null when there is no open proposal by that id.
+   */
+  async authorOf(proposalId: string): Promise<string | null> {
+    const { rows } = await this.db.query<{ proposed_by: string }>(
+      "select proposed_by from proposals where id = $1 and status = 'open'", [proposalId]);
+    return rows[0]?.proposed_by ?? null;
+  }
+
   async backlog(): Promise<BacklogEntry[]> {
     const rows = await this.db.query<{
       entity_type: string; entity_id: string; field_name: string; label: string | null;

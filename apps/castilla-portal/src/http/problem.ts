@@ -17,6 +17,25 @@ export class ProblemException extends HttpException {
       `No ${what.toLowerCase()} is published with the slug '${slug}'.`);
   }
 
+  /**
+   * One message for every sign-in failure.
+   *
+   * A wrong password, an unknown address, a disabled account and a locked one
+   * all produce this. Any difference between them enumerates the LGU's staff.
+   */
+  static unauthorised(): ProblemException {
+    return new ProblemException(401, 'invalid-credentials', 'Sign-in failed',
+      'That email address and password combination was not accepted.');
+  }
+
+  static forbidden(detail: string): ProblemException {
+    return new ProblemException(403, 'forbidden', 'Not permitted', detail);
+  }
+
+  static conflict(detail: string): ProblemException {
+    return new ProblemException(409, 'conflict', 'Refused', detail);
+  }
+
   static badRequest(detail: string): ProblemException {
     return new ProblemException(400, 'invalid-request', 'Invalid request', detail);
   }
