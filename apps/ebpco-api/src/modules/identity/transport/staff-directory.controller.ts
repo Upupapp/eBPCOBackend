@@ -8,6 +8,7 @@ import { RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 import { ROLE_SCOPES, StaffRole } from '../domain/account';
 import { DirectoryRefusal, StaffDirectoryService, isStaffRole } from '../application/staff-directory.service';
+import { TotpService } from '../application/totp.service';
 
 /**
  * The Users & Roles screen, over HTTP.
@@ -78,7 +79,49 @@ function actorOf(request: AuthenticatedRequest): { accountId: string; role: stri
 
 @Controller('staff/users')
 export class StaffDirectoryController {
-  constructor(private readonly directory: StaffDirectoryService) {}
+  constructor(
+    private readonly directory: StaffDirectoryService,
+    private readonly totp: TotpService,
+  ) {}
+
+  /**
+   * Re-issue an officer's second factor.
+   *
+   * The action the directory has always REPORTED the need for — it returns
+   * `mfaRequired` and `mfaEnrolled` for every account — and never offered. Six
+   * roles require a factor, sign-in refuses without one, enrolling needs a
+   * session the officer cannot obtain, and password reset issues none. An
+   * officer who lost their phone, and every account created holding such a
+   * role, had no way back.
+   *
+   * The provisioning URI is returned ONCE, to the administrator, to hand over
+   * out of band. It is deliberately not a self-service flow: an account that
+   * could sign in far enough to re-enrol its own factor could disable the
+   * protection by clearing it, which is exactly what the sign-in refusal exists
+   * to prevent.
+   */
+  @Post(':userId/mfa/reissue')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('staff:administer')
+  async reissueMfa(
+    @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
+  ): Promise<Record<string, unknown>> {
+    const actor = actorOf(request);
+    const result = await this.totp.reissue({
+      accountId: userId, actorAccountId: actor.accountId, actorRole: actor.role,
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, result.detail);
+    }
+    return {
+      uri: result.value.uri,
+      nextStep: 'Give this to the officer now. It is shown once and cannot be retrieved. '
+        + 'Their first sign-in must use the NEXT code, because activation spends the current one.',
+    };
+  }
 
   @Get()
   @RequireScopes('staff:administer')

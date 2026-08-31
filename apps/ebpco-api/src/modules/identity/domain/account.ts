@@ -249,7 +249,12 @@ export interface Account {
  * because it is a property of having an account and not of any role — and a
  * per-role list is one somebody adds a ninth role to without noticing.
  */
-const SELF_SCOPES: readonly Scope[] = ['profile:read', 'profile:write'];
+/**
+ * Reading and managing your OWN account. Not a job function, so every staff
+ * account holds these whatever its role or level — and they are exactly what
+ * MFA enrolment needs, which is what makes an enrolment-only session possible.
+ */
+export const SELF_SCOPES: readonly Scope[] = ['profile:read', 'profile:write'];
 
 export function scopesFor(
   account: Pick<Account, 'kind' | 'roles'>,

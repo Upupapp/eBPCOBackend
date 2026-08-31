@@ -2,7 +2,7 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { SecretBox } from '../domain/secret-box';
 import { StaffRole, requiresMfa } from '../domain/account';
-import { generateSecret, provisioningUri, verify } from '../domain/totp';
+import { codeFor, generateSecret, provisioningUri, stepAt, verify } from '../domain/totp';
 
 /**
  * Enrolling a second factor, without being locked out by the attempt.
@@ -199,6 +199,79 @@ export class TotpService {
 
       return { ok: true as const, value: { enrolled: true as const } };
     });
+  }
+
+  /**
+   * Re-issues an account's second factor, on an administrator's instruction.
+   *
+   * The design has always been that "an MFA role is enrolled by an
+   * administrator resetting it or at first issue" — see test/mfa.e2e-spec.ts.
+   * The reporting existed (`mfaEnrolled` on the staff directory) and the ACTION
+   * did not, so an officer who lost their phone, or any account created holding
+   * one of the six MFA-required roles, had no way back: sign-in refuses without
+   * a factor, enrolling needs a session, and password reset issues none.
+   *
+   * Deliberately NOT a session for the officer. Letting an unenrolled account
+   * sign in far enough to enrol would undo the property the refusal exists to
+   * hold — that a staff member cannot disable their own MFA by clearing the
+   * secret. The administrator generates the factor and hands it over out of
+   * band, which is the same shape as the seed that bootstraps the first
+   * super admin.
+   *
+   * Returns the provisioning URI ONCE. It is not retrievable afterwards.
+   */
+  async reissue(options: { accountId: string; actorAccountId: string; actorRole: string }):
+  Promise<TotpResult<EnrolmentOffer>> {
+    const { accountId, actorAccountId, actorRole } = options;
+    if (accountId === actorAccountId) {
+      // An administrator re-issuing their OWN factor is the self-service path
+      // this exists to avoid: it would let anyone holding a session replace the
+      // second factor protecting it.
+      return {
+        ok: false, reason: 'not-permitted',
+        detail: 'Re-issue another account\'s factor, not your own. Use /me/mfa to manage yours.',
+      };
+    }
+
+    const found = await this.db.query<{ id: string; kind: string }>(
+      'select id, kind from accounts where id = $1', [accountId]);
+    const account = found.rows[0];
+    if (account === undefined || account.kind !== 'staff') {
+      return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+
+    await this.db.transaction(async (tx) => {
+      // Cleared so `begin` below is not refused as already-enrolled, and so an
+      // interrupted re-issue leaves the account with no factor rather than the
+      // old one an administrator believed they had revoked.
+      await tx.query(
+        'update accounts set totp_secret_encrypted = null, totp_last_step = null where id = $1',
+        [accountId]);
+      await tx.query('delete from totp_enrolments where account_id = $1', [accountId]);
+      await this.audit.append({
+        action: 'mfa.reissued',
+        subjectType: 'account',
+        subjectId: accountId,
+        outcome: 'allowed',
+        actorAccountId,
+        actorRole,
+        beforeState: { enrolled: true },
+        afterState: { enrolled: false, reissued: true },
+      }, tx);
+    });
+
+    const offer = await this.begin({ accountId });
+    if (!offer.ok) return offer;
+
+    // Activated here, for the same reason the seed activates: an offer the
+    // officer cannot activate — because activating needs a session they cannot
+    // have — is an offer that changes nothing.
+    const activated = await this.activate({
+      accountId, code: codeFor(offer.value.secret, stepAt(this.clock())),
+    });
+    if (!activated.ok) return activated;
+
+    return offer;
   }
 
   /**

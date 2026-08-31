@@ -155,7 +155,38 @@ another administrator produces an account that is locked out from the moment it
 exists, and nothing in the response says so — it reports the officer should set
 a password through account recovery, which they can do, and it will not help.
 
-### The one path that works today
+### CORRECTION to this finding, 2026-08-31
+
+The first version of D-10 above said the only working path was "create the
+account with a non-MFA role, sign in, enrol, then grant the MFA-required role".
+That was written without reading `test/mfa.e2e-spec.ts`, which states the actual
+design:
+
+> an account with no factor still signs in far enough to enrol when its role
+> does not require one, and **an MFA role is enrolled by an administrator
+> resetting it or at first issue**
+
+So the lockout is deliberate, and it holds a property worth keeping — stated in
+`identity.service.spec.ts`: *"A staff member cannot disable their own MFA by
+clearing the secret — that path fails closed."*
+
+**A first attempt at fixing this gave unenrolled accounts an enrolment-only
+session. Two committed tests failed, correctly: that change would have undone
+the property above.** It was reverted.
+
+The real gap is narrower. The staff directory REPORTS `mfaRequired` and
+`mfaEnrolled` for every account — so an administrator could see an officer was
+stuck — and there was **no route to act on it**. The reporting existed; the
+action did not.
+
+**Fixed** by `POST /staff/users/:userId/mfa/reissue` (`staff:administer`): the
+administrator clears the old factor, a new one is generated and activated, and
+the provisioning URI is returned ONCE to hand over out of band. It refuses an
+administrator re-issuing their own factor — that is the self-service path this
+avoids, since anyone holding a session could otherwise replace the second factor
+protecting it.
+
+### The path that was assumed and never built
 
 Create the account with a role that does NOT require MFA, sign in, enrol through
 `/me/mfa`, then grant the MFA-required role with `PATCH /staff/users/:id`. That
@@ -171,10 +202,12 @@ which no test performs and every real officer must.
 
 ### Fix, in preference order
 
-1. Require MFA only once enrolled, and refuse the ROUTES that matter until it
-   is — so an unenrolled officer can sign in and enrol, and can do nothing else.
-2. Or have `POST /staff/users` return an enrolment ticket, making the second
-   factor part of account creation rather than a step afterwards.
+~~1. Require MFA only once enrolled…~~ **Rejected**: it undoes the
+   cannot-disable-your-own-MFA property, and two committed tests say so.
+
+2. **Done** — the administrator re-issue route above. `POST /staff/users` should
+   additionally return an enrolment URI at first issue, so a new officer is
+   never created stuck; that remains open.
 
 `scripts/seed-super-admin.ts` works around it by completing the enrolment
 itself: it generates the secret through the same `TotpService`, computes the

@@ -124,6 +124,61 @@ describe('the roles that could not sign in', () => {
     expect(response.json<{ accessToken: string }>().accessToken).toBeTruthy();
   });
 
+  it('is put back in reach by an ADMINISTRATOR re-issuing the factor', async () => {
+    // The action the design assumed and the API did not offer.
+    //
+    // The directory has always reported `mfaRequired` and `mfaEnrolled`, so an
+    // administrator could SEE that an officer was stuck and do nothing about
+    // it. Six roles require a factor; sign-in refuses without one; enrolling
+    // needs a session the officer cannot obtain; password reset issues none.
+    //
+    // Note what this deliberately is NOT: a session for the unenrolled officer.
+    // Letting them sign in far enough to enrol would undo the property the
+    // refusal holds — that a staff member cannot disable their own MFA by
+    // clearing the secret. The administrator generates it and hands it over.
+    const stuck = await account('cashier');
+    const email = await emailOf(stuck);
+    expect((await signIn(email)).statusCode).toBe(401);
+
+    const admin = await account('super-admin');
+    const adminSecret = await enrol(admin);
+    const adminSignIn = await signIn(
+      await emailOf(admin), codeFor(adminSecret, stepAt(new Date()) + 1));
+    expect(adminSignIn.statusCode).toBe(200);
+    const { accessToken } = adminSignIn.json<{ accessToken: string }>();
+
+    const reissued = await app.inject({
+      method: 'POST', url: `/staff/users/${stuck}/mfa/reissue`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+    expect(reissued.statusCode).toBe(201);
+    const { uri } = reissued.json<{ uri: string }>();
+    const secret = new URL(uri).searchParams.get('secret') ?? '';
+    expect(secret).not.toBe('');
+
+    // And the officer is back in — with the NEXT code, because activation
+    // spent the current one.
+    const back = await signIn(email, codeFor(secret, stepAt(new Date()) + 1));
+    expect(back.statusCode).toBe(200);
+  });
+
+  it('will not let an administrator re-issue their OWN factor', async () => {
+    // That would be the self-service path this avoids: anyone holding a session
+    // could replace the second factor protecting it.
+    const admin = await account('super-admin');
+    const secret = await enrol(admin);
+    const signedIn = await signIn(await emailOf(admin), codeFor(secret, stepAt(new Date()) + 1));
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+
+    const response = await app.inject({
+      method: 'POST', url: `/staff/users/${admin}/mfa/reissue`,
+      headers: { authorization: `Bearer ${accessToken}` },
+    });
+
+    expect(response.statusCode).toBe(403);
+  });
+
   it('refuses a code from a DIFFERENT secret', async () => {
     const id = await account('cashier');
     await enrol(id);
