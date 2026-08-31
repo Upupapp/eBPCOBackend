@@ -17,6 +17,23 @@ channels the municipality already publishes: the Municipal Hall counter, the
 telephone number, and the email address printed on the contact page. No personal
 data is collected by this website.
 
+## A note on terminology
+
+**"Citizen", "applicant" and "business owner" are the same people.** They are one
+user type at different moments: the same person reads the public website to find
+out which permit they need, and later files that permit through the eBPCO
+system. This document says "citizen" because that is the role someone is in when
+they are reading a public information page, not because it describes a different
+audience from the one the permit system serves.
+
+The distinction that matters here is therefore between **surfaces**, not between
+people. The eBPCO transaction system necessarily collects personal data — it
+cannot process a building permit otherwise — and it does so under its own
+notice, its own retention rules and its own authentication. The public
+information website collects nothing, and this decision keeps it that way. The
+same person moves between the two, and the boundary they cross is visible to
+them: one asks them to sign in, the other never asks them for anything.
+
 ## What the site does today
 
 The contact page is read-only. Measured at portal commit `55c1cfa`, it contains
@@ -70,8 +87,9 @@ way is advocacy rather than a record:
   itself. They must visit the Municipal Hall or use their own mail application.
 - There is no record of enquiries, so the LGU cannot measure demand, response
   time, or the questions citizens most often ask.
-- The eBPCO permit system has its own applicant channels; this decision does not
-  touch them. It is about the public *information* website only.
+- The eBPCO permit system has its own intake, and this decision does not touch
+  it. That is a decision about a SURFACE, not about a class of person — see the
+  note on terminology below.
 
 ## What would change it
 
