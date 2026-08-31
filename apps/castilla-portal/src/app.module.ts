@@ -1,5 +1,6 @@
 import { DynamicModule, Module } from '@nestjs/common';
 
+import { FormsModule } from './forms/forms.module';
 import { MunicipalityModule } from './municipality/municipality.module';
 import { OfficesModule } from './offices/offices.module';
 import { OfficialsModule } from './officials/officials.module';
@@ -19,7 +20,7 @@ export class AppModule {
   static withDatabase(db: SqlClient): DynamicModule {
     return {
       module: AppModule,
-      imports: [OfficesModule, OfficialsModule, MunicipalityModule, PermitsModule],
+      imports: [OfficesModule, OfficialsModule, MunicipalityModule, PermitsModule, FormsModule],
       providers: [{ provide: SQL_CLIENT, useValue: db }],
       exports: [SQL_CLIENT],
       // Global because every feature module needs the same connection and

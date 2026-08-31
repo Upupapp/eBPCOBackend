@@ -5,8 +5,9 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
   municipalityProfileSchema, officeDetailSchema, officeListSchema, officeSummarySchema,
-  officialListSchema, officialSchema, permitCatalogueSchema, permitDetailSchema,
-  permitSummarySchema, profileFieldSchema,
+  formListSchema, formRevisionsSchema, officialListSchema, officialSchema,
+  permitCatalogueSchema, permitDetailSchema, permitSummarySchema, profileFieldSchema,
+  storedFormSchema,
 } from '../src/http/contract';
 
 /**
@@ -104,6 +105,55 @@ const document = {
         },
       },
     },
+    '/forms': {
+      get: {
+        summary: 'The bundled application forms',
+        description:
+          'Current revisions only — what a citizen should be filing today. Each carries a '
+          + 'sha256 checksum of the bytes exactly as the LGU issued them; these documents are '
+          + 'never re-generated, flattened or re-exported.',
+        responses: {
+          200: { description: 'Current forms', content: { 'application/json': { schema: { $ref: '#/components/schemas/FormList' } } } },
+        },
+      },
+    },
+    '/forms/{familySlug}/revisions': {
+      get: {
+        summary: 'Every revision of one form',
+        description:
+          'Newest first. A superseded revision stays retrievable because an application filed '
+          + 'on last year\'s form is still a real application.',
+        parameters: [{ name: 'familySlug', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'All revisions', content: { 'application/json': { schema: { $ref: '#/components/schemas/FormRevisions' } } } },
+          404: { description: 'No such form', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/forms/{familySlug}/download': {
+      get: {
+        summary: 'Download a form',
+        description:
+          'The stored bytes, unmodified, with the original filename in Content-Disposition. '
+          + 'Public and unauthenticated by design: these are blank forms and gating them '
+          + 'defeats the portal. Omit `checksum` for the current revision; pass one to pin an '
+          + 'exact revision. A missing form is a JSON 404 — never an HTML page, and never a 200, '
+          + 'because a browser that saves an error page as .pdf sends a citizen to the counter '
+          + 'with it.',
+        parameters: [
+          { name: 'familySlug', in: 'path', required: true, schema: { type: 'string' } },
+          { name: 'checksum', in: 'query', required: false, schema: { type: 'string' },
+            description: 'Pin an exact revision by its sha256.' },
+        ],
+        responses: {
+          200: {
+            description: 'The form',
+            content: { 'application/pdf': { schema: { type: 'string', format: 'binary' } } },
+          },
+          404: { description: 'No such form', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
     '/offices/{slug}': {
       get: {
         summary: 'One office in full',
@@ -121,6 +171,9 @@ const document = {
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      StoredForm: zodToJsonSchema(storedFormSchema, { target: 'openApi3' }),
+      FormList: zodToJsonSchema(formListSchema, { target: 'openApi3' }),
+      FormRevisions: zodToJsonSchema(formRevisionsSchema, { target: 'openApi3' }),
       PermitSummary: zodToJsonSchema(permitSummarySchema, { target: 'openApi3' }),
       PermitCatalogue: zodToJsonSchema(permitCatalogueSchema, { target: 'openApi3' }),
       PermitDetail: zodToJsonSchema(permitDetailSchema, { target: 'openApi3' }),

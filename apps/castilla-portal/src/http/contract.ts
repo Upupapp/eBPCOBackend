@@ -113,3 +113,22 @@ export const permitDetailSchema = permitSummarySchema.extend({
 
 export type PermitCatalogueResponse = z.infer<typeof permitCatalogueSchema>;
 export type PermitDetailResponse = z.infer<typeof permitDetailSchema>;
+
+export const storedFormSchema = z.object({
+  id: z.string().uuid(),
+  familySlug: z.string().min(1),
+  originalFilename: z.string().min(1),
+  contentType: z.string().min(1),
+  byteSize: z.number().int().positive(),
+  pageCount: z.number().int().positive(),
+  checksum: z.string().regex(/^[0-9a-f]{64}$/),
+  // Absent where the form prints no revision — 10 of the 13 do not, and an
+  // invented 'v1' would be a claim the document does not make.
+  revisionLabel: z.string().min(1).optional(),
+  isCurrent: z.boolean(),
+}).strict();
+
+export const formListSchema = z.object({ forms: z.array(storedFormSchema) }).strict();
+export const formRevisionsSchema = z.object({ revisions: z.array(storedFormSchema) }).strict();
+
+export type FormListResponse = z.infer<typeof formListSchema>;
