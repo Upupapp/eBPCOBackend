@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
+import { audit } from '../audit/audit';
+import { inTransaction } from '../persistence/transaction';
 import { SQL_CLIENT, SqlClient } from '../persistence/sql-client';
 
 export interface PageEdit {
@@ -33,26 +35,35 @@ export class PagesService {
     const current = rows[0];
     if (current === undefined) return { ok: false, reason: 'no-such-page' };
 
-    // The prior text is archived BEFORE the update, so an interruption between
-    // the two statements loses the edit rather than the history.
-    await this.db.query(
-      `insert into content_page_revisions (key, title, body, is_placeholder, author)
-       values ($1,$2,$3,$4,$5)`,
-      [key, current.title, current.body, current.is_placeholder, author],
-    );
-    await this.db.query(
-      `update content_pages
-          set title = $2, body = $3, is_placeholder = $4, updated_at = now()
-        where key = $1`,
-      [key, edit.title, edit.body, edit.isPlaceholder],
-    );
+    await inTransaction(this.db, async (tx) => {
+      // The prior text is archived BEFORE the update, so an interruption
+      // between the two statements loses the edit rather than the history —
+      // and the transaction means neither happens alone.
+      await tx.query(
+        `insert into content_page_revisions (key, title, body, is_placeholder, author)
+         values ($1,$2,$3,$4,$5)`,
+        [key, current.title, current.body, current.is_placeholder, author],
+      );
+      await tx.query(
+        `update content_pages
+            set title = $2, body = $3, is_placeholder = $4, updated_at = now()
+          where key = $1`,
+        [key, edit.title, edit.body, edit.isPlaceholder],
+      );
 
-    // Replacing the text invalidates whatever sourcing the old text had. The
-    // page returns to pending until someone confirms the NEW words, which is
-    // the same rule the seeder follows: never auto-confirm.
-    await this.db.query(
-      `update field_state set state = 'pending', updated_at = now()
-        where entity_type = 'page' and entity_id = $1 and field_name = 'body'`, [key]);
+      // Replacing the text invalidates whatever sourcing the old text had. The
+      // page returns to pending until someone confirms the NEW words, which is
+      // the same rule the seeder follows: never auto-confirm.
+      await tx.query(
+        `update field_state set state = 'pending', updated_at = now()
+          where entity_type = 'page' and entity_id = $1 and field_name = 'body'`, [key]);
+
+      await audit(tx, {
+        actor: author, action: 'page-replaced', entityType: 'page', entityId: key,
+        fieldName: 'body', priorValue: current.body, newValue: edit.body,
+        detail: 'returned to pending: the new words are unsourced',
+      });
+    });
 
     return { ok: true };
   }

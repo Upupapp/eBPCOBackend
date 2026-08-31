@@ -1,3 +1,5 @@
+import { audit } from '../audit/audit';
+import { inTransaction } from '../persistence/transaction';
 import { requiresTwoPeople } from './four-eyes';
 
 export interface Sql {
@@ -128,44 +130,72 @@ export class ConfirmationService {
       };
     }
 
-    // The transition IS the lock: exactly one caller moves it out of 'open'.
-    const won = await this.db.query<{ id: string }>(
-      `update proposals set status = 'confirmed', decided_by = $2, decided_at = $3
-        where id = $1 and status = 'open' returning id`,
-      [proposalId, confirmedBy, this.clock()],
-    );
-    if (won.rows.length === 0) {
-      return {
-        ok: false, reason: 'lost-the-race',
-        detail: 'Another confirmation of this proposal completed first.',
-      };
-    }
+    // ONE TRANSACTION, ALL OF IT. The state change, its provenance, the value
+    // history and the audit row commit together or none of them do. Anything
+    // less leaves either a published fact no audit row explains, or a trail
+    // claiming a change that was rolled back — and both are worse than a
+    // failure, because both look like the truth.
+    return inTransaction(this.db, async (tx) => {
+      // The transition IS the lock: exactly one caller moves it out of 'open'.
+      const won = await tx.query<{ id: string }>(
+        `update proposals set status = 'confirmed', decided_by = $2, decided_at = $3
+          where id = $1 and status = 'open' returning id`,
+        [proposalId, confirmedBy, this.clock()],
+      );
+      if (won.rows.length === 0) {
+        return {
+          ok: false as const, reason: 'lost-the-race',
+          detail: 'Another confirmation of this proposal completed first.',
+        };
+      }
 
-    await this.db.query(
-      `insert into provenance (entity_type, entity_id, field_name, source_description,
-                               source_url, sourced_on, method)
-       values ($1,$2,$3,$4,$5,$6::date,$7::provenance_method)`,
-      [proposal.entity_type, proposal.entity_id, proposal.field_name,
-       proposal.source_description, proposal.source_url, proposal.sourced_on, proposal.method],
-    );
+      const sourced = await tx.query<{ id: string }>(
+        `insert into provenance (entity_type, entity_id, field_name, source_description,
+                                 source_url, sourced_on, method)
+         values ($1,$2,$3,$4,$5,$6::date,$7::provenance_method)
+         returning id`,
+        [proposal.entity_type, proposal.entity_id, proposal.field_name,
+         proposal.source_description, proposal.source_url, proposal.sourced_on, proposal.method],
+      );
 
-    await this.db.query(
-      `insert into field_state (entity_type, entity_id, field_name, state)
-       values ($1,$2,$3,'confirmed')
-       on conflict (entity_type, entity_id, field_name)
-       do update set state = 'confirmed', updated_at = now()`,
-      [proposal.entity_type, proposal.entity_id, proposal.field_name],
-    );
+      // Read BEFORE the write, so the audit row can say what it replaced.
+      const previous = await tx.query<{ value: string }>(
+        `select value from field_value_history
+          where entity_type = $1 and entity_id = $2 and field_name = $3
+          order by recorded_at desc limit 1`,
+        [proposal.entity_type, proposal.entity_id, proposal.field_name],
+      );
 
-    await this.db.query(
-      `insert into field_value_history (entity_type, entity_id, field_name, value, state,
-                                        proposal_id, recorded_by)
-       values ($1,$2,$3,$4,'confirmed',$5,$6)`,
-      [proposal.entity_type, proposal.entity_id, proposal.field_name,
-       proposal.proposed_value, proposalId, confirmedBy],
-    );
+      await tx.query(
+        `insert into field_state (entity_type, entity_id, field_name, state)
+         values ($1,$2,$3,'confirmed')
+         on conflict (entity_type, entity_id, field_name)
+         do update set state = 'confirmed', updated_at = now()`,
+        [proposal.entity_type, proposal.entity_id, proposal.field_name],
+      );
 
-    return { ok: true, value: undefined };
+      await tx.query(
+        `insert into field_value_history (entity_type, entity_id, field_name, value, state,
+                                          proposal_id, recorded_by)
+         values ($1,$2,$3,$4,'confirmed',$5,$6)`,
+        [proposal.entity_type, proposal.entity_id, proposal.field_name,
+         proposal.proposed_value, proposalId, confirmedBy],
+      );
+
+      await audit(tx, {
+        actor: confirmedBy, action: 'confirmed',
+        entityType: proposal.entity_type, entityId: proposal.entity_id,
+        fieldName: proposal.field_name,
+        priorValue: previous.rows[0]?.value ?? null,
+        newValue: proposal.proposed_value,
+        // The source the confirmation rested on, one hop away rather than a
+        // join nobody remembers to make.
+        provenanceId: sourced.rows[0]?.id ?? null,
+        detail: `proposed by ${proposal.proposed_by}`,
+      });
+
+      return { ok: true as const, value: undefined };
+    });
   }
 
   /**
@@ -198,22 +228,32 @@ export class ConfirmationService {
       [entityType, entityId, fieldName],
     );
 
-    await this.db.query(
-      `update field_state set state = 'pending', updated_at = now()
-        where entity_type = $1 and entity_id = $2 and field_name = $3`,
-      [entityType, entityId, fieldName],
-    );
-    await this.db.query(
-      `insert into field_value_history (entity_type, entity_id, field_name, value, state,
-                                        recorded_by)
-       values ($1,$2,$3,$4,'pending',$5)`,
-      // The value is carried forward, not cleared. Reverting says "we are no
-      // longer standing behind this", not "we never knew it" -- and the draft
-      // value is where the next confirmation conversation starts.
-      [entityType, entityId, fieldName, last.rows[0]?.value ?? '', revertedBy],
-    );
+    return inTransaction(this.db, async (tx) => {
+      await tx.query(
+        `update field_state set state = 'pending', updated_at = now()
+          where entity_type = $1 and entity_id = $2 and field_name = $3`,
+        [entityType, entityId, fieldName],
+      );
+      await tx.query(
+        `insert into field_value_history (entity_type, entity_id, field_name, value, state,
+                                          recorded_by)
+         values ($1,$2,$3,$4,'pending',$5)`,
+        // The value is carried forward, not cleared. Reverting says "we are no
+        // longer standing behind this", not "we never knew it" -- and the draft
+        // value is where the next confirmation conversation starts.
+        [entityType, entityId, fieldName, last.rows[0]?.value ?? '', revertedBy],
+      );
 
-    return { ok: true, value: undefined };
+      await audit(tx, {
+        actor: revertedBy, action: 'reverted',
+        entityType, entityId, fieldName,
+        priorValue: last.rows[0]?.value ?? null,
+        // No new value: reverting changes the STATE, not the text.
+        detail: 'confirmed -> pending',
+      });
+
+      return { ok: true as const, value: undefined };
+    });
   }
 
   /**

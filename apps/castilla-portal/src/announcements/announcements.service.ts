@@ -1,5 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
+import { audit } from '../audit/audit';
+import { inTransaction } from '../persistence/transaction';
 import { SQL_CLIENT, SqlClient } from '../persistence/sql-client';
 
 export interface DraftAnnouncement {
@@ -48,6 +50,10 @@ export class AnnouncementsService {
     if (id === undefined) return { ok: false, reason: 'slug-already-used' };
 
     await this.record(id, 'created', actor, null);
+    await audit(this.db, {
+      actor, action: 'announcement-drafted', entityType: 'announcement', entityId: input.slug,
+      newValue: input.title,
+    });
     return { ok: true, id };
   }
 
@@ -77,6 +83,11 @@ export class AnnouncementsService {
     if (id === undefined) return { ok: false, reason: 'not-found-or-withdrawn' };
 
     await this.record(id, 'published', actor, null);
+    await audit(this.db, {
+      actor, action: 'announcement-published', entityType: 'announcement', entityId: slug,
+      newValue: at.toISOString(),
+      detail: expiresAt === undefined ? null : `expires ${expiresAt.toISOString()}`,
+    });
     return { ok: true, id };
   }
 
@@ -96,9 +107,20 @@ export class AnnouncementsService {
     const id = rows[0]?.id;
     if (id === undefined) return { ok: false, reason: 'not-found-or-already-withdrawn' };
 
-    await this.record(id, 'withdrawn', actor, reason ?? null);
-    await this.db.query(
-      "update announcements set status = 'withdrawn', updated_at = now() where id = $1", [id]);
+    // One transaction: the withdrawal, its attributable event and its audit row.
+    // A withdrawal that half-applied would leave a notice the site no longer
+    // shows and no record of who took it down.
+    await inTransaction(this.db, async (tx) => {
+      await tx.query(
+        `insert into announcement_events (announcement_id, action, actor, reason)
+         values ($1,'withdrawn',$2,$3)`, [id, actor, reason ?? null]);
+      await tx.query(
+        "update announcements set status = 'withdrawn', updated_at = now() where id = $1", [id]);
+      await audit(tx, {
+        actor, action: 'announcement-withdrawn', entityType: 'announcement', entityId: slug,
+        detail: reason ?? null,
+      });
+    });
     return { ok: true, id };
   }
 

@@ -142,6 +142,43 @@
         }
       }
     },
+    "/staff/history/{entityType}/{entityId}": {
+      "get": {
+        "summary": "An entity's editorial history",
+        "description": "Who changed what, when, and on what basis — every confirmation, revert, announcement lifecycle change and page revision, oldest first. Append-only at the database level: a mistaken entry is corrected by appending, never by editing. A value belonging to a field that has since been WITHHELD is redacted here at read time and flagged `redacted`; the stored row keeps it in full, so the trail can still answer whether something was ever published and when it stopped.",
+        "security": [
+          {
+            "bearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "entityType",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "entityId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The history"
+          },
+          "404": {
+            "description": "No valid session"
+          }
+        }
+      }
+    },
     "/session": {
       "post": {
         "summary": "Sign in",

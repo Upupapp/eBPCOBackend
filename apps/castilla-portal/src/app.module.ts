@@ -3,6 +3,7 @@ import { APP_GUARD } from '@nestjs/core';
 
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { FormsModule } from './forms/forms.module';
+import { AuditModule } from './audit/audit.module';
 import { AuthGuard } from './identity/auth.guard';
 import { IdentityModule } from './identity/identity.module';
 import { SessionController } from './identity/session.controller';
@@ -30,7 +31,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         OfficesModule, OfficialsModule, MunicipalityModule, PermitsModule, FormsModule,
-        IdentityModule,
+        IdentityModule, AuditModule,
         AnnouncementsModule, SearchModule, PagesModule, WorkflowModule,
       ],
       controllers: [SessionController],
