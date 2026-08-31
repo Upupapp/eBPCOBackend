@@ -88,6 +88,16 @@ function valueOf(node: ts.Expression, source: ts.SourceFile): unknown {
   if (ts.isArrayLiteralExpression(node)) {
     return node.elements.map((e) => valueOf(e, source));
   }
+  // `'long prose ' + 'continued across lines'`. Folded, because the portal
+  // writes every narrative page that way and recording the CONCATENATION as an
+  // opaque expression means the history, mission and seal texts reach the
+  // backend as source code with quote marks and plus signs in them. Purely
+  // syntactic: only string operands, only `+`.
+  if (ts.isBinaryExpression(node) && node.operatorToken.kind === ts.SyntaxKind.PlusToken) {
+    const left = valueOf(node.left, source);
+    const right = valueOf(node.right, source);
+    if (typeof left === 'string' && typeof right === 'string') return left + right;
+  }
   if (ts.isObjectLiteralExpression(node)) {
     const out: Record<string, unknown> = {};
     const spreads: unknown[] = [];

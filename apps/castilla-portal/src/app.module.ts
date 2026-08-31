@@ -5,6 +5,7 @@ import { FormsModule } from './forms/forms.module';
 import { MunicipalityModule } from './municipality/municipality.module';
 import { OfficesModule } from './offices/offices.module';
 import { OfficialsModule } from './officials/officials.module';
+import { PagesModule } from './pages/pages.module';
 import { PermitsModule } from './permits/permits.module';
 import { SearchModule } from './search/search.module';
 import { SQL_CLIENT, SqlClient } from './persistence/sql-client';
@@ -24,7 +25,7 @@ export class AppModule {
       module: AppModule,
       imports: [
         OfficesModule, OfficialsModule, MunicipalityModule, PermitsModule, FormsModule,
-        AnnouncementsModule, SearchModule,
+        AnnouncementsModule, SearchModule, PagesModule,
       ],
       providers: [{ provide: SQL_CLIENT, useValue: db }],
       exports: [SQL_CLIENT],

@@ -226,6 +226,8 @@ export class Seeder {
       await this.contacts(id, o, unsourced);
     }
 
+    await this.pages(data, unsourced);
+
     // Relations come after every office exists, because they point at each
     // other and half of them would otherwise resolve to nothing. `office_related`
     // was created in 001 and had never been written to; the table was empty
@@ -395,6 +397,105 @@ export class Seeder {
       ? (nested as Record<string, unknown>)['isPlaceholder']
       : entity.fields['isPlaceholder'];
     return flag === true ? 'pending' : 'confirmed';
+  }
+
+  /**
+   * The five narrative pages.
+   *
+   * Four are constants in the portal's own data file and carry their sourcing
+   * comments with them. The fifth, the privacy policy, lives in an Angular
+   * template rather than in data, so it is transcribed here with the file and
+   * commit it came from — and it is the one page expected to be REPLACED
+   * wholesale by an LGU-authored document, so the duplication is short-lived by
+   * design rather than by neglect.
+   */
+  private async pages(
+    data: ExtractedPortalData,
+    unsourced: { entity: string; field: string; reason: string }[],
+  ): Promise<void> {
+    const bySource = new Map<string, ExtractedEntity>();
+    for (const entities of Object.values(data.files)) {
+      for (const entity of entities) {
+        if (entity.source !== undefined) bySource.set(entity.source, entity);
+      }
+    }
+
+    const pages: {
+      key: string; title: string; source: string; placeholder: boolean; note?: string;
+    }[] = [
+      { key: 'history', title: 'History of Castilla', source: 'HISTORY_TEXT',
+        placeholder: false },
+      // Found only as a truncated fragment. Left incomplete ON PURPOSE — TAB 09
+      // forbids completing it from a search snippet.
+      { key: 'vision', title: 'Vision', source: 'VISION_PLACEHOLDER', placeholder: true },
+      { key: 'mission', title: 'Mission', source: 'MISSION_TEXT', placeholder: false },
+      // A visual transcription that deliberately does NOT assert heraldic
+      // meaning. Merging it with a symbolic interpretation is forbidden.
+      { key: 'seal-description', title: 'The Municipal Seal', source: 'SEAL_DESCRIPTION',
+        placeholder: true },
+    ];
+
+    let ordinal = 0;
+    for (const page of pages) {
+      const entity = bySource.get(page.source);
+      if (entity === undefined) {
+        unsourced.push({
+          entity: `page:${page.key}`, field: 'body',
+          reason: `the portal constant ${page.source} was not extracted`,
+        });
+        continue;
+      }
+      const body = entity.fields['value'];
+      if (typeof body !== 'string' || body.trim() === '') {
+        // A concatenated string the extractor could not fold would land here,
+        // as source code rather than prose. Reported, never stored.
+        unsourced.push({
+          entity: `page:${page.key}`, field: 'body',
+          reason: `${page.source} did not resolve to text`,
+        });
+        continue;
+      }
+
+      await this.upsert(
+        `insert into content_pages (key, title, body, ordinal, is_placeholder, source_note)
+         values ($1,$2,$3,$4,$5,$6)
+         on conflict (key) do update set title = excluded.title, body = excluded.body,
+           ordinal = excluded.ordinal, is_placeholder = excluded.is_placeholder,
+           source_note = excluded.source_note, updated_at = now()
+         where content_pages.body is distinct from excluded.body
+            or content_pages.is_placeholder is distinct from excluded.is_placeholder
+            or content_pages.ordinal is distinct from excluded.ordinal`,
+        [page.key, page.title, body, ordinal, page.placeholder,
+         `portal ${data.commit.slice(0, 7)}: ${page.source}`],
+      );
+      // A placeholder is never confirmed: it is standing in for content nobody
+      // has supplied, and no sourcing comment can make it the LGU's words.
+      await this.state(
+        'page', page.key, 'body', page.placeholder ? 'pending' : 'confirmed', entity, unsourced);
+      ordinal += 1;
+    }
+
+    // The privacy policy, transcribed from the portal's own template. Pending,
+    // and it must remain possible to state third-party data flows here: the
+    // page currently says the portal collects no personal data, while the site
+    // embeds Google Fonts and an OpenStreetMap frame, both of which disclose a
+    // visitor's IP address to a third party.
+    await this.upsert(
+      `insert into content_pages (key, title, body, ordinal, is_placeholder, source_note)
+       values ('privacy-policy', $1, $2, $3, true, $4)
+       on conflict (key) do update set title = excluded.title, body = excluded.body,
+         ordinal = excluded.ordinal, source_note = excluded.source_note, updated_at = now()
+       where content_pages.body is distinct from excluded.body`,
+      ['Privacy Policy',
+       'This information portal is primarily a read-only public resource and does not currently '
+       + 'collect personal data through forms or accounts. Once LGU Castilla publishes an '
+       + 'official privacy policy, it will replace this placeholder notice.',
+       ordinal,
+       `portal ${data.commit.slice(0, 7)}: src/app/pages/privacy/privacy.html`],
+    );
+    await this.state('page', 'privacy-policy', 'body', 'pending',
+      { source: 'privacy', ordinal: 0, fields: {}, comment: null, fieldComments: {} },
+      unsourced);
   }
 
   private async contacts(

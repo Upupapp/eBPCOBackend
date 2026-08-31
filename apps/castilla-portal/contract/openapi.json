@@ -142,6 +142,106 @@
         }
       }
     },
+    "/pages": {
+      "get": {
+        "summary": "The narrative pages",
+        "description": "History, vision, mission, seal description and privacy policy, keyed by MEANING rather than by id. A PENDING page is served with its placeholder text and a flag, not blanked: the site currently shows an honest \"pending publication by LGU Castilla\" notice, and silence would be a downgrade. `state` and `isPlaceholder` are separate — a page can be an honest, sourced description of a placeholder situation.",
+        "responses": {
+          "200": {
+            "description": "All five pages",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageList"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pages/{key}": {
+      "get": {
+        "summary": "One narrative page",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "history",
+                "vision",
+                "mission",
+                "seal-description",
+                "privacy-policy"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The page",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContentPage"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such page",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/pages/{key}/revisions": {
+      "get": {
+        "summary": "What this page said before",
+        "description": "Newest first, each with an author and a timestamp. The privacy policy in particular will be replaced by an LGU-authored document, and the placeholder must remain retrievable: what the site said at a given time is a fact about the site.",
+        "parameters": [
+          {
+            "name": "key",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prior revisions",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PageRevisions"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "No such page",
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/search": {
       "get": {
         "summary": "Search offices and permits",
@@ -658,6 +758,194 @@
           "position",
           "office",
           "initials"
+        ],
+        "additionalProperties": false
+      },
+      "ContentPage": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "enum": [
+              "history",
+              "vision",
+              "mission",
+              "seal-description",
+              "privacy-policy"
+            ]
+          },
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "state": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirmed"
+            ]
+          },
+          "isPlaceholder": {
+            "type": "boolean"
+          },
+          "sourceNote": {
+            "type": "string",
+            "minLength": 1
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "key",
+          "title",
+          "body",
+          "state",
+          "isPlaceholder",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PageList": {
+        "type": "object",
+        "properties": {
+          "pages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "key": {
+                  "type": "string",
+                  "enum": [
+                    "history",
+                    "vision",
+                    "mission",
+                    "seal-description",
+                    "privacy-policy"
+                  ]
+                },
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "pending",
+                    "confirmed"
+                  ]
+                },
+                "isPlaceholder": {
+                  "type": "boolean"
+                },
+                "sourceNote": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "updatedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "key",
+                "title",
+                "body",
+                "state",
+                "isPlaceholder",
+                "updatedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "pages"
+        ],
+        "additionalProperties": false
+      },
+      "PageRevision": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "minLength": 1
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1
+          },
+          "isPlaceholder": {
+            "type": "boolean"
+          },
+          "author": {
+            "type": "string",
+            "minLength": 1
+          },
+          "recordedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "title",
+          "body",
+          "isPlaceholder",
+          "author",
+          "recordedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PageRevisions": {
+        "type": "object",
+        "properties": {
+          "revisions": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "title": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "isPlaceholder": {
+                  "type": "boolean"
+                },
+                "author": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "recordedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                }
+              },
+              "required": [
+                "title",
+                "body",
+                "isPlaceholder",
+                "author",
+                "recordedAt"
+              ],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": [
+          "revisions"
         ],
         "additionalProperties": false
       },

@@ -183,3 +183,29 @@ export const searchResponseSchema = z.object({
   results: z.array(searchResultSchema),
   total: z.number().int().min(0),
 }).strict();
+
+export const contentPageSchema = z.object({
+  key: z.enum(['history', 'vision', 'mission', 'seal-description', 'privacy-policy']),
+  title: z.string().min(1),
+  body: z.string().min(1),
+  state: z.enum(['pending', 'confirmed']),
+  // Distinct from `state`: a page can be an honest, sourced description of a
+  // placeholder situation. The client renders the two differently.
+  isPlaceholder: z.boolean(),
+  sourceNote: z.string().min(1).optional(),
+  updatedAt: z.string().datetime(),
+}).strict();
+
+export const pageListSchema = z.object({ pages: z.array(contentPageSchema) }).strict();
+
+export const pageRevisionSchema = z.object({
+  title: z.string().min(1),
+  body: z.string().min(1),
+  isPlaceholder: z.boolean(),
+  author: z.string().min(1),
+  recordedAt: z.string().datetime(),
+}).strict();
+
+export const pageRevisionsSchema = z.object({
+  revisions: z.array(pageRevisionSchema),
+}).strict();

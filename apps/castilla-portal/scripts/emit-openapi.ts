@@ -8,6 +8,7 @@ import {
   announcementCountSchema, announcementDetailSchema, announcementListSchema,
   announcementSummarySchema, formListSchema, formRevisionsSchema, officialListSchema,
   officialSchema,
+  contentPageSchema, pageListSchema, pageRevisionSchema, pageRevisionsSchema,
   permitCatalogueSchema, permitDetailSchema, permitSummarySchema, profileFieldSchema,
   searchResponseSchema, searchResultSchema, storedFormSchema,
 } from '../src/http/contract';
@@ -104,6 +105,45 @@ const document = {
         responses: {
           200: { description: 'The permit', content: { 'application/json': { schema: { $ref: '#/components/schemas/PermitDetail' } } } },
           404: { description: 'No permit is published with that slug', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/pages': {
+      get: {
+        summary: 'The narrative pages',
+        description:
+          'History, vision, mission, seal description and privacy policy, keyed by MEANING '
+          + 'rather than by id. A PENDING page is served with its placeholder text and a flag, '
+          + 'not blanked: the site currently shows an honest "pending publication by LGU '
+          + 'Castilla" notice, and silence would be a downgrade. `state` and `isPlaceholder` are '
+          + 'separate — a page can be an honest, sourced description of a placeholder situation.',
+        responses: {
+          200: { description: 'All five pages', content: { 'application/json': { schema: { $ref: '#/components/schemas/PageList' } } } },
+        },
+      },
+    },
+    '/pages/{key}': {
+      get: {
+        summary: 'One narrative page',
+        parameters: [{ name: 'key', in: 'path', required: true,
+          schema: { type: 'string', enum: ['history', 'vision', 'mission', 'seal-description', 'privacy-policy'] } }],
+        responses: {
+          200: { description: 'The page', content: { 'application/json': { schema: { $ref: '#/components/schemas/ContentPage' } } } },
+          404: { description: 'No such page', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/pages/{key}/revisions': {
+      get: {
+        summary: 'What this page said before',
+        description:
+          'Newest first, each with an author and a timestamp. The privacy policy in particular '
+          + 'will be replaced by an LGU-authored document, and the placeholder must remain '
+          + 'retrievable: what the site said at a given time is a fact about the site.',
+        parameters: [{ name: 'key', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'Prior revisions', content: { 'application/json': { schema: { $ref: '#/components/schemas/PageRevisions' } } } },
+          404: { description: 'No such page', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
         },
       },
     },
@@ -240,6 +280,10 @@ const document = {
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      ContentPage: zodToJsonSchema(contentPageSchema, { target: 'openApi3' }),
+      PageList: zodToJsonSchema(pageListSchema, { target: 'openApi3' }),
+      PageRevision: zodToJsonSchema(pageRevisionSchema, { target: 'openApi3' }),
+      PageRevisions: zodToJsonSchema(pageRevisionsSchema, { target: 'openApi3' }),
       SearchResult: zodToJsonSchema(searchResultSchema, { target: 'openApi3' }),
       SearchResponse: zodToJsonSchema(searchResponseSchema, { target: 'openApi3' }),
       AnnouncementSummary: zodToJsonSchema(announcementSummarySchema, { target: 'openApi3' }),
