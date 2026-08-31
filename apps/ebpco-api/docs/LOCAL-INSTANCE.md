@@ -34,6 +34,38 @@ The application is written, the read-back fails, and the client sees a 500 on a
 filing that partly succeeded. That is a property of the stand-in database, not
 of this service: against real PostgreSQL, `DB_POOL_MAX=10` is correct.
 
+### Measured, because "the bridge cannot do fan-out" is the wrong conclusion
+
+The same two queries `SqlCalendarRepository.load` issues, run against the same
+socket bridge in one process, changing nothing but the pool size:
+
+```
+DB_POOL_MAX=1  ->  OK, both queries returned
+DB_POOL_MAX=4  ->  read ECONNRESET
+```
+
+So this is **a pool setting, not a limit on what the bridge can serve**. At
+`max: 1` the pool queues the second query onto the one connection it holds; above
+1 it opens a second connection for the second half of the `Promise.all`, and the
+bridge drops it — which is why the stack trace names `index 1`. Every request
+path in this service works over the bridge at `max: 1`, filing included: all
+nineteen permit types were filed through it end to end.
+
+### One consequence worth knowing
+
+The bridge serves **one connection at a time, in total** — not one per client. So
+while the API is running it holds that connection, and a second process cannot
+query the database at all:
+
+```sh
+# with the API up, any out-of-band query fails:
+npx ts-node --transpile-only some-query.ts   # -> read ECONNRESET
+```
+
+Stop the API first, or read through the API's own endpoints. This is also the
+cheapest confirmation that the bridge is behaving as described rather than
+something being wrong with your setup.
+
 ## Standing it up
 
 Put `DATABASE_URL` in your own `.env` — never in a tracked file. The secret
