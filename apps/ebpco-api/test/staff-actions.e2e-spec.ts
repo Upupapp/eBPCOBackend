@@ -49,6 +49,16 @@ async function staffToken(role: StaffRole): Promise<string> {
     [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  // The access assignment migration 032 backfills for every real officer.
+  // Without it the allow-list fails CLOSED and every transition is refused
+  // `forms:<permit type>` — correct behaviour, and a fixture that skips it is
+  // testing an officer no deployment produces.
+  await db.query(
+    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+    [id, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [id]);
   const issued = await tokens.issueAccessToken({
     sub: id, sid: randomUUID(), kind: 'staff', // scopesFor(), not ROLE_SCOPES: production issues tokens through it, and it
     // grants profile:* to every account on top of the role's job scopes. A

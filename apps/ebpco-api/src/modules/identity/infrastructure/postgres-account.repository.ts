@@ -118,6 +118,13 @@ export class PostgresAccountRepository implements AccountRepository {
    * and a repository that throws on the other branch makes every caller wrap
    * it.
    */
+  async accessLevelOf(accountId: string): Promise<'view' | 'view-edit' | null> {
+    const result = await this.db.query<{ level: string }>(
+      'select level from staff_access where account_id = $1', [accountId]);
+    const level = result.rows[0]?.level;
+    return level === 'view' || level === 'view-edit' ? level : null;
+  }
+
   async profileOf(accountId: string): Promise<ApplicantProfile | null> {
     const result = await this.db.query<{
       first_name: string; last_name: string; mobile_number: string | null;

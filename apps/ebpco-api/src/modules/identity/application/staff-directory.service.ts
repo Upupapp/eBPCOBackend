@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { ROLE_SCOPES, StaffRole, requiresMfa } from '../domain/account';
+import { mayRemoveSuperAdmin } from '../domain/super-admin-floor';
 import { normaliseEmail } from './account.repository';
 
 /**
@@ -181,6 +182,33 @@ export class StaffDirectoryService {
       : { ok: true, user };
   }
 
+  /**
+   * Whether the service still has someone who can administer it, without this
+   * account.
+   *
+   * Asked by demotion and by disabling, from one place, because they differ in
+   * every respect except the only one that matters: afterwards, that account
+   * can no longer administer. Erasure asks it too, and refuses staff accounts
+   * outright for a separate reason.
+   *
+   * This is the one failure that cannot be repaired from inside the product.
+   * Every other refusal here protects a record; this protects the ability to
+   * grant the role back at all, and recovery without it means someone with
+   * database credentials — at which point the access control has stopped being
+   * the mechanism.
+   */
+  private async survivesWithout(accountId: string): Promise<{ ok: true } | DirectoryRefusal> {
+    const { rows } = await this.db.query<{ id: string }>(
+      `select a.id from accounts a
+         join account_roles r on r.account_id = a.id
+        where r.role = 'super-admin' and a.disabled_at is null`,
+    );
+    const decision = mayRemoveSuperAdmin(
+      { enabledSuperAdmins: rows.map((row) => row.id) }, accountId);
+
+    return decision.ok ? { ok: true } : { ok: false, reason: 'self', detail: decision.reason };
+  }
+
   async setRoles(options: {
     id: string; roles: readonly StaffRole[]; actor: string; actorRole: string;
   }): Promise<{ ok: true; user: StaffUser } | DirectoryRefusal> {
@@ -194,6 +222,13 @@ export class StaffDirectoryService {
     const before = await this.byId(options.id);
     if (before === null) {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+
+    // Demotion is one of the three ways to remove the last super admin, and
+    // they must answer identically — see `survivesWithout`.
+    if (before.roles.includes('super-admin') && !options.roles.includes('super-admin')) {
+      const floor = await this.survivesWithout(options.id);
+      if (!floor.ok) return floor;
     }
 
     await this.db.transaction(async (tx) => {
@@ -234,6 +269,13 @@ export class StaffDirectoryService {
     const before = await this.byId(options.id);
     if (before === null) {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+
+    // Disabling is the second way. ENABLING is not: it can only add an
+    // administrator, never remove the last one.
+    if (options.disabled) {
+      const floor = await this.survivesWithout(options.id);
+      if (!floor.ok) return floor;
     }
 
     await this.db.transaction(async (tx) => {

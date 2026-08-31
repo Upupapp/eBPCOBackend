@@ -40,6 +40,14 @@ beforeEach(async () => {
     `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Maria','Santos')`,
     [applicantId, APPLICANT_ACCOUNT],
   );
+  // Migration 032's backfill, which a direct-insert fixture skips. The
+  // allow-list fails CLOSED, so without it every staff transition is refused.
+  await db.query(
+    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+    [OFFICER, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [OFFICER]);
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)

@@ -3,9 +3,9 @@ import { join } from 'node:path';
 import { AuditService } from '../src/modules/compliance/application/audit.service';
 import { AccessRequestService } from '../src/modules/identity/application/access-request.service';
 import { StaffAccessService } from '../src/modules/identity/application/staff-access.service';
-import { AccessLevel, mayAct, mayWorkOn, scopesAt } from '../src/modules/identity/domain/staff-access';
-import { StaffRole } from '../src/modules/identity/domain/account';
-import { grantsAuthority } from '../src/modules/identity/domain/account';
+import { StaffDirectoryService } from '../src/modules/identity/application/staff-directory.service';
+import { AccessLevel, mayAct, mayWorkOn } from '../src/modules/identity/domain/staff-access';
+import { StaffRole, grantsAuthority, scopesFor } from '../src/modules/identity/domain/account';
 import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { PgliteClient } from '../src/persistence/pglite-client';
 
@@ -288,9 +288,13 @@ describe('role × level × forms', () => {
       } else {
         expect(mayWorkOn(granted, reaches)).toBe(true);
       }
-      // And the level never widens the role, whatever the forms say.
-      for (const scope of scopesAt(role, level)) {
-        if (level === 'view') expect(grantsAuthority(scope)).toBe(false);
+      // And the level never widens the role, whatever the forms say. Read
+      // through scopesFor, which is the single place a token's scopes are
+      // decided — a second derivation would be the drift this guards against.
+      for (const scope of scopesFor({ kind: 'staff', roles: [role] }, level)) {
+        if (level === 'view' && scope !== 'profile:read' && scope !== 'profile:write') {
+          expect(grantsAuthority(scope)).toBe(false);
+        }
       }
     });
 
@@ -315,31 +319,11 @@ describe('role × level × forms', () => {
   });
 });
 
-describe('the last super admin cannot be removed', () => {
-  it('refuses when only one is enabled', async () => {
-    const only = await superAdmin();
-
-    const decision = await access.mayLoseSuperAdmin(only);
-
-    expect(decision.ok).toBe(false);
-  });
-
-  it('permits once a second exists', async () => {
-    const first = await superAdmin('paul@lguids.com.ph');
-    await superAdmin('second@castilla.gov.ph');
-
-    expect((await access.mayLoseSuperAdmin(first)).ok).toBe(true);
-  });
-
-  it('does not count a disabled super admin as a survivor', async () => {
-    const first = await superAdmin('paul@lguids.com.ph');
-    const second = await superAdmin('second@castilla.gov.ph');
-    await query('update accounts set disabled_at = now() where id = $1', [second]);
-
-    // A disabled account cannot sign in, so it cannot be the one that saves you.
-    expect((await access.mayLoseSuperAdmin(first)).ok).toBe(false);
-  });
-});
+// The last-super-admin floor is exercised through the paths that can actually
+// remove the role — see 'demoting or disabling the last super admin is refused'
+// below. It was briefly tested here through a service method that nothing in
+// production called; the reachability gate caught that the rule was built and
+// wired to nothing, which is the more useful failure.
 
 describe('changing level and forms is recorded with both sides', () => {
   it('records the level it was and the level it became', async () => {
@@ -417,5 +401,77 @@ describe('changing level and forms is recorded with both sides', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.detail).toContain('Fencing Permit');
+  });
+});
+
+describe('demoting or disabling the last super admin is refused', () => {
+  /**
+   * The floor, reached through the paths a real administrator uses rather than
+   * through the domain function directly.
+   *
+   * The reachability gate caught this: the rule was built, tested and wired to
+   * nothing. A test calling `mayRemoveSuperAdmin` proves the arithmetic and
+   * says nothing about whether demotion asks it.
+   */
+  const directory = (): StaffDirectoryService =>
+    new StaffDirectoryService(db, new AuditService(db));
+
+  /** A well-formed id that is not the subject. The refusal comes first anyway. */
+  const OTHER_ADMIN = '11111111-1111-4111-8111-111111111111';
+
+  it('refuses to demote the only enabled super admin', async () => {
+    const only = await superAdmin();
+
+    const result = await directory().setRoles({
+      id: only, roles: ['administrator'], actor: OTHER_ADMIN, actorRole: 'super-admin',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.detail).toContain('Appoint another super admin first');
+    const still = await query<{ n: number }>(
+      "select count(*)::int n from account_roles where account_id = $1 and role = 'super-admin'",
+      [only]);
+    expect(still[0]!.n).toBe(1);
+  });
+
+  it('refuses to disable the only enabled super admin', async () => {
+    const only = await superAdmin();
+
+    const result = await directory().setDisabled({
+      id: only, disabled: true, actor: OTHER_ADMIN, actorRole: 'super-admin',
+    });
+
+    expect(result.ok).toBe(false);
+    const account = await query<{ disabled_at: Date | null }>(
+      'select disabled_at from accounts where id = $1', [only]);
+    expect(account[0]!.disabled_at).toBeNull();
+  });
+
+  it('permits both once a second super admin exists', async () => {
+    // The other half. Without it these pass against a service that refuses
+    // every demotion and every disabling.
+    //
+    // The actor is a REAL account id here, unlike the two refusals above: they
+    // never reach the audit write, which is itself confirmation the floor is
+    // checked before anything is written.
+    const first = await superAdmin('paul@lguids.com.ph');
+    const second = await superAdmin('second@castilla.gov.ph');
+
+    expect((await directory().setRoles({
+      id: first, roles: ['administrator'], actor: second, actorRole: 'super-admin',
+    })).ok).toBe(true);
+  });
+
+  it('still permits ENABLING, which can only add an administrator', async () => {
+    const first = await superAdmin('paul@lguids.com.ph');
+    const second = await superAdmin('second@castilla.gov.ph');
+    await query('update accounts set disabled_at = now() where id = $1', [second]);
+
+    // Enabling never removes the last one, so the floor must not block it —
+    // and blocking it would make a disabled super admin unrecoverable.
+    expect((await directory().setDisabled({
+      id: second, disabled: false, actor: first, actorRole: 'super-admin',
+    })).ok).toBe(true);
   });
 });

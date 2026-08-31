@@ -1,8 +1,15 @@
-import { ROLE_SCOPES, Scope, StaffRole, grantsAuthority, isReadOnlyRole } from './account';
 import {
-  ACCESS_LEVELS, AccessLevel, NO_ACCESS, StaffAccess,
-  mayAct, mayWorkOn, scopesAt, scopesForRolesAt,
-} from './staff-access';
+  ROLE_SCOPES, Scope, StaffRole, grantsAuthority, isReadOnlyRole, scopesFor,
+} from './account';
+import { ACCESS_LEVELS, AccessLevel, NO_ACCESS, StaffAccess, mayAct, mayWorkOn } from './staff-access';
+
+/** The derivation under test lives in account.ts; this is the shape it takes. */
+const scopesAt = (role: StaffRole, level: AccessLevel): readonly Scope[] =>
+  scopesFor({ kind: 'staff', roles: [role] }, level)
+    .filter((scope) => (ROLE_SCOPES[role]).includes(scope));
+
+const scopesForRolesAt = (roles: readonly StaffRole[], level: AccessLevel): readonly Scope[] =>
+  scopesFor({ kind: 'staff', roles }, level);
 
 /**
  * Table-driven over role × level, because that is what found the last one.

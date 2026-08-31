@@ -1,6 +1,6 @@
 import { StaffAccess } from '../../identity/domain/staff-access';
 import { Caller } from './application';
-import { formFilterFor, formFilterSql, mayActOnPermitType } from './form-access';
+import { formFilterFor, formFilterSql } from './form-access';
 
 const staff = (scopes: string[] = []): Caller =>
   ({ kind: 'staff', accountId: 'a', scopes, roles: [] } as unknown as Caller);
@@ -58,23 +58,6 @@ describe('the SQL fragment', () => {
   });
 });
 
-describe('acting is asked separately from seeing', () => {
-  const table = [
-    { forms: ['New Construction'], target: 'New Construction', allowed: true },
-    { forms: ['New Construction'], target: 'Renovation', allowed: false },
-    { forms: [], target: 'New Construction', allowed: false },
-  ];
-
-  it.each(table)('forms=$forms target=$target', ({ forms, target, allowed }) => {
-    expect(mayActOnPermitType({ kind: 'permit-types', permitTypes: forms }, target))
-      .toBe(allowed);
-  });
-
-  it('is exact about keys, never lenient', () => {
-    // 'Fencing' and 'Fencing Permit' are different vocabularies — an internal
-    // key and a published name. An authorisation decision is the last place to
-    // be forgiving about which one it was handed.
-    expect(mayActOnPermitType(
-      { kind: 'permit-types', permitTypes: ['Fencing'] }, 'Fencing Permit')).toBe(false);
-  });
-});
+// The acting predicate moved: see `mayWorkOn` in
+// identity/domain/staff-access.spec.ts, which states the same semantics — empty
+// means none, matching is exact — in one place rather than two.

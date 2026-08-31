@@ -226,18 +226,23 @@ export class IdentityService {
       throw new Error('account is no longer active');
     }
 
+    // Refresh re-reads the level too: an officer lowered to view-only must not
+    // keep acting for the lifetime of a refresh token they already hold.
+    const level = stored.kind === 'staff'
+      ? await this.accounts.accessLevelOf(stored.id) : null;
+    const scopes = scopesFor(stored, level ?? undefined);
     const access = await this.tokens.issueAccessToken({
       sub: stored.id,
       sid: rotated.familyId,
       kind: stored.kind,
-      scopes: scopesFor(stored),
+      scopes,
     });
 
     return {
       accessToken: access.token,
       refreshToken: rotated.presented,
       expiresIn: access.expiresIn,
-      scopes: scopesFor(stored),
+      scopes,
     };
   }
 
@@ -312,7 +317,12 @@ export class IdentityService {
 
   private async issueFor(account: Account): Promise<IssuedTokens> {
     const session = await this.tokens.startSession(account.id);
-    const scopes = scopesFor(account);
+    // The level narrows the role's scopes; it never widens them. Read at issue
+    // so a change a super admin makes takes effect on the next sign-in rather
+    // than being frozen into a token already held.
+    const level = account.kind === 'staff'
+      ? await this.accounts.accessLevelOf(account.id) : null;
+    const scopes = scopesFor(account, level ?? undefined);
     const access = await this.tokens.issueAccessToken({
       sub: account.id,
       sid: session.familyId,

@@ -38,6 +38,7 @@ interface SnapshotRow {
   id: string;
   applicant_account_id: string;
   lifecycle_status: LifecycleStatus;
+  permit_type: string;
   version: number;
   identity_document_verified: boolean;
   required_documents_present: boolean;
@@ -61,6 +62,7 @@ const SNAPSHOT_SQL = `
     a.id,
     acc.id as applicant_account_id,
     a.lifecycle_status,
+    a.permit_type,
     a.version,
     exists (
       select 1 from documents d
@@ -122,6 +124,7 @@ export class LifecycleService {
       id: row.id,
       applicantAccountId: row.applicant_account_id,
       status: row.lifecycle_status,
+      permitType: row.permit_type,
       version: row.version,
       identityDocumentVerified: row.identity_document_verified,
       requiredDocumentsPresent: row.required_documents_present,
@@ -187,6 +190,34 @@ export class LifecycleService {
       // lifecycle and finds the next transition still refused by the old table
       // would reasonably conclude the edit did not work, and a cache invalidated
       // by hand is a cache that is wrong on the day it matters.
+      // THE FORMS ALLOW-LIST, on the write path.
+      //
+      // Checked here rather than in the transport: this is inside the
+      // transaction and after the row lock, so the permit type being judged is
+      // the one the move will actually apply to. It refuses identically whether
+      // the application exists or not — an officer probing outside their forms
+      // learns nothing from the shape of the answer, which is why it reuses
+      // `not-permitted` rather than introducing a refusal only they would see.
+      if (caller.kind === 'staff') {
+        const allowed = await tx.query<{ permit_type: string }>(
+          `select p.permit_type from staff_permit_access p
+            where p.account_id = $1 and p.permit_type = $2`,
+          [caller.accountId, snapshot.permitType],
+        );
+        if (allowed.rows.length === 0) {
+          return {
+            ok: false,
+            refusal: {
+              kind: 'not-permitted' as const,
+              from: snapshot.status,
+              to,
+              reason: 'wrong-actor' as const,
+              requiredScope: `forms:${snapshot.permitType}`,
+            },
+          };
+        }
+      }
+
       const rules = await loadTransitions(tx);
 
       const decision = decide({

@@ -32,6 +32,17 @@ export class InMemoryAccountRepository implements AccountRepository {
     this.profiles.set(accountId, profile);
   }
 
+  private readonly levels = new Map<string, 'view' | 'view-edit'>();
+
+  /** Set by tests that need a level; production reads it from staff_access. */
+  setAccessLevel(accountId: string, level: 'view' | 'view-edit'): void {
+    this.levels.set(accountId, level);
+  }
+
+  accessLevelOf(accountId: string): Promise<'view' | 'view-edit' | null> {
+    return Promise.resolve(this.levels.get(accountId) ?? null);
+  }
+
   profileOf(accountId: string): Promise<ApplicantProfile | null> {
     return Promise.resolve(this.profiles.get(accountId) ?? null);
   }

@@ -51,6 +51,17 @@ async function staffToken(role: StaffRole): Promise<{ id: string; token: string 
     [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  // The access assignment migration 032 backfills for every real officer.
+  // A fixture that skips it tests an officer no deployment produces: the
+  // allow-list fails CLOSED, so an unassigned account reaches nothing, and the
+  // queue would correctly return an empty page for reasons unrelated to the
+  // test. Same principle as the note above about scopesFor().
+  await db.query(
+    `insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)`,
+    [id, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [id]);
   const issued = await tokens.issueAccessToken({
     sub: id, sid: randomUUID(), kind: 'staff',
     scopes: [...scopesFor({ kind: 'staff', roles: [role] })],

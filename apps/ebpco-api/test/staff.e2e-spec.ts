@@ -69,6 +69,17 @@ async function staffToken(role: StaffRole): Promise<string> {
     [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  // The access assignment migration 032 backfills for every real officer.
+  // A fixture that skips it tests an officer no deployment produces: the
+  // allow-list fails CLOSED, so an unassigned account reaches nothing, and the
+  // queue would correctly return an empty page for reasons unrelated to the
+  // test. Same principle as the note above about scopesFor().
+  await db.query(
+    `insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)`,
+    [id, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [id]);
   // scopesFor(), not ROLE_SCOPES: production issues tokens through it, and it
   // grants profile:* to every account on top of the role's job scopes. A helper
   // reading the role table directly quietly tests a narrower token than any

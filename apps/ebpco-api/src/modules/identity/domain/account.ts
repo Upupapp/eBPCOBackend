@@ -251,13 +251,34 @@ export interface Account {
  */
 const SELF_SCOPES: readonly Scope[] = ['profile:read', 'profile:write'];
 
-export function scopesFor(account: Pick<Account, 'kind' | 'roles'>): readonly Scope[] {
+export function scopesFor(
+  account: Pick<Account, 'kind' | 'roles'>,
+  /**
+   * The account's access level, where it has one.
+   *
+   * `view` withholds every scope that grants AUTHORITY, leaving sight. Omitted
+   * — or 'view-edit' — the role's scopes are issued unchanged, which is the
+   * behaviour every account had before levels existed.
+   *
+   * Applied HERE rather than at each call site because this is the one place a
+   * staff token's scopes are decided, and a level enforced anywhere else would
+   * be a level the token does not reflect: an officer's own /me would disagree
+   * with what the guard lets them do.
+   */
+  level?: 'view' | 'view-edit',
+): readonly Scope[] {
   if (account.kind === 'applicant') return APPLICANT_SCOPES;
   const granted = new Set<Scope>(SELF_SCOPES);
   for (const role of account.roles) {
     for (const scope of ROLE_SCOPES[role]) granted.add(scope);
   }
-  return [...granted];
+  if (level !== 'view') return [...granted];
+
+  // SELF_SCOPES survive: reading and managing your own account is not a job
+  // function, and a view-only officer must still be able to change their own
+  // password.
+  const self = new Set<Scope>(SELF_SCOPES);
+  return [...granted].filter((scope) => self.has(scope) || !grantsAuthority(scope));
 }
 
 export function requiresMfa(account: Pick<Account, 'kind' | 'roles'>): boolean {

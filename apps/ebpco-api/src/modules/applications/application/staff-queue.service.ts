@@ -6,6 +6,7 @@ import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } fr
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
 import { visibleStatusesFor } from '../domain/visibility';
+import { formFilterFor, formFilterSql } from '../domain/form-access';
 import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
@@ -212,6 +213,39 @@ export class StaffQueueService {
     private readonly clock: () => Date = () => new Date(),
   ) {}
 
+  /**
+   * Which permit types this caller's rows may be drawn from.
+   *
+   * Read per request rather than carried in the token, deliberately. Scopes
+   * stay global and coarse — `account.ts` argues why — and an allow-list in the
+   * token would have to be reissued whenever a super admin changed it, so an
+   * officer's access would lag their assignment by up to the token lifetime.
+   * One indexed read is the cost of the assignment taking effect immediately.
+   *
+   * An applicant is not governed by the list at all: they read their own
+   * records through ownership.
+   */
+  private async formsFor(caller: Caller): Promise<ReturnType<typeof formFilterFor>> {
+    if (caller.kind !== 'staff') return formFilterFor(caller, null);
+
+    const { rows } = await this.db.query<{ permit_type: string }>(
+      `select p.permit_type from staff_permit_access p
+         join permit_types t on t.permit_type = p.permit_type and t.retired_at is null
+        where p.account_id = $1`,
+      [caller.accountId],
+    );
+    const level = await this.db.query<{ level: string }>(
+      'select level from staff_access where account_id = $1', [caller.accountId]);
+
+    // No assignment row means no access, never all access.
+    if (level.rows.length === 0) return formFilterFor(caller, null);
+    return formFilterFor(caller, {
+      level: level.rows[0]!.level === 'view-edit' ? 'view-edit' : 'view',
+      permitTypes: rows.map((row) => row.permit_type),
+    });
+  }
+
+
   async page(caller: Caller, filters: QueueFilters = {}): Promise<QueuePage> {
     const visible = visibleStatusesFor(caller);
     if (Array.isArray(visible) && visible.length === 0) return { rows: [], nextCursor: null };
@@ -227,6 +261,17 @@ export class StaffQueueService {
     };
 
     if (visible !== 'all') where.push(`a.lifecycle_status = any(${bind(visible)})`);
+
+    // The forms allow-list, ANDed into the query rather than applied to the
+    // rows afterwards. Filtering after the fact would still have COUNTED the
+    // rows, and an officer who can see the queue holds 412 applications when 38
+    // are theirs has learned the size of every other office's workload.
+    const forms = formFilterSql(await this.formsFor(caller), 'a.permit_type', values.length + 1);
+    if (forms.sql === 'false') return { rows: [], nextCursor: null };
+    if (forms.sql !== 'true') {
+      where.push(forms.sql);
+      values.push(...forms.params);
+    }
 
     // An explicit status filter narrows what the caller may see; it can never
     // widen it, because the visibility clause above is still ANDed in.

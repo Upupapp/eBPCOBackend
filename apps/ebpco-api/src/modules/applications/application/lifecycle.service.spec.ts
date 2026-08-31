@@ -36,6 +36,15 @@ async function seed(): Promise<void> {
     `insert into applicants (id, account_id, first_name, last_name) values ($1, $2, 'Maria', 'Santos')`,
     [APPLICANT, APPLICANT_ACCOUNT],
   );
+  // The access assignment migration 032 backfills for every real officer. The
+  // allow-list fails CLOSED, so without it every staff transition below is
+  // refused `forms:<permit type>` — correct, and not what these tests are about.
+  await db.query(
+    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+    [OFFICER_ACCOUNT, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [OFFICER_ACCOUNT]);
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)

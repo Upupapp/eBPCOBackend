@@ -23,6 +23,9 @@ const APPLICANT_ACCOUNT = 'applicant-1';
 const satisfied = (status: LifecycleStatus, overrides: Partial<ApplicationSnapshot> = {}): ApplicationSnapshot => ({
   id: 'app-1',
   applicantAccountId: APPLICANT_ACCOUNT,
+  // The engine does not read it — the forms allow-list is checked in the
+  // service, inside the transaction — but the snapshot carries it.
+  permitType: 'New Construction',
   status,
   version: 1,
   identityDocumentVerified: true,

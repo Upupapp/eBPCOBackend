@@ -2,7 +2,6 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { SECURITY_ACTIONS } from '../../compliance/domain/security-events';
 import { AccessLevel, NO_ACCESS, StaffAccess } from '../domain/staff-access';
-import { mayRemoveSuperAdmin } from '../domain/super-admin-floor';
 
 export type Refusal = { readonly ok: false; readonly reason: string; readonly detail: string };
 export type Outcome = { readonly ok: true } | Refusal;
@@ -171,24 +170,9 @@ export class StaffAccessService {
     return { ok: true };
   }
 
-  /**
-   * Whether removing this account's super-admin standing is survivable.
-   *
-   * Asked here rather than at each call site, so demote, disable and erase get
-   * one answer. The count is of ENABLED super admins: a disabled one cannot
-   * sign in, so it cannot be the one that saves you.
-   */
-  async mayLoseSuperAdmin(accountId: string): Promise<Outcome> {
-    const { rows } = await this.db.query<{ account_id: string }>(
-      `select a.id as account_id from accounts a
-         join account_roles r on r.account_id = a.id
-        where r.role = 'super-admin' and a.disabled_at is null`,
-    );
-    const decision = mayRemoveSuperAdmin(
-      { enabledSuperAdmins: rows.map((row) => row.account_id) }, accountId);
-
-    return decision.ok
-      ? { ok: true }
-      : { ok: false, reason: 'last-super-admin', detail: decision.reason };
-  }
+  // `mayLoseSuperAdmin` lived here and was removed: StaffDirectoryService asks
+  // the same question in `survivesWithout`, on the paths that can actually
+  // remove the role, and two implementations of one rule is the drift the rule
+  // exists to prevent. The domain function they both call is
+  // `mayRemoveSuperAdmin` in domain/super-admin-floor.ts.
 }

@@ -20,8 +20,28 @@ let queue: StaffQueueService;
 const APPLICANT_ACCOUNT = randomUUID();
 let applicantId: string;
 
-function officer(role: StaffRole): Caller {
-  return { accountId: randomUUID(), kind: 'staff', scopes: ROLE_SCOPES[role] };
+/**
+ * An officer who exists in the database, not just in a token.
+ *
+ * The account and its access assignment are real rows because the queue reads
+ * them: the forms allow-list fails CLOSED, so a caller invented purely in
+ * memory reaches nothing and every assertion below would pass or fail for a
+ * reason unrelated to what it is testing. This mirrors what migration 032's
+ * backfill does for every officer a deployment actually has.
+ */
+async function officer(role: StaffRole): Promise<Caller> {
+  const accountId = randomUUID();
+  await db.query(
+    `insert into accounts (id, kind, email, email_normalised, password_hash)
+     values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+    [accountId, `${role}-${accountId.slice(0, 8)}@lgu.gov.ph`]);
+  await db.query(
+    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+    [accountId, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [accountId]);
+  return { accountId, kind: 'staff', scopes: ROLE_SCOPES[role] };
 }
 
 async function file(options: {
@@ -175,7 +195,7 @@ describe('an officer sees only what their role needs', () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Payment Submitted' });
 
-    const page = await queue.page(officer('cashier'));
+    const page = await queue.page(await officer('cashier'));
 
     expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-2']);
   });
@@ -184,7 +204,7 @@ describe('an officer sees only what their role needs', () => {
     await file({ reference: 'BP-1', status: 'Under Evaluation' });
     await file({ reference: 'BP-2', status: 'Ready for Release' });
 
-    const page = await queue.page(officer('releasing-officer'));
+    const page = await queue.page(await officer('releasing-officer'));
 
     expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-2']);
   });
@@ -193,8 +213,8 @@ describe('an officer sees only what their role needs', () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Ready for Release' });
 
-    expect(visibleStatusesFor(officer('building-official'))).toBe('all');
-    expect((await queue.page(officer('building-official'))).rows).toHaveLength(2);
+    expect(visibleStatusesFor(await officer('building-official'))).toBe('all');
+    expect((await queue.page(await officer('building-official'))).rows).toHaveLength(2);
   });
 
   it('returns nothing, rather than failing, for a role with no read scope', async () => {
@@ -214,7 +234,7 @@ describe('an officer sees only what their role needs', () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Payment Submitted' });
 
-    const page = await queue.page(officer('cashier'), { statuses: ['Submitted'] });
+    const page = await queue.page(await officer('cashier'), { statuses: ['Submitted'] });
 
     expect(page.rows).toHaveLength(0);
   });
@@ -224,8 +244,8 @@ describe('an officer sees only what their role needs', () => {
     // filed anything yet, so nobody at the LGU may read it.
     await file({ reference: 'BP-1', status: 'Draft' });
 
-    expect((await queue.page(officer('administrator'))).rows).toHaveLength(0);
-    expect((await queue.metrics(officer('administrator'))).total).toBe(0);
+    expect((await queue.page(await officer('administrator'))).rows).toHaveLength(0);
+    expect((await queue.metrics(await officer('administrator'))).total).toBe(0);
   });
 });
 
@@ -233,7 +253,7 @@ describe('search', () => {
   it('matches reference number, business name and applicant name', async () => {
     await file({ reference: 'BP-2026-000123', status: 'Submitted', businessName: 'Aling Nena Sari-Sari' });
 
-    const admin = officer('administrator');
+    const admin = await officer('administrator');
     expect((await queue.page(admin, { search: '000123' })).rows).toHaveLength(1);
     expect((await queue.page(admin, { search: 'Aling Nena' })).rows).toHaveLength(1);
     expect((await queue.page(admin, { search: 'Maria Santos' })).rows).toHaveLength(1);
@@ -245,7 +265,7 @@ describe('search', () => {
     await file({ reference: 'BP-1', status: 'Submitted', businessName: '100% Fresh Meats' });
     await file({ reference: 'BP-2', status: 'Submitted', businessName: 'Unrelated Hardware' });
 
-    const page = await queue.page(officer('administrator'), { search: '100%' });
+    const page = await queue.page(await officer('administrator'), { search: '100%' });
 
     expect(page.rows.map((r) => r.businessName)).toEqual(['100% Fresh Meats']);
   });
@@ -265,7 +285,7 @@ describe('paging a queue that is being worked', () => {
       ids.push(await file({ reference: `BP-${i}`, status: 'Submitted' }));
     }
 
-    const admin = officer('administrator');
+    const admin = await officer('administrator');
     const first = await queue.page(admin, { limit: 3 });
     expect(first.nextCursor).not.toBeNull();
 
@@ -281,7 +301,7 @@ describe('paging a queue that is being worked', () => {
   it('stops rather than looping on a cursor that is not one', async () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
 
-    const page = await queue.page(officer('administrator'), { cursor: 'not-a-cursor' });
+    const page = await queue.page(await officer('administrator'), { cursor: 'not-a-cursor' });
 
     expect(page.rows).toHaveLength(0);
     expect(page.nextCursor).toBeNull();
@@ -290,7 +310,7 @@ describe('paging a queue that is being worked', () => {
   it('caps the page size a caller can ask for', async () => {
     for (let i = 1; i <= 5; i += 1) await file({ reference: `BP-${i}`, status: 'Submitted' });
 
-    const page = await queue.page(officer('administrator'), { limit: 10_000 });
+    const page = await queue.page(await officer('administrator'), { limit: 10_000 });
 
     expect(page.rows.length).toBeLessThanOrEqual(100);
   });
@@ -303,7 +323,7 @@ describe('the dashboard is counted by the database, not the browser', () => {
     // reports the size of a page and calls it the size of the backlog.
     for (let i = 1; i <= 30; i += 1) await file({ reference: `BP-${i}`, status: 'Submitted' });
 
-    const metrics = await queue.metrics(officer('administrator'));
+    const metrics = await queue.metrics(await officer('administrator'));
 
     expect(metrics.total).toBe(30);
     expect(metrics.byStatus['Submitted']).toBe(30);
@@ -314,7 +334,7 @@ describe('the dashboard is counted by the database, not the browser', () => {
     await file({ reference: 'BP-2', status: 'Under Evaluation' });
     await file({ reference: 'BP-3', status: 'Completed' });
 
-    const metrics = await queue.metrics(officer('administrator'));
+    const metrics = await queue.metrics(await officer('administrator'));
     const summed = Object.values(metrics.byStatus).reduce((a, b) => a + b, 0);
 
     expect(summed).toBe(metrics.total);
@@ -324,7 +344,7 @@ describe('the dashboard is counted by the database, not the browser', () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Payment Submitted' });
 
-    expect((await queue.metrics(officer('cashier'))).total).toBe(1);
+    expect((await queue.metrics(await officer('cashier'))).total).toBe(1);
   });
 
   it('excludes Revision Required from the officer backlog', async () => {
@@ -333,7 +353,7 @@ describe('the dashboard is counted by the database, not the browser', () => {
     await file({ reference: 'BP-1', status: 'Revision Required' });
     await file({ reference: 'BP-2', status: 'Under Evaluation' });
 
-    const metrics = await queue.metrics(officer('administrator'));
+    const metrics = await queue.metrics(await officer('administrator'));
 
     expect(metrics.awaitingAction).toBe(1);
   });
@@ -343,7 +363,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
   it('is null where the charter has no entry, never a guessed deadline', async () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
 
-    expect((await queue.page(officer('administrator'))).rows[0]!.pledge).toBeNull();
+    expect((await queue.page(await officer('administrator'))).rows[0]!.pledge).toBeNull();
   });
 
   it('counts working days, so a weekend is not a breach', async () => {
@@ -355,11 +375,11 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       classification: 'Simple', submittedAt: '2026-08-14T01:00:00Z',
     });
 
-    const row = (await queue.page(officer('administrator'))).rows[0]!;
+    const row = (await queue.page(await officer('administrator'))).rows[0]!;
 
     expect(row.pledge).not.toBeNull();
     expect(row.pledge!.overdue).toBe(false);
-    expect((await queue.metrics(officer('administrator'))).overduePledge).toBe(0);
+    expect((await queue.metrics(await officer('administrator'))).overduePledge).toBe(0);
   });
 
   it('honours the proclaimed calendar, so a holiday is not a working day', async () => {
@@ -381,7 +401,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       classification: 'Simple', submittedAt: '2026-08-17T01:00:00Z',
     });
 
-    const row = (await withCalendar.page(officer('administrator'))).rows[0]!;
+    const row = (await withCalendar.page(await officer('administrator'))).rows[0]!;
 
     // Mon 17 filed; working days 18, 19, 20, (21 holiday), 24, 25 -> due 25.
     expect(row.pledge!.dueDate).toBe('2026-08-25');
@@ -403,7 +423,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       [id, APPLICANT_ACCOUNT],
     );
 
-    const row = (await queue.page(officer('administrator'))).rows[0]!;
+    const row = (await queue.page(await officer('administrator'))).rows[0]!;
 
     expect(row.pledge!.workingDaysElapsed).toBeLessThan(3);
     expect(row.pledge!.overdue).toBe(false);
@@ -419,7 +439,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       classification: 'Simple', submittedAt: '2026-08-03T01:00:00Z',
     });
 
-    const metrics = await queue.metrics(officer('administrator'));
+    const metrics = await queue.metrics(await officer('administrator'));
 
     expect(metrics.overduePledge).toBe(0);
     expect(metrics.pledgeIndeterminate).toBe(1);
@@ -434,7 +454,7 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       classification: 'Simple', submittedAt: '2026-08-03T01:00:00Z',
     });
 
-    const metrics = await withCalendar.metrics(officer('administrator'));
+    const metrics = await withCalendar.metrics(await officer('administrator'));
 
     expect(metrics.overduePledge).toBe(1);
     expect(metrics.pledgeIndeterminate).toBe(0);
@@ -449,6 +469,6 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
       classification: 'Simple', submittedAt: '2026-01-05T01:00:00Z',
     });
 
-    expect((await queue.metrics(officer('administrator'))).overduePledge).toBe(0);
+    expect((await queue.metrics(await officer('administrator'))).overduePledge).toBe(0);
   });
 });

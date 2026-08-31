@@ -40,6 +40,16 @@ export interface AccountRepository {
    * without checking `kind`.
    */
   profileOf(accountId: string): Promise<ApplicantProfile | null>;
+
+  /**
+   * A staff account's access level, or null where it has no assignment.
+   *
+   * Read at token issue, so a level a super admin changes takes effect on the
+   * officer's next sign-in rather than being frozen into whatever token they
+   * happened to hold. Null means unassigned, and `scopesFor` treats that as the
+   * role's own scopes — the level narrows, it never grants.
+   */
+  accessLevelOf(accountId: string): Promise<'view' | 'view-edit' | null>;
 }
 
 export interface ApplicantProfile {

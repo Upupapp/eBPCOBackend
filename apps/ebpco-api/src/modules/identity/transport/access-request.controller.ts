@@ -1,11 +1,13 @@
 import {
-  Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req,
+  Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Put, Query, Req,
 } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { StaffRole } from '../domain/account';
 import { AccessRequestService, Refusal } from '../application/access-request.service';
+import { ACCESS_LEVELS } from '../domain/staff-access';
+import { StaffAccessService } from '../application/staff-access.service';
 import { isStaffRole } from '../application/staff-directory.service';
 import { RequireScopes, Public } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
@@ -22,7 +24,9 @@ function parse<T>(shape: z.ZodType<T>, value: unknown): T {
   return result.data;
 }
 
-const LEVELS = ['view', 'view-edit'] as const;
+// The domain's list, not a second copy. A level added there and forgotten here
+// would be a level the API silently refuses.
+const LEVELS = ACCESS_LEVELS as readonly ['view', 'view-edit'];
 
 const requestShape = z.object({
   fullName: z.string().min(1).max(200),
@@ -170,5 +174,67 @@ export class StaffAccessRequestsController {
     // explained itself would disclose which addresses are known, which roles
     // exist, and what this LGU considers a good enough justification.
     if (!result.ok) refuse(result);
+  }
+}
+
+const levelShape = z.object({ level: z.enum(LEVELS) }).strict();
+const formsShape = z.object({
+  permitTypes: z.array(z.string().min(1).max(120)).min(1).max(30),
+}).strict();
+
+/**
+ * Changing what an officer may work on, after they have an account.
+ *
+ * `staff:administer` on every route. A role that can grant itself authority is
+ * not access control, and these are the two routes that grant it.
+ */
+@Controller('staff/users')
+export class StaffAccessController {
+  constructor(private readonly access: StaffAccessService) {}
+
+  @Get(':userId/access')
+  @RequireScopes('staff:administer')
+  async read(@Param('userId') userId: string): Promise<Record<string, unknown>> {
+    // Both readings. `assigned` is what was granted and explains why an officer
+    // had access; `live` is what it reaches today, once retired permit types
+    // are excluded. Returning only one would either hide a grant or overstate
+    // what it can do.
+    const assigned = await this.access.accessFor(userId);
+    const live = await this.access.liveAccessFor(userId);
+    return {
+      level: assigned.level,
+      permitTypes: assigned.permitTypes,
+      livePermitTypes: live.permitTypes,
+    };
+  }
+
+  @Put(':userId/access/level')
+  @RequireScopes('staff:administer')
+  async setLevel(
+    @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ level: string }> {
+    const input = parse(levelShape, body);
+    const result = await this.access.setLevel(userId, input.level, actorOf(request));
+    if (!result.ok) {
+      throw new ProblemException(
+        ProblemType.conflict, 'Cannot change this level', HttpStatus.CONFLICT, result.detail);
+    }
+    return { level: input.level };
+  }
+
+  @Put(':userId/access/forms')
+  @RequireScopes('staff:administer')
+  async setForms(
+    @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ permitTypes: string[] }> {
+    const input = parse(formsShape, body);
+    const result = await this.access.setForms(userId, input.permitTypes, actorOf(request));
+    if (!result.ok) {
+      throw new ProblemException(
+        ProblemType.conflict, 'Cannot change these forms', HttpStatus.CONFLICT, result.detail);
+    }
+    return { permitTypes: input.permitTypes };
   }
 }

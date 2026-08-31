@@ -26,7 +26,7 @@ import { StaffDirectoryController } from './transport/staff-directory.controller
 import { AccessRequestService } from './application/access-request.service';
 import { StaffAccessService } from './application/staff-access.service';
 import {
-  AccessRequestController, StaffAccessRequestsController,
+  AccessRequestController, StaffAccessController, StaffAccessRequestsController,
 } from './transport/access-request.controller';
 import { ContactVerificationService } from './application/contact-verification.service';
 import { ContactsController } from './transport/contacts.controller';
@@ -48,7 +48,8 @@ import { RefusalRecorder } from './application/refusal-recorder';
 @Module({
   imports: [ComplianceModule],
   controllers: [AuthController, MeController, StaffDirectoryController, ContactsController,
-    MfaController, AccessRequestController, StaffAccessRequestsController],
+    MfaController, AccessRequestController, StaffAccessRequestsController,
+    StaffAccessController],
   providers: [
     {
       provide: PASSWORD_RESET_REPOSITORY,

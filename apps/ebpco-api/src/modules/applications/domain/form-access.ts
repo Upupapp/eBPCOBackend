@@ -56,14 +56,8 @@ export function formFilterSql(
   };
 }
 
-/**
- * Whether a caller may ACT on a record of this permit type.
- *
- * Separate from the read filter because the refusals differ: a read that finds
- * nothing is indistinguishable from a record that does not exist, which is what
- * we want, while a write must be refused explicitly — and must be refused the
- * same way whether the application exists or not.
- */
-export function mayActOnPermitType(filter: FormFilter, permitType: string): boolean {
-  return filter.kind === 'all' || filter.permitTypes.includes(permitType);
-}
+// `mayActOnPermitType` lived here and was removed: it asked the same question as
+// `mayWorkOn` in identity/domain/staff-access.ts, on a different type, and two
+// names for one rule is how the two come to disagree. The write path checks one
+// indexed row inside its transaction; `mayWorkOn` is where the semantics are
+// stated and tested.

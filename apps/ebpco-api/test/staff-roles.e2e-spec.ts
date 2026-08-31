@@ -67,6 +67,16 @@ async function mint(role: StaffRole): Promise<string> {
   // Through the real table, which is also what proves migration 016 accepts
   // the two new roles: a check constraint refuses them otherwise.
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  // The access assignment migration 032 backfills for every real officer.
+  // Without it the allow-list fails CLOSED and every transition is refused
+  // `forms:<permit type>` — correct behaviour, and a fixture that skips it is
+  // testing an officer no deployment produces.
+  await db.query(
+    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+    [id, 'view-edit']);
+  await db.query(
+    `insert into staff_permit_access (account_id, permit_type, granted_by)
+     select $1, permit_type, $1 from permit_types`, [id]);
   const issued = await tokens.issueAccessToken({
     sub: id, sid: randomUUID(), kind: 'staff',
     scopes: [...scopesFor({ kind: 'staff', roles: [role] })],
