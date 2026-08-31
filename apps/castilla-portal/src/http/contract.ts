@@ -132,3 +132,39 @@ export const formListSchema = z.object({ forms: z.array(storedFormSchema) }).str
 export const formRevisionsSchema = z.object({ revisions: z.array(storedFormSchema) }).strict();
 
 export type FormListResponse = z.infer<typeof formListSchema>;
+
+/**
+ * `state` is DERIVED from the clock, never stored. 'scheduled' and 'expired'
+ * are what time makes of a published announcement, so nothing has to run at the
+ * appointed minute and no stopped job can leave a lapsed advisory on the site.
+ */
+export const announcementSummarySchema = z.object({
+  slug: z.string().min(1),
+  title: z.string().min(1),
+  category: z.string().min(1),
+  publishedAt: z.string().datetime(),
+  expiresAt: z.string().datetime().optional(),
+  state: z.enum(['draft', 'scheduled', 'published', 'expired', 'withdrawn']),
+}).strict();
+
+export const announcementDetailSchema = announcementSummarySchema.extend({
+  body: z.string().min(1),
+  // Rendered server-side from the plain-text body. No markup is ever accepted.
+  bodyHtml: z.string().min(1),
+  attachment: z.object({
+    familySlug: z.string().min(1),
+    originalFilename: z.string().min(1),
+    downloadUrl: z.string().startsWith('/forms/'),
+  }).strict().optional(),
+}).strict();
+
+export const announcementListSchema = z.object({
+  announcements: z.array(announcementSummarySchema),
+  total: z.number().int().min(0),
+  limit: z.number().int().positive(),
+  offset: z.number().int().min(0),
+}).strict();
+
+export const announcementCountSchema = z.object({
+  count: z.number().int().min(0),
+}).strict();

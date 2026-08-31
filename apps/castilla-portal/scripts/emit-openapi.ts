@@ -5,7 +5,9 @@ import { zodToJsonSchema } from 'zod-to-json-schema';
 
 import {
   municipalityProfileSchema, officeDetailSchema, officeListSchema, officeSummarySchema,
-  formListSchema, formRevisionsSchema, officialListSchema, officialSchema,
+  announcementCountSchema, announcementDetailSchema, announcementListSchema,
+  announcementSummarySchema, formListSchema, formRevisionsSchema, officialListSchema,
+  officialSchema,
   permitCatalogueSchema, permitDetailSchema, permitSummarySchema, profileFieldSchema,
   storedFormSchema,
 } from '../src/http/contract';
@@ -105,6 +107,50 @@ const document = {
         },
       },
     },
+    '/announcements': {
+      get: {
+        summary: 'Published announcements',
+        description:
+          'Published and currently live, newest first. A scheduled announcement is absent until '
+          + 'its moment passes — no deploy and no job is involved, because the publication time '
+          + 'is compared to the clock at read time. Drafts and withdrawn announcements are never '
+          + 'served.',
+        parameters: [
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', maximum: 50, default: 20 } },
+          { name: 'offset', in: 'query', required: false, schema: { type: 'integer', minimum: 0, default: 0 } },
+        ],
+        responses: {
+          200: { description: 'Live announcements', content: { 'application/json': { schema: { $ref: '#/components/schemas/AnnouncementList' } } } },
+          400: { description: 'Invalid paging', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
+    '/announcements/count': {
+      get: {
+        summary: 'How many announcements are live',
+        description:
+          'What the header badge needs and nothing else: one integer, from one query against a '
+          + 'partial index. Cacheable for 60 seconds and `public`, because the answer is the same '
+          + 'for every reader — there is deliberately no per-user unread state.',
+        responses: {
+          200: { description: 'The count', content: { 'application/json': { schema: { $ref: '#/components/schemas/AnnouncementCount' } } } },
+        },
+      },
+    },
+    '/announcements/{slug}': {
+      get: {
+        summary: 'One announcement',
+        description:
+          'Includes EXPIRED announcements, flagged `expired`, so a link shared on social media '
+          + 'does not rot the day the notice lapses. Drafts, scheduled and withdrawn '
+          + 'announcements all 404 alike — that a draft exists is itself information.',
+        parameters: [{ name: 'slug', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: {
+          200: { description: 'The announcement', content: { 'application/json': { schema: { $ref: '#/components/schemas/AnnouncementDetail' } } } },
+          404: { description: 'Not published', content: { 'application/problem+json': { schema: { $ref: '#/components/schemas/Problem' } } } },
+        },
+      },
+    },
     '/forms': {
       get: {
         summary: 'The bundled application forms',
@@ -171,6 +217,10 @@ const document = {
       OfficeList: zodToJsonSchema(officeListSchema, { target: 'openApi3' }),
       OfficeDetail: zodToJsonSchema(officeDetailSchema, { target: 'openApi3' }),
       Official: zodToJsonSchema(officialSchema, { target: 'openApi3' }),
+      AnnouncementSummary: zodToJsonSchema(announcementSummarySchema, { target: 'openApi3' }),
+      AnnouncementDetail: zodToJsonSchema(announcementDetailSchema, { target: 'openApi3' }),
+      AnnouncementList: zodToJsonSchema(announcementListSchema, { target: 'openApi3' }),
+      AnnouncementCount: zodToJsonSchema(announcementCountSchema, { target: 'openApi3' }),
       StoredForm: zodToJsonSchema(storedFormSchema, { target: 'openApi3' }),
       FormList: zodToJsonSchema(formListSchema, { target: 'openApi3' }),
       FormRevisions: zodToJsonSchema(formRevisionsSchema, { target: 'openApi3' }),
