@@ -2,6 +2,7 @@ import { Controller, Get, Query } from '@nestjs/common';
 
 import { ProblemException } from '../http/problem';
 import { SearchRepository, SearchResult } from './search.repository';
+import { POLICIES, Cacheable } from '../http/cache';
 
 const MAX_RESULTS = 50;
 const DEFAULT_RESULTS = 20;
@@ -10,6 +11,7 @@ const DEFAULT_RESULTS = 20;
 export class SearchController {
   constructor(private readonly search: SearchRepository) {}
 
+  @Cacheable(POLICIES.query, () => 'search')
   @Get()
   async query(
     @Query('q') q?: string,

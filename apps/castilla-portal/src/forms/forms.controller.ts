@@ -3,11 +3,13 @@ import type { FastifyReply } from 'fastify';
 
 import { ProblemException } from '../http/problem';
 import { FormsRepository } from './forms.repository';
+import { POLICIES, Cacheable } from '../http/cache';
 
 @Controller('forms')
 export class FormsController {
   constructor(private readonly forms: FormsRepository) {}
 
+  @Cacheable(POLICIES.reference, () => 'forms')
   @Get()
   async list(): Promise<{ forms: Awaited<ReturnType<FormsRepository['list']>> }> {
     return { forms: await this.forms.list() };

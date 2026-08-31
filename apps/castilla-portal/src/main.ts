@@ -1,5 +1,6 @@
 import 'reflect-metadata';
 
+import compress from '@fastify/compress';
 import { NestFactory } from '@nestjs/core';
 import { FastifyAdapter, NestFastifyApplication } from '@nestjs/platform-fastify';
 import { Pool } from 'pg';
@@ -27,6 +28,17 @@ async function bootstrap(): Promise<void> {
   const app = await NestFactory.create<NestFastifyApplication>(
     AppModule.withDatabase(pool), new FastifyAdapter(),
   );
+  // Compression for JSON, and NOT for the bundled forms.
+  //
+  // A PDF is already deflate-compressed internally: gzipping it again spends
+  // CPU to make the file marginally larger, and TAB 06's download must serve
+  // the LGU's bytes rather than a re-encoded approximation of them.
+  await app.register(compress, {
+    global: true,
+    encodings: ['br', 'gzip', 'deflate'],
+    customTypes: /^(?:application\/(?:json|problem\+json)|text\/)/,
+  });
+
   app.setGlobalPrefix('api');
   app.enableShutdownHooks();
 

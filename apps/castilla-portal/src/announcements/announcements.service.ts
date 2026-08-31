@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { audit } from '../audit/audit';
+import { ContentVersions } from '../http/cache';
 import { inTransaction } from '../persistence/transaction';
 import { SQL_CLIENT, SqlClient } from '../persistence/sql-client';
 
@@ -31,7 +32,10 @@ export type LifecycleResult =
  */
 @Injectable()
 export class AnnouncementsService {
-  constructor(@Inject(SQL_CLIENT) private readonly db: SqlClient) {}
+  constructor(
+    @Inject(SQL_CLIENT) private readonly db: SqlClient,
+    private readonly versions?: ContentVersions,
+  ) {}
 
   async draft(input: DraftAnnouncement, actor: string): Promise<LifecycleResult> {
     if (actor.trim() === '') return { ok: false, reason: 'actor-required' };
@@ -88,6 +92,8 @@ export class AnnouncementsService {
       newValue: at.toISOString(),
       detail: expiresAt === undefined ? null : `expires ${expiresAt.toISOString()}`,
     });
+    // Publication is one of the three moments public content changes.
+    this.versions?.bump('announcements');
     return { ok: true, id };
   }
 
@@ -121,6 +127,9 @@ export class AnnouncementsService {
         detail: reason ?? null,
       });
     });
+    // And withdrawal is the third — the one where a stale cache would keep
+    // showing a notice the LGU has taken down.
+    this.versions?.bump('announcements');
     return { ok: true, id };
   }
 

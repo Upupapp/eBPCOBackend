@@ -2,6 +2,7 @@ import { Controller, Get, Header, Param, Query } from '@nestjs/common';
 
 import { ProblemException } from '../http/problem';
 import { AnnouncementsRepository } from './announcements.repository';
+import { POLICIES, Cacheable } from '../http/cache';
 
 const MAX_PAGE = 50;
 const DEFAULT_PAGE = 20;
@@ -19,6 +20,9 @@ function positiveInt(raw: string | undefined, fallback: number, max: number, nam
 export class AnnouncementsController {
   constructor(private readonly announcements: AnnouncementsRepository) {}
 
+  // TAB 13's guard: the one content type whose value IS timeliness is the one
+  // most likely to be over-cached by a sensible-looking default.
+  @Cacheable(POLICIES.timely, () => 'announcements')
   @Get()
   async list(@Query('limit') limit?: string, @Query('offset') offset?: string): Promise<unknown> {
     const take = Math.max(1, positiveInt(limit, DEFAULT_PAGE, MAX_PAGE, 'limit'));
@@ -41,6 +45,7 @@ export class AnnouncementsController {
     return { count: await this.announcements.count(new Date()) };
   }
 
+  @Cacheable(POLICIES.timely, (p: Record<string, string>) => `announcement:${p['slug'] ?? ''}`)
   @Get(':slug')
   async detail(@Param('slug') slug: string): Promise<unknown> {
     const announcement = await this.announcements.bySlug(slug, new Date());

@@ -1,9 +1,12 @@
 import { DynamicModule, Module } from '@nestjs/common';
-import { APP_GUARD } from '@nestjs/core';
+import { APP_GUARD, APP_INTERCEPTOR } from '@nestjs/core';
 
 import { AnnouncementsModule } from './announcements/announcements.module';
 import { FormsModule } from './forms/forms.module';
 import { AuditModule } from './audit/audit.module';
+import { ContentVersions } from './http/cache';
+import { CacheInterceptor } from './http/cache.interceptor';
+import { NoStoreHook } from './http/no-store.hook';
 import { AuthGuard } from './identity/auth.guard';
 import { IdentityModule } from './identity/identity.module';
 import { SessionController } from './identity/session.controller';
@@ -42,8 +45,14 @@ export class AppModule {
         // unguarded by default, and 'someone forgot the decorator' is exactly
         // how a write endpoint ends up public.
         { provide: APP_GUARD, useClass: AuthGuard },
+        // One instance for the whole process: the version counters ARE the
+        // cache, so a per-request instance would hand every caller a fresh
+        // registry and no ETag would ever match.
+        ContentVersions,
+        NoStoreHook,
+        { provide: APP_INTERCEPTOR, useClass: CacheInterceptor },
       ],
-      exports: [SQL_CLIENT],
+      exports: [SQL_CLIENT, ContentVersions],
       // Global because every feature module needs the same connection and
       // threading a Database module through each import list adds ceremony
       // without adding a decision.

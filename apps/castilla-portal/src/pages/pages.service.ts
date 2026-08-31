@@ -1,6 +1,7 @@
 import { Inject, Injectable } from '@nestjs/common';
 
 import { audit } from '../audit/audit';
+import { ContentVersions } from '../http/cache';
 import { inTransaction } from '../persistence/transaction';
 import { SQL_CLIENT, SqlClient } from '../persistence/sql-client';
 
@@ -23,7 +24,10 @@ export type EditResult =
  */
 @Injectable()
 export class PagesService {
-  constructor(@Inject(SQL_CLIENT) private readonly db: SqlClient) {}
+  constructor(
+    @Inject(SQL_CLIENT) private readonly db: SqlClient,
+    private readonly versions?: ContentVersions,
+  ) {}
 
   async replace(key: string, edit: PageEdit, author: string): Promise<EditResult> {
     if (author.trim() === '') return { ok: false, reason: 'author-required' };
@@ -65,6 +69,7 @@ export class PagesService {
       });
     });
 
+    this.versions?.bump('pages', `page:${key}`);
     return { ok: true };
   }
 }

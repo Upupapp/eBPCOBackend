@@ -3,11 +3,13 @@ import { Controller, Get, Param, Query } from '@nestjs/common';
 import { OfficeDetailResponse, OfficeListResponse } from '../http/contract';
 import { ProblemException } from '../http/problem';
 import { OfficesRepository } from './offices.repository';
+import { POLICIES, Cacheable } from '../http/cache';
 
 @Controller('offices')
 export class OfficesController {
   constructor(private readonly offices: OfficesRepository) {}
 
+  @Cacheable(POLICIES.reference, () => 'offices')
   @Get()
   async list(@Query('category') category?: string): Promise<OfficeListResponse> {
     if (category !== undefined) {
@@ -24,6 +26,7 @@ export class OfficesController {
     return { offices: await this.offices.list(category) };
   }
 
+  @Cacheable(POLICIES.reference, (p: Record<string, string>) => `office:${p['slug'] ?? ''}`)
   @Get(':slug')
   async detail(@Param('slug') slug: string): Promise<OfficeDetailResponse> {
     const office = await this.offices.detail(slug);

@@ -1,4 +1,6 @@
 import { audit } from '../audit/audit';
+import { ContentVersions } from '../http/cache';
+import { invalidateFor } from '../http/invalidation';
 import { inTransaction } from '../persistence/transaction';
 import { requiresTwoPeople } from './four-eyes';
 
@@ -49,7 +51,22 @@ export class ConfirmationService {
   constructor(
     private readonly db: Sql,
     private readonly clock: () => Date = () => new Date(),
+    /**
+     * Optional: the workflow is usable without a cache, and the tests that
+     * predate TAB 13 construct it with two arguments.
+     */
+    private readonly versions?: ContentVersions,
   ) {}
+
+  /**
+   * Expire what this change made stale — AFTER the transaction, never inside.
+   * Invalidating within it would expire caches for a change that then rolled
+   * back, buying a revalidation storm for nothing.
+   */
+  private async invalidate(entityType: string, entityId: string): Promise<void> {
+    if (this.versions === undefined) return;
+    await invalidateFor(this.versions, this.db, entityType, entityId);
+  }
 
   async propose(input: ProposalInput): Promise<Outcome<string>> {
     if (input.sourceDescription.trim().length < 8) {
@@ -135,7 +152,7 @@ export class ConfirmationService {
     // less leaves either a published fact no audit row explains, or a trail
     // claiming a change that was rolled back — and both are worse than a
     // failure, because both look like the truth.
-    return inTransaction(this.db, async (tx) => {
+    const result = await inTransaction(this.db, async (tx) => {
       // The transition IS the lock: exactly one caller moves it out of 'open'.
       const won = await tx.query<{ id: string }>(
         `update proposals set status = 'confirmed', decided_by = $2, decided_at = $3
@@ -196,6 +213,9 @@ export class ConfirmationService {
 
       return { ok: true as const, value: undefined };
     });
+
+    if (result.ok) await this.invalidate(proposal.entity_type, proposal.entity_id);
+    return result;
   }
 
   /**
@@ -228,7 +248,7 @@ export class ConfirmationService {
       [entityType, entityId, fieldName],
     );
 
-    return inTransaction(this.db, async (tx) => {
+    await inTransaction(this.db, async (tx) => {
       await tx.query(
         `update field_state set state = 'pending', updated_at = now()
           where entity_type = $1 and entity_id = $2 and field_name = $3`,
@@ -254,6 +274,12 @@ export class ConfirmationService {
 
       return { ok: true as const, value: undefined };
     });
+
+    // A revert removes a fact from public view — arguably the moment where a
+    // stale cache does the most harm, since the alternative is serving
+    // something the LGU has just stopped standing behind.
+    await this.invalidate(entityType, entityId);
+    return { ok: true, value: undefined };
   }
 
   /**
