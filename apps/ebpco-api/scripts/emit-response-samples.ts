@@ -155,6 +155,23 @@ async function seed(db: SqlClient): Promise<Seeded> {
       [id, `${role}@cabuyao.gov.ph`],
     );
     await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+    // What migration 032's backfill grants an existing staff account. A fixture
+    // that inserts a staff row directly skips the backfill, and the access
+    // control added in 032 then filters every staff queue down to nothing --
+    // which records as an EMPTY list. An empty list validates against almost
+    // any schema, so the evidence would have gone quietly worthless rather
+    // than failing. Granted here so the samples stay real bytes.
+    await db.query(
+      `insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)`,
+      // view-edit for all seven: the samples must show what each role can DO,
+      // and a view-only officer records a narrower response than the role has.
+      [id, 'view-edit'],
+    );
+    await db.query(
+      `insert into staff_permit_access (account_id, permit_type, granted_by)
+       select $1, t.permit_type, $1 from permit_types t where t.retired_at is null`,
+      [id],
+    );
   }
 
   const applicant = randomUUID();
@@ -489,6 +506,11 @@ async function main(): Promise<void> {
     `/applications/${seeded.detailed}`, applicantToken);
   await record('applicant.applications.timeline', 'GET',
     `/applications/${seeded.detailed}/timeline`, applicantToken);
+  // The permit itself, read by the citizen it was issued to (C-1). Recorded
+  // AFTER staff.generatePermit above, so these are the real bytes of a real
+  // generation rather than a fixture shaped like one.
+  await record('applicant.applications.permit', 'GET',
+    `/applications/${seeded.approved}/permit`, applicantToken);
   await record('applicant.notifications', 'GET', '/notifications', applicantToken);
   await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
   await record('applicant.businesses', 'GET', '/businesses', applicantToken);

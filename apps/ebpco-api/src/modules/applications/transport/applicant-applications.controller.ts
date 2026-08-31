@@ -80,6 +80,34 @@ export class ApplicantApplicationsController {
     return found;
   }
 
+  /**
+   * The permit, once it exists.
+   *
+   * Separate from the application detail rather than folded into it: the detail
+   * is read on every list refresh, and the permit is read once, at the end. A
+   * join nobody needs on the common path is a join every caller pays for.
+   */
+  @Get(':applicationId/permit')
+  @RequireScopes('applications:read')
+  async permit(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<Record<string, unknown>> {
+    const account = callerAccount(request);
+    const permit = await this.applications.permit(account, applicationId);
+    if (permit !== null) return { ...permit };
+
+    // Two different absences, told apart. "Not yours" must stay
+    // indistinguishable from "does not exist" — otherwise a reference number
+    // confirms a neighbour has applied — but an applicant reading their OWN
+    // application is entitled to know the permit is simply not issued yet,
+    // rather than being told their application does not exist.
+    const own = await this.applications.byId(account, applicationId);
+    if (own === null) throw ProblemException.notFound('No such application.');
+    throw ProblemException.notFound(
+      'No permit has been issued for this application yet.');
+  }
+
   @Get(':applicationId/timeline')
   @RequireScopes('applications:read')
   async timeline(

@@ -398,3 +398,88 @@ describe('devices', () => {
     expect(Number(count.rows[0]!.n)).toBe(1);
   });
 });
+
+describe('an applicant can obtain the permit they were issued (C-1)', () => {
+  const issue = async (applicationId: string, number: string): Promise<void> => {
+    await db.query(
+      `insert into generated_permits (application_id, permit_number, issued_date, scope,
+                                      conditions, generated_by)
+       values ($1,$2,'2026-08-28T01:00:00Z','Fencing, 24 linear metres',
+               $3::text[], $4)`,
+      [applicationId, number,
+       '{"A cash bond of PHP 20,000 shall be posted before excavation",'
+       + '"Five days\' notice shall be given before work begins"}', MARIA],
+    );
+  };
+
+  it('returns the number, the date, the scope and the conditions', async () => {
+    // The whole purpose of the application. Before this route the record
+    // existed and no controller read it: a citizen who filed, paid and was
+    // approved could not learn their own permit number.
+    await issue(mariaApplication, 'BP-2026-000041-P');
+
+    const body = (await get(`/applications/${mariaApplication}/permit`, await applicantToken(MARIA)))
+      .json<{ permitNumber: string; issuedDate: string; scope: string; conditions: string[] }>();
+
+    expect(body.permitNumber).toBe('BP-2026-000041-P');
+    expect(body.issuedDate).toBe('2026-08-28T01:00:00.000Z');
+    expect(body.scope).toBe('Fencing, 24 linear metres');
+    // The conditions are what the permit REQUIRES of the holder. A citizen who
+    // cannot read them cannot comply with them, so they are carried in full
+    // rather than summarised or counted.
+    expect(body.conditions).toEqual([
+      'A cash bond of PHP 20,000 shall be posted before excavation',
+      'Five days\' notice shall be given before work begins',
+    ]);
+  });
+
+  it('never serves another applicant’s permit', async () => {
+    await issue(joseApplication, 'BP-2026-000042-P');
+
+    const response = await get(
+      `/applications/${joseApplication}/permit`, await applicantToken(MARIA));
+
+    // 404, and the same 404 as an application that does not exist: a permit
+    // number is the most disclosing field on the record.
+    expect(response.statusCode).toBe(404);
+    expect(JSON.stringify(response.json())).not.toContain('BP-2026-000042-P');
+  });
+
+  it('says the permit is not issued yet, rather than that the application is missing', async () => {
+    // Two different absences. "Not yours" must stay indistinguishable from
+    // "does not exist", but an applicant reading their OWN application is
+    // entitled to know the permit is simply not ready.
+    const response = await get(
+      `/applications/${mariaApplication}/permit`, await applicantToken(MARIA));
+
+    expect(response.statusCode).toBe(404);
+    expect(response.json<{ detail: string }>().detail).toMatch(/no permit has been issued/i);
+  });
+
+  it('reports whether the permit can be collected, and how', async () => {
+    await issue(mariaApplication, 'BP-2026-000041-P');
+    await db.query(
+      `insert into permit_releases (application_id, status, method)
+       values ($1,'Ready for Release','Physical Claim')`,
+      [mariaApplication],
+    );
+
+    const body = (await get(`/applications/${mariaApplication}/permit`, await applicantToken(MARIA)))
+      .json<{ release: { status: string; method: string; releasedAt: string | null } }>();
+
+    expect(body.release).toEqual({
+      status: 'Ready for Release', method: 'Physical Claim', releasedAt: null,
+    });
+  });
+
+  it('reports a null release rather than omitting the field', async () => {
+    // "Not ready" is a fact the applicant should read, not infer from an
+    // absent key. An omitted field reads to a client as a parse failure.
+    await issue(mariaApplication, 'BP-2026-000041-P');
+
+    const body = (await get(`/applications/${mariaApplication}/permit`, await applicantToken(MARIA)))
+      .json<Record<string, unknown>>();
+
+    expect(body).toHaveProperty('release', null);
+  });
+});

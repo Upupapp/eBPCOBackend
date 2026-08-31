@@ -100,6 +100,63 @@ export class ApplicantQueryService {
     return toApplicantView(this.toRecord(row, await this.calendars.load()));
   }
 
+  /**
+   * The permit itself.
+   *
+   * C-1. The record has existed since the lifecycle could reach
+   * "Permit Generated" — `generated_permits` holds the number, the issue date,
+   * the scope and the conditions — and no controller read it. A citizen who
+   * filed, paid and was approved could not learn their permit number, and the
+   * only path to it was the RA 10173 data export: a privacy mechanism returning
+   * the subject's whole record as a file, asynchronously, for a request nobody
+   * makes to collect a permit.
+   *
+   * The conditions are the part worth carrying deliberately. They are what the
+   * permit REQUIRES of the holder — a cash bond, a setback, a notice before
+   * excavation — and a citizen who cannot read them cannot comply with them.
+   *
+   * Returns null for an application that is not theirs AND for one whose permit
+   * has not been issued; the controller distinguishes the two, because an
+   * applicant already knows their own application exists.
+   */
+  async permit(accountId: string, applicationId: string): Promise<{
+    permitNumber: string; issuedDate: string; scope: string | null;
+    conditions: readonly string[];
+    release: { status: string; method: string | null; releasedAt: string | null } | null;
+  } | null> {
+    if (await this.byId(accountId, applicationId) === null) return null;
+
+    const result = await this.db.query<{
+      permit_number: string; issued_date: Date; scope: string | null; conditions: string[];
+      release_status: string | null; release_method: string | null; released_at: Date | null;
+    }>(
+      `select g.permit_number, g.issued_date, g.scope, g.conditions,
+              r.status as release_status, r.method as release_method, r.released_at
+         from generated_permits g
+         left join permit_releases r on r.application_id = g.application_id
+        where g.application_id = $1`,
+      [applicationId],
+    );
+
+    const row = result.rows[0];
+    if (row === undefined) return null;
+
+    return {
+      permitNumber: row.permit_number,
+      issuedDate: row.issued_date.toISOString(),
+      scope: row.scope,
+      conditions: row.conditions,
+      // Whether it can be collected yet, and how. Null before an officer has
+      // set it: "not ready" is a fact the applicant should read rather than
+      // infer from an absent field.
+      release: row.release_status === null ? null : {
+        status: row.release_status,
+        method: row.release_method,
+        releasedAt: row.released_at === null ? null : row.released_at.toISOString(),
+      },
+    };
+  }
+
   /** The application's own history, in the applicant's vocabulary. */
   async timeline(accountId: string, applicationId: string): Promise<ReadonlyArray<Record<string, unknown>> | null> {
     if (await this.byId(accountId, applicationId) === null) return null;
