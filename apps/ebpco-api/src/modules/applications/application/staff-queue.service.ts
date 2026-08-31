@@ -6,7 +6,7 @@ import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } fr
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
 import { visibleStatusesFor } from '../domain/visibility';
-import { formFilterFor, formFilterSql } from '../domain/form-access';
+import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
 import { publishedNameFor } from '../../permits/domain/published-vocabulary';
 
 /**
@@ -442,21 +442,29 @@ export class StaffQueueService {
    */
   async metrics(caller: Caller): Promise<QueueMetrics> {
     const visible = visibleStatusesFor(caller);
-    if (Array.isArray(visible) && visible.length === 0) {
-      return {
-        total: 0, byStatus: {}, awaitingAction: 0, overduePledge: 0, pledgeIndeterminate: 0,
-        trend: EMPTY_TREND,
-      };
-    }
+    const forms = await this.formsFor(caller);
+    // Every figure below is computed over the caller's VISIBLE SET, not over
+    // the table. A dashboard that counts work an officer cannot open is worse
+    // than one that shows nothing: it reports a backlog they are not permitted
+    // to reduce, and the number moves when another office's queue does.
+    const empty: QueueMetrics = {
+      total: 0, byStatus: {}, awaitingAction: 0, overduePledge: 0, pledgeIndeterminate: 0,
+      trend: EMPTY_TREND,
+    };
+    if (Array.isArray(visible) && visible.length === 0) return empty;
+    if (formFilterSql(forms, 'a.permit_type', 1).sql === 'false') return empty;
 
     const values: unknown[] = [];
     const clause = visible === 'all' ? '' : ' and a.lifecycle_status = any($1)';
     if (visible !== 'all') values.push(visible);
+    const formsHere = formFilterSql(forms, 'a.permit_type', values.length + 1);
+    const formsClause = formsHere.sql === 'true' ? '' : ` and ${formsHere.sql}`;
+    values.push(...formsHere.params);
 
     const result = await this.db.query<{ lifecycle_status: string; n: string }>(
       `select a.lifecycle_status, count(*) as n
          from applications a
-        where a.lifecycle_status <> 'Draft' and a.archived_at is null${clause}
+        where a.lifecycle_status <> 'Draft' and a.archived_at is null${clause}${formsClause}
         group by a.lifecycle_status`,
       values,
     );
@@ -481,8 +489,8 @@ export class StaffQueueService {
     ];
     const awaitingAction = WAITING_ON_STAFF.reduce((sum, s) => sum + (byStatus[s] ?? 0), 0);
 
-    const { overdue, indeterminate } = await this.overdue(visible);
-    const trend = await this.trend(visible);
+    const { overdue, indeterminate } = await this.overdue(visible, forms);
+    const trend = await this.trend(visible, forms);
 
     return { total, byStatus, awaitingAction, overduePledge: overdue, pledgeIndeterminate: indeterminate, trend };
   }
@@ -514,12 +522,17 @@ export class StaffQueueService {
    * single status 'Payment Under Verification', not the pair that sounds like
    * it: a payment merely submitted is waiting on nobody at the LGU yet.
    */
-  private async trend(visible: readonly LifecycleStatus[] | 'all'): Promise<QueueTrend> {
+  private async trend(
+    visible: readonly LifecycleStatus[] | 'all', forms: FormFilter,
+  ): Promise<QueueTrend> {
     const now = this.clock();
     const day = 24 * 60 * 60 * 1000;
     const values: unknown[] = [new Date(now.getTime() - 60 * day), new Date(now.getTime() - 30 * day), now];
     const clause = visible === 'all' ? '' : ' and a.lifecycle_status = any($4)';
     if (visible !== 'all') values.push(visible);
+    const formsHere = formFilterSql(forms, 'a.permit_type', values.length + 1);
+    const formsClause = formsHere.sql === 'true' ? '' : ` and ${formsHere.sql}`;
+    values.push(...formsHere.params);
 
     const rows = await this.db.query<{ lifecycle_status: string; bucket: string; n: string }>(
       `select a.lifecycle_status,
@@ -529,7 +542,7 @@ export class StaffQueueService {
               count(*) as n
          from applications a
         where a.lifecycle_status <> 'Draft' and a.archived_at is null
-          and a.submitted_at >= $1 and a.submitted_at < $3${clause}
+          and a.submitted_at >= $1 and a.submitted_at < $3${clause}${formsClause}
         group by a.lifecycle_status, bucket`,
       values,
     );
@@ -554,10 +567,17 @@ export class StaffQueueService {
 
   private async overdue(
     visible: readonly LifecycleStatus[] | 'all',
+    forms: FormFilter,
   ): Promise<{ overdue: number; indeterminate: number }> {
     const values: unknown[] = [];
     const clause = visible === 'all' ? '' : ' and a.lifecycle_status = any($1)';
     if (visible !== 'all') values.push(visible);
+    // The statutory figure must be over the caller's own forms too: an officer
+    // told they have 14 overdue applications, 11 of which belong to another
+    // office, cannot act on the number and cannot correct it.
+    const formsHere = formFilterSql(forms, 'a.permit_type', values.length + 1);
+    const formsClause = formsHere.sql === 'true' ? '' : ` and ${formsHere.sql}`;
+    values.push(...formsHere.params);
 
     const result = await this.db.query<Record<string, never>>(
       `select a.id, a.classification as charter_classification, a.submitted_at,
@@ -570,7 +590,7 @@ export class StaffQueueService {
          from applications a
          left join charter_entries ce on ce.id = a.charter_entry_id
         where a.lifecycle_status not in
-              ('Draft', 'Released', 'Completed', 'Rejected', 'Cancelled', 'Expired')${clause}`,
+              ('Draft', 'Released', 'Completed', 'Rejected', 'Cancelled', 'Expired')${clause}${formsClause}`,
       values,
     );
 

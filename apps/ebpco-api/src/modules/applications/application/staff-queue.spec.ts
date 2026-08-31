@@ -472,3 +472,78 @@ describe('the pledge is the compliance module’s answer, not a second one', () 
     expect((await queue.metrics(await officer('administrator'))).overduePledge).toBe(0);
   });
 });
+
+describe('metrics count only what the caller can open', () => {
+  /**
+   * The dashboard is the easiest place for the allow-list to leak.
+   *
+   * A queue that hides rows but a metric that counts them tells an officer
+   * exactly how much work exists outside their forms, and lets them watch it
+   * change — which is the inference the row filter exists to prevent. Every
+   * figure has to be computed over the same set.
+   */
+  const assign = async (accountId: string, permitTypes: string[]): Promise<void> => {
+    await db.query('delete from staff_permit_access where account_id = $1', [accountId]);
+    for (const permitType of permitTypes) {
+      await db.query(
+        'insert into staff_permit_access (account_id, permit_type, granted_by) values ($1,$2,$1)',
+        [accountId, permitType]);
+    }
+  };
+
+  it('counts only the caller’s own forms in total and byStatus', async () => {
+    await file({ reference: 'BP-1', status: 'Submitted', permitType: 'New Construction' });
+    await file({ reference: 'BP-2', status: 'Submitted', permitType: 'Renovation' });
+    const caller = await officer('administrator');
+    await assign(caller.accountId, ['New Construction']);
+
+    const metrics = await queue.metrics(caller);
+
+    expect(metrics.total).toBe(1);
+    expect(metrics.byStatus['Submitted']).toBe(1);
+  });
+
+  it('agrees with the queue it describes', async () => {
+    // The property that matters more than any single number: a card saying 2
+    // above a list showing 1 is a bug an officer reports, and a card saying 1
+    // above a list showing 1 is trustworthy.
+    await file({ reference: 'BP-3', status: 'Submitted', permitType: 'New Construction' });
+    await file({ reference: 'BP-4', status: 'Submitted', permitType: 'Demolition' });
+    const caller = await officer('administrator');
+    await assign(caller.accountId, ['New Construction']);
+
+    const metrics = await queue.metrics(caller);
+    const page = await queue.page(caller);
+
+    expect(metrics.total).toBe(page.rows.length);
+  });
+
+  it('reports nothing at all for an officer with no forms', async () => {
+    await file({ reference: 'BP-5', status: 'Submitted', permitType: 'New Construction' });
+    const caller = await officer('administrator');
+    await assign(caller.accountId, []);
+
+    const metrics = await queue.metrics(caller);
+
+    expect(metrics.total).toBe(0);
+    expect(metrics.byStatus).toEqual({});
+    expect(metrics.overduePledge).toBe(0);
+    // Every trend figure is zero, not merely the totals.
+    expect(Object.values(metrics.trend).every(
+      (value) => typeof value !== 'object' || value === null
+        || Object.values(value as Record<string, number>).every((n) => n === 0))).toBe(true);
+  });
+
+  it('scopes the statutory pledge figure too', async () => {
+    // An officer told they have overdue applications belonging to another
+    // office cannot act on the number and cannot correct it.
+    await file({ reference: 'BP-6', status: 'Submitted', permitType: 'Renovation' });
+    const caller = await officer('administrator');
+    await assign(caller.accountId, ['New Construction']);
+
+    const metrics = await queue.metrics(caller);
+
+    expect(metrics.overduePledge).toBe(0);
+    expect(metrics.pledgeIndeterminate).toBe(0);
+  });
+});
