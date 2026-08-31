@@ -219,6 +219,23 @@ async function seed(db: SqlClient): Promise<Seeded> {
              'documents/2026/08/psa.pdf','Approved',true,now())`,
     [randomUUID(), detailed, applicantAccount],
   );
+  // A SECOND document, turned back with a standard reason and custom feedback
+  // (C-2). Recorded because a sample of the documents route showing only an
+  // approved file would not exercise the fields the route exists for -- the
+  // reason code, its label, and the remark written for this applicant.
+  await db.query(
+    `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                            byte_size, sha256, storage_key, status, scan_cleared, scanned_at,
+                            review_status, review_reason_code, review_remark, reviewed_at,
+                            reviewed_by)
+     values ($1,$2,$3,'Lot plan','lot-plan.pdf','application/pdf',
+             941233,'7c2e5a1b9f3d4068223344556677889900aabbccddeeff00112233445566aa91',
+             'documents/2026/08/lot-plan.pdf','Pending',true,now(),
+             'Rejected','illegible',
+             'Page 3 is cut off at the right margin -- the setback dimension cannot be read.',
+             now(),$4)`,
+    [randomUUID(), detailed, applicantAccount, evaluator],
+  );
   // Initial and Zoning decided, so the recorded POST is the NEXT stage in turn
   // rather than an out-of-order refusal. The order matters: Fire Safety
   // examines a plan the earlier stages have already checked.
@@ -511,6 +528,10 @@ async function main(): Promise<void> {
   // generation rather than a fixture shaped like one.
   await record('applicant.applications.permit', 'GET',
     `/applications/${seeded.approved}/permit`, applicantToken);
+  // The office's verdict on each document, in the applicant's view (C-2). Also
+  // the only recorded response that carries a document id at all.
+  await record('applicant.applications.documents', 'GET',
+    `/applications/${seeded.detailed}/documents`, applicantToken);
   await record('applicant.notifications', 'GET', '/notifications', applicantToken);
   await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
   await record('applicant.businesses', 'GET', '/businesses', applicantToken);

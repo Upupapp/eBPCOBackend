@@ -290,6 +290,17 @@
             "scanCleared": true,
             "expiresOn": null,
             "uploadedAt": "2026-01-01T00:00:00.000Z"
+          },
+          {
+            "id": "00000000-0000-4000-8000-000000000000",
+            "label": "Lot plan",
+            "fileName": "lot-plan.pdf",
+            "contentType": "application/pdf",
+            "byteSize": 941233,
+            "status": "Pending",
+            "scanCleared": true,
+            "expiresOn": null,
+            "uploadedAt": "2026-01-01T00:00:00.000Z"
           }
         ],
         "evaluations": [
@@ -1080,6 +1091,57 @@
           "releasedAt": null
         }
       }
+    },
+    "applicant.applications.documents": {
+      "request": {
+        "method": "GET",
+        "path": "/applications/00000000-0000-4000-8000-000000000000/documents",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": [
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Valid identity document",
+          "fileName": "psa-birth-certificate.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "182344",
+          "sha256": "3b1f2c9a4d8e7f60112233445566778899aabbccddeeff00112233445566778f",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "expiresOn": null,
+          "reviewStatus": null,
+          "reviewedAt": null,
+          "reviewReason": null,
+          "reviewRemark": null,
+          "supersedesDocumentId": null,
+          "supersededByDocumentId": null,
+          "scanCleared": true,
+          "quarantined": false
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Lot plan",
+          "fileName": "lot-plan.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "941233",
+          "sha256": "7c2e5a1b9f3d4068223344556677889900aabbccddeeff00112233445566aa91",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "expiresOn": null,
+          "reviewStatus": "Rejected",
+          "reviewedAt": "2026-01-01T00:00:00.000Z",
+          "reviewReason": {
+            "code": "illegible",
+            "label": "Illegible",
+            "description": "The scan or photograph cannot be read."
+          },
+          "reviewRemark": "Page 3 is cut off at the right margin -- the setback dimension cannot be read.",
+          "supersedesDocumentId": null,
+          "supersededByDocumentId": null,
+          "scanCleared": true,
+          "quarantined": false
+        }
+      ]
     },
     "applicant.notifications": {
       "request": {
@@ -2060,7 +2122,7 @@
             ],
             "nextStage": "OBO",
             "requiredDocumentCount": 0,
-            "attachedDocumentCount": 1
+            "attachedDocumentCount": 2
           }
         ],
         "nextCursor": null

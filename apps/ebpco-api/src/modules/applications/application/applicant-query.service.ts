@@ -100,6 +100,101 @@ export class ApplicantQueryService {
   }
 
   /**
+   * The documents on this application, and what the office said about each.
+   *
+   * C-2. Every one of these fields already existed -- migration 027 gave a
+   * document its own verdict, a standard reason code, custom feedback written
+   * for this applicant, and a supersession chain -- and no citizen-facing route
+   * read any of it. The application detail mentions documents nowhere.
+   *
+   * Two consequences, both of which this closes. An applicant could not see
+   * WHY a document was turned back, so the office's careful reason ("Illegible"
+   * plus "page 3 of the lot plan is cut off") reached nobody and the applicant
+   * made another trip to ask. And `id` was undiscoverable: `GET /documents/:id/
+   * content` and the resubmit route both take a document id, and there was no
+   * route that ever returned one -- so a citizen could not re-download a file
+   * they had uploaded themselves.
+   *
+   * The reason is returned as BOTH its code and its label. The code is what a
+   * client switches on and what the LGU counts; the label is what the office
+   * wrote and what a citizen reads. Sending only the code would make every
+   * client keep its own copy of the catalogue -- and that catalogue is editable
+   * by the LGU, so those copies would drift.
+   *
+   * Null for an application that is not theirs. An application with no
+   * documents returns an empty list, which is a different and true answer.
+   */
+  async documents(accountId: string, applicationId: string):
+  Promise<ReadonlyArray<Record<string, unknown>> | null> {
+    if (await this.byId(accountId, applicationId) === null) return null;
+
+    const result = await this.db.query<{
+      id: string; label: string; file_name: string; content_type: string;
+      byte_size: string; sha256: string; uploaded_at: Date; expires_on: string | null;
+      review_status: string | null; review_remark: string | null; reviewed_at: Date | null;
+      reason_code: string | null; reason_label: string | null; reason_description: string | null;
+      supersedes_document_id: string | null; superseded_by_document_id: string | null;
+      scan_cleared: boolean; quarantined: boolean;
+    }>(
+      `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
+              d.sha256, d.uploaded_at, to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
+              d.review_status, d.review_remark, d.reviewed_at,
+              r.code as reason_code, r.label as reason_label, r.description as reason_description,
+              d.supersedes_document_id,
+              (select s.id from documents s
+                where s.supersedes_document_id = d.id and s.deleted_at is null)
+                as superseded_by_document_id,
+              d.scan_cleared,
+              (d.status = 'Rejected' and not d.scan_cleared) as quarantined
+         from documents d
+         left join document_review_reasons r on r.code = d.review_reason_code
+        where d.application_id = $1 and d.deleted_at is null
+        order by d.uploaded_at, d.id`,
+      [applicationId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      fileName: row.file_name,
+      contentType: row.content_type,
+      // Text, not a number: byte_size is a bigint, and JSON numbers lose
+      // precision where bigint does not. Every other size on this surface is
+      // carried the same way.
+      byteSize: row.byte_size,
+      sha256: row.sha256,
+      uploadedAt: row.uploaded_at.toISOString(),
+      expiresOn: row.expires_on,
+      // The officer's verdict. Null until anyone has looked -- which is a real
+      // state and says "not yet reviewed", not "nothing wrong".
+      reviewStatus: row.review_status,
+      reviewedAt: row.reviewed_at === null ? null : row.reviewed_at.toISOString(),
+      reviewReason: row.reason_code === null ? null : {
+        code: row.reason_code,
+        label: row.reason_label,
+        description: row.reason_description,
+      },
+      reviewRemark: row.review_remark,
+      // The resubmission chain, both ways. A replacement is a new row pointing
+      // at what it replaces, so the old document keeps its rejection and its
+      // reason -- an applicant can see what was wrong AND what they sent
+      // instead, which is exactly the pair that makes a rejection actionable.
+      supersedesDocumentId: row.supersedes_document_id,
+      supersededByDocumentId: row.superseded_by_document_id,
+      // The malware scan, which is a DIFFERENT axis from the officer's verdict
+      // and is deliberately not folded into it: a quarantined file is not an
+      // evaluation outcome, and an officer's rejection does not mean a virus.
+      // Two plain booleans rather than a new vocabulary, because both clients
+      // throw on an enum value they do not recognise.
+      scanCleared: row.scan_cleared,
+      quarantined: row.quarantined,
+      // `reviewed_by` is deliberately absent. Naming the officer who turned a
+      // document back is the officer-identity leak the applicant boundary
+      // exists to prevent.
+    }));
+  }
+
+  /**
    * The permit itself.
    *
    * C-1. The record has existed since the lifecycle could reach

@@ -51,7 +51,7 @@ A reviewer following the app's own description reaches "Permit Generated" and
 stops. Recommend: `GET /applications/:id/permit`, returning the number, issue
 date, scope and conditions, plus a link to the document.
 
-## C-2 — a citizen cannot see the documents on their own application. BLOCKING.
+## C-2 — a citizen cannot see the documents on their own application. BLOCKING. — CLOSED, see below
 
 `POST /documents` uploads one. `GET /documents/:documentId/content` returns
 one's bytes. **Nothing returns the list**, and the application detail has no
@@ -187,3 +187,76 @@ ratcheted 36 → 37.
 
 Gate: 82 suites, 1639 tests, reachability 52/52 explained, recorded-response
 check ok, secret scan ok over 302 files.
+
+
+---
+
+## C-2 CLOSED — `GET /applications/:applicationId/documents`
+
+Shipped. A citizen can now see every document on their application and what the
+office said about each: the verdict, the standard reason with its label, the
+custom feedback written for them, the resubmission chain, and the document id.
+
+**Every field already existed.** Migration 027 gave a document its own verdict,
+a reason catalogue the LGU can edit, a free-text remark, and a supersession
+chain — and no citizen-facing route read any of it. The application detail
+mentions documents nowhere. So the office's careful reason ("Illegible", plus
+"page 3 is cut off at the right margin — the setback dimension cannot be read")
+reached nobody, and the applicant made another trip to ask what was wrong.
+
+**The document id was undiscoverable.** `GET /documents/:documentId/content` and
+the resubmit route both take one, and **no route returned one**. A citizen could
+not re-download a file they had uploaded themselves. This route is the only one
+that serves a document id.
+
+### Three decisions
+
+**The reason is returned as both code and label.** The code is what a client
+switches on and what the LGU counts; the label is what the office wrote and what
+a citizen reads. Sending only the code would make every client keep its own copy
+of the catalogue — and that catalogue is deliberately editable by the LGU, so
+those copies would drift.
+
+**The malware scan is a separate axis from the officer's verdict**, and is kept
+separate. Migration 027 already refused to widen `documents.status` for exactly
+this reason: an officer marking a document Rejected must not make its bytes
+unretrievable as though it carried malware. Two plain booleans — `scanCleared`,
+`quarantined` — rather than a new vocabulary, because both clients throw on an
+enum value they do not recognise.
+
+**`reviewStatus: null` is a real state**, meaning "nobody has looked yet", not
+"nothing is wrong". A client rendering null as a tick would tell an applicant
+their document passed when it has not been opened.
+
+`reviewed_by` is deliberately absent: naming the officer who turned a document
+back is the officer-identity leak the applicant boundary exists to prevent.
+Break-checked — leaking it fails the test, and removing the ownership pre-check
+serves Jose's documents to Maria.
+
+### What this does NOT do, and why it would have been a fabrication
+
+**It does not say which required document is missing.** `documents` has no
+`requirement_code` column: the checklist in `document_requirements` and the
+uploads in `documents` are joined by nothing. Matching them would mean guessing
+on the label — and `evaluation.service.ts:149` had already reached the same
+conclusion and written it down.
+
+A "Missing Documents" figure derived from a label match would be a number that
+looks measured and is not. Migration 027's `review_status` does carry a
+`'Missing'` value, so an officer can mark a specific document missing and that
+now reaches the citizen; what cannot be computed is which checklist entry has
+no upload at all.
+
+**Filed as C-6:** give `documents` a nullable `requirement_code` referencing
+`document_requirements`, set at upload. Until then no surface should claim to
+know which requirement is unmet.
+
+### Also still true
+
+A document uploaded with `applicationId: null` — which `POST /documents` allows —
+is reachable from nowhere. This route is per-application, so it cannot list one.
+Either the upload should require an application, or `GET /me/documents` should
+exist. Filed as **C-7**; it is not reachable through any client flow today.
+
+Gate: 82 suites, 1642 tests, reachability 50/50, recorded responses ok (coverage
+ratchet 37 → 38), secret scan ok over 304 files.

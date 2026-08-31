@@ -81,6 +81,31 @@ export class ApplicantApplicationsController {
   }
 
   /**
+   * The documents on this application, and the office's verdict on each.
+   *
+   * C-2. A bare array, as the timeline is: the contract already has one shape
+   * for "a list belonging to one application" and a second would be a second
+   * idea for the same thing.
+   *
+   * Note this is also the ONLY route that returns a document id. Content
+   * retrieval and resubmission both take one, and nothing served one before --
+   * so a citizen could not re-download a file they had uploaded themselves.
+   */
+  @Get(':applicationId/documents')
+  @RequireScopes('applications:read')
+  async documents(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<ReadonlyArray<Record<string, unknown>>> {
+    const documents = await this.applications.documents(callerAccount(request), applicationId);
+    // 404 for "not yours" as well as "not there", the same as the detail. An
+    // application of theirs with nothing uploaded yet returns [], which is a
+    // different answer and a true one.
+    if (documents === null) throw ProblemException.notFound('No such application.');
+    return documents;
+  }
+
+  /**
    * The permit, once it exists.
    *
    * Separate from the application detail rather than folded into it: the detail

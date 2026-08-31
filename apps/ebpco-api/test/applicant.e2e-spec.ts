@@ -483,3 +483,150 @@ describe('an applicant can obtain the permit they were issued (C-1)', () => {
     expect(body).toHaveProperty('release', null);
   });
 });
+
+describe('an applicant can see the office’s verdict on their documents (C-2)', () => {
+  const OFFICER = randomUUID();
+
+  const upload = async (applicationId: string, label: string, opts: {
+    reviewStatus?: string; reasonCode?: string; remark?: string;
+    supersedes?: string; scanCleared?: boolean; status?: string;
+  } = {}): Promise<string> => {
+    const id = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared, scanned_at,
+                              review_status, review_reason_code, review_remark, reviewed_at,
+                              reviewed_by, supersedes_document_id, uploaded_at)
+       values ($1,$2,$3,$4,$5,'application/pdf',12345,
+               'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+               $16, $6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
+      [id, applicationId, MARIA, label, `${label.toLowerCase().replace(/ /g, '-')}.pdf`,
+       opts.status ?? 'Pending', opts.scanCleared ?? true,
+       opts.scanCleared === false ? null : '2026-08-20T01:00:00Z',
+       opts.reviewStatus ?? null, opts.reasonCode ?? null, opts.remark ?? null,
+       opts.reviewStatus === undefined ? null : '2026-08-21T01:00:00Z',
+       opts.reviewStatus === undefined ? null : OFFICER,
+       opts.supersedes ?? null,
+       `2026-08-${String(20 + (opts.supersedes ? 2 : 0)).padStart(2, '0')}T01:00:00Z`,
+       `obj/${id}`],
+    );
+    return id;
+  };
+
+  beforeEach(async () => {
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff','evaluator@lgu.gov.ph','evaluator@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+      [OFFICER],
+    );
+  });
+
+  it('tells the applicant why a document was turned back, in the office’s own words', async () => {
+    // The whole point. The reason and the remark existed on the record since
+    // migration 027 and reached no citizen -- so the applicant made another
+    // trip to the office to ask what was wrong.
+    await upload(mariaApplication, 'Lot Plan', {
+      reviewStatus: 'Rejected', reasonCode: 'illegible',
+      remark: 'Page 3 of the lot plan is cut off at the margin.',
+    });
+
+    const body = (await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA)))
+      .json<{ reviewStatus: string; reviewReason: { code: string; label: string };
+              reviewRemark: string }[]>();
+
+    expect(body).toHaveLength(1);
+    expect(body[0]!.reviewStatus).toBe('Rejected');
+    // Both halves: the code is what a client switches on, the label is what the
+    // citizen reads. Sending only the code would make every client keep its own
+    // copy of a catalogue the LGU can edit.
+    expect(body[0]!.reviewReason).toMatchObject({ code: 'illegible', label: 'Illegible' });
+    expect(body[0]!.reviewRemark).toBe('Page 3 of the lot plan is cut off at the margin.');
+  });
+
+  it('returns the document id, which no other route ever did', async () => {
+    // GET /documents/:documentId/content and the resubmit route both take an
+    // id, and nothing served one -- so a citizen could not re-download a file
+    // they had uploaded themselves.
+    const uploaded = await upload(mariaApplication, 'Tax Clearance');
+
+    const body = (await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA)))
+      .json<{ id: string }[]>();
+
+    expect(body[0]!.id).toBe(uploaded);
+  });
+
+  it('never names the officer who rejected it', async () => {
+    // reviewed_by is on the row and is deliberately not on the wire. Naming the
+    // officer who turned a document back is exactly the officer-identity leak
+    // the applicant boundary exists to prevent.
+    await upload(mariaApplication, 'Lot Plan', {
+      reviewStatus: 'Rejected', reasonCode: 'unsigned',
+    });
+
+    const response = await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA));
+
+    expect(JSON.stringify(response.json())).not.toContain(OFFICER);
+  });
+
+  it('shows the replacement and the rejection it replaced, both', async () => {
+    // A replacement is a new row pointing at what it replaces, so the old
+    // document keeps its rejection and its reason. Seeing both is what makes a
+    // rejection actionable -- what was wrong, and what was sent instead.
+    const rejected = await upload(mariaApplication, 'Lot Plan', {
+      reviewStatus: 'Rejected', reasonCode: 'illegible',
+    });
+    const replacement = await upload(mariaApplication, 'Lot Plan', { supersedes: rejected });
+
+    const body = (await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA)))
+      .json<{ id: string; supersedesDocumentId: string | null;
+              supersededByDocumentId: string | null }[]>();
+
+    const old = body.find((d) => d.id === rejected)!;
+    const fresh = body.find((d) => d.id === replacement)!;
+    expect(old.supersededByDocumentId).toBe(replacement);
+    expect(fresh.supersedesDocumentId).toBe(rejected);
+  });
+
+  it('separates a quarantined file from an officer’s rejection', async () => {
+    // Two different verdicts on two different axes. A file the malware scanner
+    // held is not an evaluation outcome, and an officer's rejection does not
+    // mean a virus -- conflating them would tell a citizen their lot plan has
+    // a virus because an officer said it was unsigned.
+    await upload(mariaApplication, 'Photos', { status: 'Rejected', scanCleared: false });
+
+    const body = (await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA)))
+      .json<{ quarantined: boolean; scanCleared: boolean; reviewStatus: string | null }[]>();
+
+    expect(body[0]).toMatchObject({ quarantined: true, scanCleared: false, reviewStatus: null });
+  });
+
+  it('says nothing has been reviewed yet, rather than that nothing is wrong', async () => {
+    // Null review status is a real state and a different message from
+    // "Accepted". A client that renders null as a tick would tell an applicant
+    // their document passed when nobody has opened it.
+    await upload(mariaApplication, 'Lot Plan');
+
+    const body = (await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA)))
+      .json<{ reviewStatus: string | null; reviewReason: unknown; reviewedAt: string | null }[]>();
+
+    expect(body[0]).toMatchObject({ reviewStatus: null, reviewReason: null, reviewedAt: null });
+  });
+
+  it('answers 404 for someone else’s application, not an empty list', async () => {
+    // An empty list would confirm the application exists. The same 404 as the
+    // detail: a reference number that resolves tells you a neighbour applied.
+    await upload(joseApplication, 'Lot Plan');
+
+    const response = await get(`/applications/${joseApplication}/documents`, await applicantToken(MARIA));
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('returns an empty list for their own application with nothing uploaded', async () => {
+    // Different from 404, and true.
+    const response = await get(`/applications/${mariaApplication}/documents`, await applicantToken(MARIA));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([]);
+  });
+});
