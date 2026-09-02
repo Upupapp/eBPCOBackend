@@ -98,9 +98,12 @@ export class DocumentService {
      * told it succeeded.
      */
     supersedes?: string | null;
+    /** Which checklist entry this answers (C-6). Null means not attributed. */
+    requirementCode?: string | null;
   }): Promise<UploadOutcome> {
     const { bytes, fileName, label, applicationId, caller } = options;
     const supersedes = options.supersedes ?? null;
+    const requirementCode = options.requirementCode ?? null;
 
     const inspection = inspect(bytes, fileName);
     if (!inspection.ok) return { ok: false, failure: inspection.failure };
@@ -116,11 +119,11 @@ export class DocumentService {
     const inserted = await this.db.query<{ id: string }>(
       `insert into documents (application_id, uploaded_by, label, file_name, content_type,
                               byte_size, sha256, storage_key, status, scan_cleared,
-                              supersedes_document_id)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false, $9)
+                              supersedes_document_id, requirement_code)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false, $9, $10)
        returning id`,
       [applicationId, caller.accountId, label, fileName, inspection.inspection.format,
-       scrubbed.bytes.length, digest, key, supersedes],
+       scrubbed.bytes.length, digest, key, supersedes, requirementCode],
     );
     const documentId = inserted.rows[0]?.id ?? '';
 
@@ -181,8 +184,10 @@ export class DocumentService {
     }
     if (seen.kind === 'mismatch') return { kind: 'mismatch' };
 
-    const existing = await this.db.query<{ review_status: string | null; replaced_by: string | null }>(
-      `select d.review_status,
+    const existing = await this.db.query<{
+      review_status: string | null; replaced_by: string | null; requirement_code: string | null;
+    }>(
+      `select d.review_status, d.requirement_code,
               (select r.id from documents r
                 where r.supersedes_document_id = d.id and r.deleted_at is null) as replaced_by
          from documents d
@@ -217,6 +222,13 @@ export class DocumentService {
       applicationId,
       caller,
       supersedes: supersededDocumentId,
+      // INHERITED, not re-declared (C-6). A replacement answers the same
+      // checklist entry the rejected document answered -- the applicant is
+      // responding to a verdict, not choosing a requirement afresh -- and
+      // taking it from the client would let a resubmission silently reattribute
+      // itself, or lose the attribution entirely and read as "not provided"
+      // the moment it was fixed.
+      requirementCode: row.requirement_code,
     });
 
     if (!uploaded.ok) {

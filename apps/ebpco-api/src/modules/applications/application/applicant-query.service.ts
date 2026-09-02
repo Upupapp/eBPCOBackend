@@ -131,12 +131,14 @@ export class ApplicantQueryService {
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; sha256: string; uploaded_at: Date; expires_on: string | null;
+      requirement_code: string | null;
       review_status: string | null; review_remark: string | null; reviewed_at: Date | null;
       reason_code: string | null; reason_label: string | null; reason_description: string | null;
       supersedes_document_id: string | null; superseded_by_document_id: string | null;
       scan_cleared: boolean; quarantined: boolean;
     }>(
       `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
+              d.requirement_code,
               d.sha256, d.uploaded_at, to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
               d.review_status, d.review_remark, d.reviewed_at,
               r.code as reason_code, r.label as reason_label, r.description as reason_description,
@@ -165,6 +167,10 @@ export class ApplicantQueryService {
       sha256: row.sha256,
       uploadedAt: row.uploaded_at.toISOString(),
       expiresOn: row.expires_on,
+      // Which checklist entry this answers (C-6). Null means NOT ATTRIBUTED --
+      // nobody recorded which requirement it is for -- and never that it
+      // answers none.
+      requirementCode: row.requirement_code,
       // The officer's verdict. Null until anyone has looked -- which is a real
       // state and says "not yet reviewed", not "nothing wrong".
       reviewStatus: row.review_status,
@@ -192,6 +198,97 @@ export class ApplicantQueryService {
       // document back is the officer-identity leak the applicant boundary
       // exists to prevent.
     }));
+  }
+
+  /**
+   * The checklist this application was judged against, and what answers it.
+   *
+   * C-6, and the reason the column exists: a field nothing reads is not a
+   * feature. Until now `document_requirements` said what a permit type asks for
+   * and `documents` held what was sent, and nothing joined them -- so no
+   * surface could say which required document was missing without matching on
+   * the label, which is a guess.
+   *
+   * Read from `applications.required_documents`, the snapshot taken at filing,
+   * NOT the live catalogue. The checklist changes and a filed application must
+   * not: someone who submitted everything asked of them in March cannot become
+   * non-compliant in April because the LGU added a document.
+   *
+   * ── Why `unattributedDocuments` is returned beside the list ─────────────
+   *
+   * A document uploaded before migration 035, or by a client that sends no
+   * code, has a null `requirement_code`. It may well answer a requirement --
+   * nobody recorded which. Counting requirements with no matching code and
+   * calling them missing would report EVERY item missing on an application
+   * whose documents all predate the column, which is worse than reporting
+   * nothing at all.
+   *
+   * So the count travels with the list. A caller cannot render "3 missing"
+   * without also having been handed "and 7 documents nobody attributed", which
+   * is the difference between a measurement and an accusation.
+   */
+  async requirements(accountId: string, applicationId: string): Promise<{
+    requirements: ReadonlyArray<Record<string, unknown>>;
+    unattributedDocuments: number;
+    attributionComplete: boolean;
+  } | null> {
+    if (await this.byId(accountId, applicationId) === null) return null;
+
+    const snapshot = await this.db.query<{ required_documents: unknown }>(
+      'select required_documents from applications where id = $1', [applicationId]);
+    const row = snapshot.rows[0];
+    if (row === undefined) return null;
+
+    const checklist = (row.required_documents ?? []) as ReadonlyArray<{
+      code: string; label: string; description: string; required: boolean;
+    }>;
+
+    const documents = await this.db.query<{
+      id: string; requirement_code: string | null; review_status: string | null;
+    }>(
+      `select d.id, d.requirement_code, d.review_status
+         from documents d
+        where d.application_id = $1 and d.deleted_at is null
+          and not exists (select 1 from documents r
+                           where r.supersedes_document_id = d.id and r.deleted_at is null)
+        order by d.uploaded_at`,
+      [applicationId],
+    );
+
+    const byCode = new Map<string, { id: string; reviewStatus: string | null }[]>();
+    let unattributed = 0;
+    for (const document of documents.rows) {
+      if (document.requirement_code === null) { unattributed += 1; continue; }
+      const existing = byCode.get(document.requirement_code) ?? [];
+      existing.push({ id: document.id, reviewStatus: document.review_status });
+      byCode.set(document.requirement_code, existing);
+    }
+
+    return {
+      requirements: checklist.map((entry) => {
+        const answering = byCode.get(entry.code) ?? [];
+        return {
+          code: entry.code,
+          label: entry.label,
+          description: entry.description,
+          required: entry.required,
+          // Only the CURRENT document for a requirement: a superseded one is
+          // excluded above, so a replaced-and-accepted requirement does not
+          // still read as rejected because of the document it replaced.
+          documentIds: answering.map((document) => document.id),
+          // 'provided' means a document is attributed to it. It does NOT mean
+          // an officer accepted that document -- that is `reviewStatus` on the
+          // document itself, and conflating the two would tell an applicant
+          // their rejected lot plan satisfies the requirement it failed.
+          status: answering.length > 0 ? 'provided' : 'not-provided',
+        };
+      }),
+      unattributedDocuments: unattributed,
+      // The one field that says whether 'not-provided' can be trusted. False
+      // means some documents carry no code, so a 'not-provided' entry may in
+      // fact have been answered by one of them.
+      attributionComplete: unattributed === 0,
+    };
   }
 
   /**

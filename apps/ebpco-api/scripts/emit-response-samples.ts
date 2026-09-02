@@ -220,6 +220,23 @@ async function seed(db: SqlClient): Promise<Seeded> {
              'documents/2026/08/psa.pdf','Approved',true,now())`,
     [randomUUID(), detailed, applicantAccount],
   );
+  // The checklist this application was judged against, snapshotted the way a
+  // real filing does it (migration 022), plus one document attributed to an
+  // entry (C-6). The OTHER document is left unattributed on purpose: that is
+  // the state every application filed before migration 035 is in, and the
+  // sample has to show a client what `attributionComplete: false` looks like.
+  await db.query(
+    `update applications set required_documents = $2::jsonb where id = $1`,
+    [detailed, JSON.stringify([
+      { code: 'lot-plan', label: 'Lot plan',
+        description: 'A survey plan signed by a licensed geodetic engineer.', required: true },
+      { code: 'tax-clearance', label: 'Real property tax clearance',
+        description: 'Issued by the Municipal Treasurer for the current year.', required: true },
+      { code: 'site-photographs', label: 'Site photographs',
+        description: 'Two views of the site as it stands today.', required: false },
+    ])],
+  );
+
   const rejectedDocument = randomUUID();
   // A SECOND document, turned back with a standard reason and custom feedback
   // (C-2). Recorded because a sample of the documents route showing only an
@@ -229,13 +246,13 @@ async function seed(db: SqlClient): Promise<Seeded> {
     `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
                             byte_size, sha256, storage_key, status, scan_cleared, scanned_at,
                             review_status, review_reason_code, review_remark, reviewed_at,
-                            reviewed_by)
+                            reviewed_by, requirement_code)
      values ($1,$2,$3,'Lot plan','lot-plan.pdf','application/pdf',
              941233,'7c2e5a1b9f3d4068223344556677889900aabbccddeeff00112233445566aa91',
              'documents/2026/08/lot-plan.pdf','Pending',true,now(),
              'Rejected','illegible',
              'Page 3 is cut off at the right margin -- the setback dimension cannot be read.',
-             now(),$4)`,
+             now(),$4,'lot-plan')`,
     [rejectedDocument, detailed, applicantAccount, evaluator],
   );
   // Initial and Zoning decided, so the recorded POST is the NEXT stage in turn
@@ -555,6 +572,12 @@ async function main(): Promise<void> {
         '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
       ).toString('base64'),
     }, randomUUID());
+  // The checklist this application was judged against, and what answers it
+  // (C-6). Recorded with attributionComplete FALSE, which is the state every
+  // application filed before migration 035 is in -- the honest case, and the
+  // one a client must render correctly.
+  await record('applicant.applications.requirements', 'GET',
+    `/applications/${seeded.detailed}/requirements`, applicantToken);
   await record('applicant.notifications', 'GET', '/notifications', applicantToken);
   await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
   await record('applicant.businesses', 'GET', '/businesses', applicantToken);

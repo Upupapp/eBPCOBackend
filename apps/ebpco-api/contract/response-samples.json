@@ -1158,6 +1158,7 @@
           "sha256": "3b1f2c9a4d8e7f60112233445566778899aabbccddeeff00112233445566778f",
           "uploadedAt": "2026-01-01T00:00:00.000Z",
           "expiresOn": null,
+          "requirementCode": null,
           "reviewStatus": null,
           "reviewedAt": null,
           "reviewReason": null,
@@ -1176,6 +1177,7 @@
           "sha256": "7c2e5a1b9f3d4068223344556677889900aabbccddeeff00112233445566aa91",
           "uploadedAt": "2026-01-01T00:00:00.000Z",
           "expiresOn": null,
+          "requirementCode": "lot-plan",
           "reviewStatus": "Rejected",
           "reviewedAt": "2026-01-01T00:00:00.000Z",
           "reviewReason": {
@@ -1204,6 +1206,47 @@
         "supersedesDocumentId": "00000000-0000-4000-8000-000000000000",
         "status": "Pending",
         "removedMetadata": []
+      }
+    },
+    "applicant.applications.requirements": {
+      "request": {
+        "method": "GET",
+        "path": "/applications/00000000-0000-4000-8000-000000000000/requirements",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "requirements": [
+          {
+            "code": "lot-plan",
+            "label": "Lot plan",
+            "description": "A survey plan signed by a licensed geodetic engineer.",
+            "required": true,
+            "documentIds": [
+              "00000000-0000-4000-8000-000000000000"
+            ],
+            "status": "provided"
+          },
+          {
+            "code": "tax-clearance",
+            "label": "Real property tax clearance",
+            "description": "Issued by the Municipal Treasurer for the current year.",
+            "required": true,
+            "documentIds": [],
+            "status": "not-provided"
+          },
+          {
+            "code": "site-photographs",
+            "label": "Site photographs",
+            "description": "Two views of the site as it stands today.",
+            "required": false,
+            "documentIds": [],
+            "status": "not-provided"
+          }
+        ],
+        "unattributedDocuments": 1,
+        "attributionComplete": false
       }
     },
     "applicant.notifications": {
@@ -2184,7 +2227,7 @@
               }
             ],
             "nextStage": "OBO",
-            "requiredDocumentCount": 0,
+            "requiredDocumentCount": 2,
             "attachedDocumentCount": 3
           }
         ],

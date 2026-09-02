@@ -324,6 +324,13 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     reviewed_at: none('statutory'),
     reviewed_by: linkable('statutory', ACCOUNTABILITY),
     supersedes_document_id: structural,
+    // Which checklist entry this document answers (migration 035). An LGU
+    // checklist code -- 'lot-plan', 'tax-clearance' -- identical for every
+    // applicant who files that permit type, so it says nothing about a person.
+    // Structural rather than `none('statutory')`: it is a reference into the
+    // application's own snapshot, like the ids above it, not a fact collected
+    // about the applicant.
+    requirement_code: structural,
   },
 
   evaluations: {

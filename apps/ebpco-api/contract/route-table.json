@@ -9,6 +9,7 @@
     "GET /applications/:applicationId",
     "GET /applications/:applicationId/documents",
     "GET /applications/:applicationId/permit",
+    "GET /applications/:applicationId/requirements",
     "GET /applications/:applicationId/timeline",
     "GET /businesses",
     "GET /documents/:documentId/content",

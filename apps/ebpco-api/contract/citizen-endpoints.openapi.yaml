@@ -72,6 +72,33 @@ paths:
           description: Not the caller's application, or no such application.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
+  /applications/{applicationId}/requirements:
+    get:
+      operationId: getApplicationRequirements
+      summary: The checklist this application was judged against, and what answers it
+      description: |
+        Read from the snapshot taken at filing, NOT the live catalogue: the
+        checklist changes and a filed application must not.
+
+        `unattributedDocuments` travels WITH the list and must be rendered with
+        it. A document with no `requirementCode` may well answer a requirement —
+        nobody recorded which — so a `not-provided` entry is only certainly
+        missing when `attributionComplete` is true. Showing "3 missing" while
+        hiding "and 7 documents nobody attributed" tells an applicant to send
+        documents they already sent.
+      security: [{ bearerAuth: [applications:read] }]
+      parameters:
+        - { name: applicationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The checklist, with what answers each entry.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ApplicationRequirements' }
+        '404':
+          description: Not the caller's application, or no such application.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /applications/{applicationId}/documents/{documentId}/resubmit:
     post:
       operationId: resubmitDocument
@@ -169,7 +196,7 @@ components:
       additionalProperties: false
       required:
         [id, label, fileName, contentType, byteSize, sha256, uploadedAt, expiresOn,
-         reviewStatus, reviewedAt, reviewReason, reviewRemark,
+         requirementCode, reviewStatus, reviewedAt, reviewReason, reviewRemark,
          supersedesDocumentId, supersededByDocumentId, scanCleared, quarantined]
       properties:
         id: { type: string, format: uuid }
@@ -182,6 +209,13 @@ components:
         sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         uploadedAt: { type: string, format: date-time }
         expiresOn: { type: [string, 'null'], format: date }
+        requirementCode:
+          type: [string, 'null']
+          description: |
+            Which checklist entry this document answers. NULL MEANS NOT
+            ATTRIBUTED — nobody recorded which requirement it is for — and never
+            that it answers none. Every document uploaded before this existed
+            carries null.
         reviewStatus:
           type: [string, 'null']
           enum: ['Missing', 'Uploaded', 'Submitted', 'Under Review', 'Accepted',
@@ -220,6 +254,49 @@ components:
             Held by the malware scanner. Not an evaluation outcome — an officer's
             rejection does not mean a virus, and a quarantined file is not a
             verdict on the application.
+
+    ApplicationRequirements:
+      type: object
+      additionalProperties: false
+      required: [requirements, unattributedDocuments, attributionComplete]
+      properties:
+        requirements:
+          type: array
+          items:
+            type: object
+            additionalProperties: false
+            required: [code, label, description, required, documentIds, status]
+            properties:
+              code: { type: string }
+              label: { type: string }
+              description: { type: string }
+              required:
+                type: boolean
+                description: False for a document asked for only in some circumstances. It still appears.
+              documentIds:
+                type: array
+                items: { type: string, format: uuid }
+                description: |
+                  The CURRENT documents answering this entry. A superseded
+                  document is excluded, so a replaced-and-accepted requirement
+                  does not still read as rejected because of what it replaced.
+              status:
+                type: string
+                enum: [provided, not-provided]
+                description: |
+                  'provided' means a document is ATTRIBUTED to this entry. It
+                  does NOT mean an officer accepted it — that is `reviewStatus`
+                  on the document. Conflating them would tell an applicant their
+                  rejected lot plan satisfies the requirement it failed.
+        unattributedDocuments:
+          type: integer
+          description: Documents on this application carrying no requirementCode.
+        attributionComplete:
+          type: boolean
+          description: |
+            THE FIELD THAT SAYS WHETHER 'not-provided' CAN BE TRUSTED. False
+            means some documents carry no code, so an entry reported
+            'not-provided' may in fact have been answered by one of them.
 
     ResubmitResult:
       type: object

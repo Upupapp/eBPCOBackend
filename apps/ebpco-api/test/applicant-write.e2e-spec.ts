@@ -837,3 +837,143 @@ describe('replacing a rejected document (D-8)', () => {
       'select count(*) as n from documents where application_id = $1', [applicationId])).toBe(1);
   });
 });
+
+describe('which checklist entry a document answers (C-6)', () => {
+  const CHECKLIST = {
+    documents: [
+      { code: 'lot-plan', label: 'Lot plan', description: '', required: true },
+      { code: 'tax-clearance', label: 'Tax clearance', description: '', required: true },
+      { code: 'photos', label: 'Site photographs', description: '', required: false },
+    ],
+  };
+
+  /** Publishing a checklist needs `staff:administer`, which is the administrator. */
+  const administrator = async (): Promise<string> => {
+    const officer = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+      [officer, `admin-${officer.slice(0, 8)}@lgu.gov.ph`]);
+    await db.query('insert into account_roles (account_id, role) values ($1,$2)',
+      [officer, 'administrator']);
+    return (await tokens.issueAccessToken({
+      sub: officer, sid: randomUUID(), kind: 'staff',
+      scopes: [...scopesFor({ kind: 'staff', roles: ['administrator'] })],
+    })).token;
+  };
+
+  const publish = async (): Promise<void> => {
+    const admin = await administrator();
+    const response = await app.inject({
+      method: 'PUT', url: '/staff/config/requirements/Fencing%20Permit',
+      headers: { authorization: `Bearer ${admin}`, 'idempotency-key': randomUUID() },
+      payload: CHECKLIST,
+    });
+    if (response.statusCode !== 200) {
+      throw new Error(`publishing the checklist failed: ${response.statusCode} ${response.body}`);
+    }
+  };
+
+  const upload = async (code: string | null): Promise<string> => {
+    const response = await post('/documents', maria, {
+      fileName: 'doc.pdf', label: 'A document', contentBase64: PDF.toString('base64'),
+      ...(code === null ? {} : { requirementCode: code }),
+    });
+    if (response.statusCode !== 201) {
+      throw new Error(`upload failed: ${response.statusCode} ${response.body}`);
+    }
+    return response.json<{ documentId: string }>().documentId;
+  };
+
+  it('reports which requirements are answered and which are not', async () => {
+    // The whole point of the column. Before it, documents and the checklist
+    // were joined by nothing, so no surface could say what was missing without
+    // matching on the label -- which is a guess.
+    await publish();
+    const lotPlan = await upload('lot-plan');
+    const filed = await post('/applications', maria, submission({ documentIds: [lotPlan] }));
+    expect(filed.statusCode).toBe(201);
+    const applicationId = filed.json<{ id: string }>().id;
+
+    const body = (await get(`/applications/${applicationId}/requirements`, maria))
+      .json<{ requirements: { code: string; status: string; documentIds: string[] }[];
+              unattributedDocuments: number; attributionComplete: boolean }>();
+
+    const byCode = Object.fromEntries(body.requirements.map((r) => [r.code, r]));
+    expect(byCode['lot-plan']!.status).toBe('provided');
+    expect(byCode['lot-plan']!.documentIds).toEqual([lotPlan]);
+    expect(byCode['tax-clearance']!.status).toBe('not-provided');
+    expect(body.unattributedDocuments).toBe(0);
+    expect(body.attributionComplete).toBe(true);
+  });
+
+  it('says attribution is incomplete when a document carries no code', async () => {
+    // The honesty rule. A document uploaded before this column existed, or by a
+    // client that sends no code, may well answer a requirement -- nobody
+    // recorded which. Reporting "not-provided" as certain would tell an
+    // applicant to send a document they already sent.
+    await publish();
+    const anonymous = await upload(null);
+    const filed = await post('/applications', maria, submission({ documentIds: [anonymous] }));
+    const applicationId = filed.json<{ id: string }>().id;
+
+    const body = (await get(`/applications/${applicationId}/requirements`, maria))
+      .json<{ unattributedDocuments: number; attributionComplete: boolean;
+              requirements: { status: string }[] }>();
+
+    expect(body.unattributedDocuments).toBe(1);
+    expect(body.attributionComplete).toBe(false);
+    // And every requirement still reads not-provided — which is exactly why the
+    // count has to travel with the list.
+    expect(body.requirements.every((r) => r.status === 'not-provided')).toBe(true);
+  });
+
+  it('refuses a filing whose document names a requirement this permit has not', async () => {
+    // A code naming nothing is a client bug. Dropping it silently would leave
+    // the applicant believing they had answered a requirement they had not.
+    await publish();
+    const wrong = await upload('roof-plan');
+
+    const filed = await post('/applications', maria, submission({ documentIds: [wrong] }));
+
+    expect(filed.statusCode).toBe(422);
+    expect(filed.json().detail).toContain('roof-plan');
+  });
+
+  it('carries the attribution onto a replacement, so a fix does not read as missing', async () => {
+    // A resubmission answers the same checklist entry the rejected document
+    // answered. Losing the code here would make a requirement go from provided
+    // to not-provided the moment the applicant fixed it.
+    await publish();
+    const lotPlan = await upload('lot-plan');
+    const filed = await post('/applications', maria, submission({ documentIds: [lotPlan] }));
+    const applicationId = filed.json<{ id: string }>().id;
+    await db.query(
+      `update documents set review_status = 'Rejected', review_reason_code = 'illegible',
+              reviewed_at = now() where id = $1`, [lotPlan]);
+
+    const replaced = await post(
+      `/applications/${applicationId}/documents/${lotPlan}/resubmit`, maria,
+      { fileName: 'lot-plan-v2.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64') });
+    expect(replaced.statusCode).toBe(201);
+
+    const body = (await get(`/applications/${applicationId}/requirements`, maria))
+      .json<{ requirements: { code: string; status: string; documentIds: string[] }[];
+              attributionComplete: boolean }>();
+    const lot = body.requirements.find((r) => r.code === 'lot-plan')!;
+    expect(lot.status).toBe('provided');
+    // The REPLACEMENT, not the superseded original.
+    expect(lot.documentIds).toEqual([replaced.json<{ documentId: string }>().documentId]);
+    expect(body.attributionComplete).toBe(true);
+  });
+
+  it('answers 404 for someone else’s application', async () => {
+    await publish();
+    const filed = await post('/applications', maria, submission({}));
+
+    const response = await get(
+      `/applications/${filed.json<{ id: string }>().id}/requirements`, jose);
+
+    expect(response.statusCode).toBe(404);
+  });
+});

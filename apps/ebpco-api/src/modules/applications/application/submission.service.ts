@@ -6,7 +6,7 @@ import { FormViolation, schemaFor } from '../domain/application-form';
 import { randomUUID } from 'node:crypto';
 import { normaliseEmail } from '../../identity/application/account.repository';
 import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
-import { RequirementsService } from './requirements.service';
+import { RequirementDocument, RequirementsService } from './requirements.service';
 
 /**
  * Filing an application, exactly once.
@@ -35,7 +35,7 @@ export type SubmitResult =
   | {
       readonly ok: false;
       readonly reason: 'no-applicant-record' | 'unknown-permit-type' | 'business-not-yours'
-        | 'documents-not-yours' | 'key-reused' | 'form-rejected'
+        | 'documents-not-yours' | 'requirement-unknown' | 'key-reused' | 'form-rejected'
         | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found';
       readonly detail: string;
       /** Present for `form-rejected`, so a client can point at the field. */
@@ -203,7 +203,7 @@ export class SubmissionService {
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
 
       const now = this.clock();
-      const { applicationId, referenceNumber } = await this.fileApplication(tx, {
+      const { applicationId, referenceNumber, requiredDocuments } = await this.fileApplication(tx, {
         applicantId, submission, now, renewsPermitId: renewal.permitId,
         // Self-service: the filer and the applicant are the same account.
         filedBy: caller.accountId,
@@ -211,6 +211,36 @@ export class SubmissionService {
       });
 
       if (submission.documentIds.length > 0) {
+        // Every requirement code an attached document carries must be on THIS
+        // application's checklist (C-6).
+        //
+        // Checked here rather than at upload because here is the first moment
+        // the list exists: `POST /documents` takes a nullable application_id and
+        // both clients upload before they file, so at upload time there is no
+        // permit type to check against. And it is checked against the list just
+        // SNAPSHOTTED onto the application -- the one it will be judged by --
+        // not whatever the catalogue says afterwards.
+        //
+        // Refused rather than quietly nulled. A code naming nothing is a client
+        // bug, and dropping it would leave the applicant believing they had
+        // answered a requirement they had not.
+        const attributed = await tx.query<{ requirement_code: string }>(
+          `select distinct requirement_code from documents
+            where id = any($1) and requirement_code is not null`,
+          [[...submission.documentIds]],
+        );
+        const onChecklist = new Set(requiredDocuments.map((entry) => entry.code));
+        const unknown = attributed.rows
+          .map((row) => row.requirement_code)
+          .filter((code) => !onChecklist.has(code))
+          .sort();
+        if (unknown.length > 0) {
+          return {
+            ok: false, reason: 'requirement-unknown',
+            detail: `This permit type has no requirement called ${unknown.join(', ')}.`,
+          };
+        }
+
         await tx.query(
           'update documents set application_id = $1 where id = any($2)',
           [applicationId, [...submission.documentIds]],
@@ -495,7 +525,13 @@ export class SubmissionService {
       formValidatedAgainst: string | null;
       renewsPermitId: string | null;
     },
-  ): Promise<{ applicationId: string; referenceNumber: string }> {
+  ): Promise<{
+    applicationId: string; referenceNumber: string;
+    /** The checklist SNAPSHOTTED onto this application -- the list it will be
+     *  judged against. Returned so a caller validates against the stored list
+     *  rather than re-reading a catalogue that may have moved. */
+    requiredDocuments: readonly RequirementDocument[];
+  }> {
     const { applicantId, submission, now, filedBy } = options;
 
     // The charter entry in force ON THE FILING DATE, not the latest one. An
@@ -534,7 +570,8 @@ export class SubmissionService {
         JSON.stringify(requirements), options.renewsPermitId,
       ],
     );
-    return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber };
+    return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber,
+      requiredDocuments: requirements };
   }
 
   private async nextReference(tx: SqlClient, now: Date): Promise<string> {

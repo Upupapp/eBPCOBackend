@@ -106,6 +106,24 @@ export class ApplicantApplicationsController {
   }
 
   /**
+   * The checklist this application was judged against, and what answers it.
+   *
+   * An object rather than a bare array, because the list cannot honestly travel
+   * without `unattributedDocuments` beside it -- a caller must not be able to
+   * render "3 missing" without also holding "and 7 documents nobody attributed".
+   */
+  @Get(':applicationId/requirements')
+  @RequireScopes('applications:read')
+  async requirements(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<Record<string, unknown>> {
+    const found = await this.applications.requirements(callerAccount(request), applicationId);
+    if (found === null) throw ProblemException.notFound('No such application.');
+    return { ...found };
+  }
+
+  /**
    * The permit, once it exists.
    *
    * Separate from the application detail rather than folded into it: the detail

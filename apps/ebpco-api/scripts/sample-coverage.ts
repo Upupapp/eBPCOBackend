@@ -27,7 +27,7 @@ const say = (line = ''): void => void process.stdout.write(`${line}\n`);
 const warn = (line: string): void => void process.stderr.write(`${line}\n`);
 
 /** Raised deliberately, never lowered to make a run pass. */
-const FLOOR = 39;
+const FLOOR = 40;
 
 interface Sample {
   request?: { method?: string; path?: string };

@@ -57,6 +57,7 @@ describe('the citizen contract fragment matches the recorded responses', () => {
   it.each([
     ['Permit', 'applicant.applications.permit'],
     ['ResubmitResult', 'applicant.applications.resubmitDocument'],
+    ['ApplicationRequirements', 'applicant.applications.requirements'],
   ])('%s declares exactly the keys %s returns', (schema, sample) => {
     expect([...requiredOf(schema)].sort()).toEqual(Object.keys(bodyOf(sample)).sort());
   });
@@ -93,6 +94,20 @@ describe('the citizen contract fragment matches the recorded responses', () => {
     expect(reviewed).toBeDefined();
     expect(Object.keys(reviewed!['reviewReason'] as object).sort())
       .toEqual(['code', 'description', 'label']);
+  });
+
+  it('records the honest case: attribution incomplete, so not-provided is not certain', () => {
+    // The recorded sample deliberately leaves one document unattributed --
+    // which is the state EVERY application filed before migration 035 is in.
+    // A sample showing only the tidy case would let a client ship a "missing
+    // documents" list it has no right to present as certain.
+    const body = bodyOf('applicant.applications.requirements');
+
+    expect(body['attributionComplete']).toBe(false);
+    expect(body['unattributedDocuments']).toBeGreaterThan(0);
+    const entries = body['requirements'] as Record<string, unknown>[];
+    expect(entries.some((entry) => entry['status'] === 'provided')).toBe(true);
+    expect(entries.some((entry) => entry['status'] === 'not-provided')).toBe(true);
   });
 
   it('keeps byteSize a string, because a bigint does not survive a JSON number', () => {

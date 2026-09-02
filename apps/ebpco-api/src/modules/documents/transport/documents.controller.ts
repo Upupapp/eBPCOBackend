@@ -31,6 +31,12 @@ const uploadShape = z.object({
   fileName: z.string().min(1).max(255),
   label: z.string().min(1).max(200),
   applicationId: z.string().uuid().nullable().optional(),
+  /**
+   * Which checklist entry this document answers (C-6). Optional: a client that
+   * does not know is better off saying nothing than guessing, and a null is
+   * read as "not attributed" rather than as a missing requirement.
+   */
+  requirementCode: z.string().min(1).max(100).nullable().optional(),
   // The cap is on decoded bytes; this bound only stops an absurd body reaching
   // the decoder. The real limit is BODY_LIMIT_BYTES at the adapter and the
   // service's own inspection.
@@ -83,6 +89,7 @@ export class DocumentsController {
       fileName: input.fileName,
       label: input.label,
       applicationId: input.applicationId ?? null,
+      requirementCode: input.requirementCode ?? null,
       caller: callerOf(request),
     });
 

@@ -367,3 +367,70 @@ Two things follow, neither of which this lane should decide alone:
 Filed rather than fixed: raising the limit without knowing the real file sizes
 would be picking a number, and the client-visible half (a bare 413) is only
 worth changing once the limit itself is settled.
+
+
+---
+
+## C-6 CLOSED — a document says which requirement it answers
+
+`document_requirements` said what a permit type asks for, `documents` held what
+was sent, and **nothing joined them**. So no surface could name a missing
+document without matching on the label — a guess `evaluation.service.ts` had
+already refused to make, and one the admin front end shipped once as a "Missing
+Documents" column computed from a hash.
+
+Migration 035 adds `documents.requirement_code`, and
+`GET /applications/:applicationId/requirements` is what reads it.
+
+### No foreign key, deliberately
+
+The authority for a filed application is **not** the live catalogue. Migration
+022 snapshots the checklist onto `applications.required_documents` at filing,
+because the checklist changes and a filed application must not. A key into
+`document_requirements (permit_type, code)` would point at what the catalogue
+says *today* — the wrong list to judge an old application against — and would
+break the moment the LGU retired a code some filed application still references.
+
+A document is also uploaded **before** its application exists: `POST /documents`
+takes a nullable `application_id`, and both clients upload first and file
+second. So at write time there is usually no permit type to check against.
+
+The code is therefore validated at **submission**, against the list being
+snapshotted onto that application — the list it will actually be judged by. An
+unknown code refuses the filing (422) naming it, rather than being quietly
+nulled: a code naming nothing is a client bug, and dropping it would leave the
+applicant believing they had answered a requirement they had not.
+
+### Null means NOT ATTRIBUTED, and the read side says so
+
+Every document uploaded before this migration carries a null code, as does any
+from a client that sends none. Counting requirements with no matching code and
+calling them missing would report **every** item missing on an application whose
+documents all predate the column — worse than reporting nothing.
+
+So `unattributedDocuments` travels with the list, and `attributionComplete` says
+in one field whether `not-provided` can be trusted. A caller cannot render
+"3 missing" without also holding "and 7 documents nobody attributed", which is
+the difference between a measurement and an accusation. **The recorded contract
+sample is deliberately the incomplete case**, because a sample showing only the
+tidy state would let a client ship a missing-documents list it has no right to
+present as certain.
+
+### Two properties worth naming
+
+**A replacement inherits the attribution.** Taken from the superseded document,
+not from the client: an applicant resubmitting is responding to a verdict, not
+choosing a requirement afresh. Without it a requirement would flip from provided
+to not-provided the moment the applicant fixed it. Break-checked.
+
+**`provided` is not `accepted`.** It means a document is attributed to the entry,
+not that an officer approved it — that is `reviewStatus` on the document.
+Conflating them would tell an applicant their rejected lot plan satisfies the
+requirement it failed. Superseded documents are excluded from `documentIds`, so
+a replaced-and-accepted requirement does not still read as rejected because of
+what it replaced.
+
+**C-7 remains open** and is now the last of the original list: a document
+uploaded with `applicationId: null` is reachable from no route.
+
+Gate: 83 suites, 1675 tests, coverage ratchet 39 → 40.
