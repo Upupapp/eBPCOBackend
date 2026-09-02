@@ -511,6 +511,13 @@ async function main(): Promise<void> {
       scope: 'Perimeter fence, 42 linear metres, hollow block on reinforced concrete footing',
       conditions: ['Maintain a 1.5m setback from the property line.'],
     }, randomUUID());
+  // The permit as the citizen sees it BEFORE any officer has prepared the
+  // release (C-1). Recorded here, between generation and release preparation,
+  // because `release: null` is a state the citizen web lane has to render and
+  // there was otherwise no recorded bytes for it -- only the populated case.
+  // Two samples, one per branch, rather than a sentence in a document.
+  await record('applicant.applications.permit.beforeRelease', 'GET',
+    `/applications/${seeded.approved}/permit`, applicantToken);
   await record('staff.releasePreparation', 'POST',
     `/staff/applications/${seeded.approved}/release-preparation`, releasingToken,
     {

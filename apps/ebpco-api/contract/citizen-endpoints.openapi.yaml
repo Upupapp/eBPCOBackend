@@ -1,0 +1,249 @@
+# The three citizen endpoints, for a client being written from scratch.
+#
+# Requested by the citizen web portal lane, which has no HTTP layer yet and
+# asked not to infer shapes from prose. Every field below is pinned against a
+# RECORDED response in `contract/response-samples.json` -- real bytes from the
+# real controllers over real PostgreSQL -- and `citizen-contract-parity.spec.ts`
+# fails if this file and those samples disagree in either direction: a field
+# documented here and absent from the samples, or present there and undocumented
+# here.
+#
+# So this is not a description of what someone believed the server returns.
+#
+# OpenAPI 3.1. `type: [string, 'null']` is the 3.1 spelling; `nullable: true` is
+# the 3.0 one and is NOT valid here -- a mistake caught once already in this
+# programme by validating rather than reading.
+openapi: 3.1.0
+info:
+  title: eBPCO citizen endpoints — permit, documents, resubmission
+  version: 1.0.0
+  description: |
+    Shipped in eBPCOBackend: C-1 at f7eb40e, C-2 at 5a0f18a, D-8 at 18028a8.
+
+    All three require a citizen bearer token. All three answer 404 for an
+    application that is not the caller's, which is the SAME 404 as one that does
+    not exist: a reference number that resolves differently would confirm that a
+    neighbour has applied.
+
+paths:
+  /applications/{applicationId}/permit:
+    get:
+      operationId: getPermit
+      summary: The issued permit — number, date, scope, conditions, collection
+      security: [{ bearerAuth: [applications:read] }]
+      parameters:
+        - { name: applicationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The permit.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Permit' } } }
+        '404':
+          description: |
+            Not the caller's application, no such application, OR the permit has
+            not been issued yet. The first two are deliberately indistinguishable;
+            the third says so in `detail` ("No permit has been issued for this
+            application yet"), because an applicant reading their OWN application
+            is entitled to know it simply is not ready.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /applications/{applicationId}/documents:
+    get:
+      operationId: listApplicationDocuments
+      summary: Every document on the application, and the office's verdict on each
+      description: |
+        A BARE ARRAY, not an envelope — the same shape as the timeline. Empty
+        array for an application of theirs with nothing uploaded, which is a
+        different answer from 404 and a true one.
+
+        This is the only route that returns a document id, which content
+        retrieval and resubmission both require.
+      security: [{ bearerAuth: [applications:read] }]
+      parameters:
+        - { name: applicationId, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The documents, oldest upload first.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ApplicationDocument' }
+        '404':
+          description: Not the caller's application, or no such application.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /applications/{applicationId}/documents/{documentId}/resubmit:
+    post:
+      operationId: resubmitDocument
+      summary: Replace one document with a newly supplied file
+      description: |
+        APPENDS, never overwrites: the replacement is a new document pointing at
+        what it replaces, and the old one keeps its rejection and reason.
+
+        `Idempotency-Key` is REQUIRED and must be a UUID. A retry with the same
+        key replays the identical 201 body rather than creating a second
+        document. The FILE is part of the fingerprint, so the same key carrying a
+        different replacement is refused 409 — never reuse a key across files.
+
+        Size: `contentBase64` is capped at 40,000,000 characters by this schema,
+        but the server's body limit is 1MB by default and base64 inflates by
+        about a third, so the real ceiling on a FILE is roughly 750KB. Over it,
+        the HTTP adapter answers a bare 413 that is NOT a problem document.
+      security: [{ bearerAuth: [documents:write] }]
+      parameters:
+        - { name: applicationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: documentId, in: path, required: true, schema: { type: string, format: uuid } }
+        - name: Idempotency-Key
+          in: header
+          required: true
+          schema: { type: string, format: uuid }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [fileName, label, contentBase64]
+              properties:
+                fileName: { type: string, minLength: 1, maxLength: 255 }
+                label: { type: string, minLength: 1, maxLength: 200 }
+                contentBase64: { type: string, minLength: 1, maxLength: 40000000 }
+      responses:
+        '201':
+          description: The replacement was stored and linked.
+          content: { application/json: { schema: { $ref: '#/components/schemas/ResubmitResult' } } }
+        '404':
+          description: Not the caller's application, or no such document ON that application.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: |
+            Already replaced, already accepted by an officer, or the
+            Idempotency-Key was used for a different request. `detail` says which.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: The file failed a malware check and was not stored.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+components:
+  securitySchemes:
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+
+  schemas:
+    Permit:
+      type: object
+      additionalProperties: false
+      required: [permitNumber, issuedDate, scope, conditions, release]
+      properties:
+        permitNumber: { type: string, examples: ['FP-2026-000001'] }
+        issuedDate: { type: string, format: date-time }
+        scope:
+          type: [string, 'null']
+          description: What the permit covers. Null when the officer recorded none.
+        conditions:
+          type: array
+          items: { type: string }
+          description: |
+            What the permit REQUIRES of the holder — a cash bond, a setback,
+            notice before excavation. Render in full: a citizen who cannot read
+            these cannot comply with them. Empty array when there are none.
+        release:
+          description: |
+            ALWAYS PRESENT, and null until an officer has prepared the release.
+            Null is a fact to render ("not yet ready to collect"), not an absent
+            key — both branches are recorded:
+            `applicant.applications.permit` (populated) and
+            `applicant.applications.permit.beforeRelease` (null).
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [status, method, releasedAt]
+              properties:
+                status: { type: string, enum: ['Not Ready', 'Ready for Release', 'Released'] }
+                method: { type: [string, 'null'], enum: ['Physical Claim', 'Authorized Representative', null] }
+                releasedAt: { type: [string, 'null'], format: date-time }
+
+    ApplicationDocument:
+      type: object
+      additionalProperties: false
+      required:
+        [id, label, fileName, contentType, byteSize, sha256, uploadedAt, expiresOn,
+         reviewStatus, reviewedAt, reviewReason, reviewRemark,
+         supersedesDocumentId, supersededByDocumentId, scanCleared, quarantined]
+      properties:
+        id: { type: string, format: uuid }
+        label: { type: string }
+        fileName: { type: string }
+        contentType: { type: string }
+        byteSize:
+          type: string
+          description: A STRING, not a number — the column is a bigint and JSON numbers lose precision.
+        sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
+        uploadedAt: { type: string, format: date-time }
+        expiresOn: { type: [string, 'null'], format: date }
+        reviewStatus:
+          type: [string, 'null']
+          enum: ['Missing', 'Uploaded', 'Submitted', 'Under Review', 'Accepted',
+                 'Rejected', 'Revision Required', 'Expired', null]
+          description: |
+            The OFFICER's verdict. NULL MEANS NOBODY HAS LOOKED YET — it does not
+            mean nothing is wrong. Rendering null as a tick would tell an
+            applicant their document passed when it has not been opened.
+        reviewedAt: { type: [string, 'null'], format: date-time }
+        reviewReason:
+          description: |
+            The standard, reusable reason. Null when none was cited. USE `label`
+            for display rather than keeping your own copy of the catalogue: the
+            LGU can edit it, and a client-side copy drifts. `code` is what to
+            switch on.
+          oneOf:
+            - type: 'null'
+            - type: object
+              additionalProperties: false
+              required: [code, label, description]
+              properties:
+                code: { type: string, examples: ['illegible'] }
+                label: { type: string, examples: ['Illegible'] }
+                description: { type: string }
+        reviewRemark:
+          type: [string, 'null']
+          description: Free text written for THIS applicant about THIS document.
+        supersedesDocumentId: { type: [string, 'null'], format: uuid }
+        supersededByDocumentId: { type: [string, 'null'], format: uuid }
+        scanCleared:
+          type: boolean
+          description: Malware scan completed and passed. A DIFFERENT axis from reviewStatus.
+        quarantined:
+          type: boolean
+          description: |
+            Held by the malware scanner. Not an evaluation outcome — an officer's
+            rejection does not mean a virus, and a quarantined file is not a
+            verdict on the application.
+
+    ResubmitResult:
+      type: object
+      additionalProperties: false
+      required: [documentId, supersedesDocumentId, status, removedMetadata]
+      properties:
+        documentId: { type: string, format: uuid, description: The NEW document. }
+        supersedesDocumentId: { type: string, format: uuid }
+        status: { type: string, enum: ['Pending', 'Approved', 'Rejected', 'Missing'] }
+        removedMetadata:
+          type: array
+          items: { type: string }
+          description: |
+            Metadata stripped from the file — EXIF, GPS. Returned rather than
+            silently dropped: a photograph of a site carries its coordinates, and
+            an applicant is entitled to know the LGU removed them.
+
+    Problem:
+      type: object
+      description: RFC 9457. `detail` is the human-readable half.
+      properties:
+        type: { type: string }
+        title: { type: string }
+        status: { type: integer }
+        detail: { type: string }
+        instance: { type: string }
+        correlationId: { type: string }

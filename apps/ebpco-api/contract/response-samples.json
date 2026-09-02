@@ -836,6 +836,24 @@
         "issuedDate": "2026-01-01T00:00:00.000Z"
       }
     },
+    "applicant.applications.permit.beforeRelease": {
+      "request": {
+        "method": "GET",
+        "path": "/applications/00000000-0000-4000-8000-000000000000/permit",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "permitNumber": "FP-2026-000001",
+        "issuedDate": "2026-01-01T00:00:00.000Z",
+        "scope": "Perimeter fence, 42 linear metres, hollow block on reinforced concrete footing",
+        "conditions": [
+          "Maintain a 1.5m setback from the property line."
+        ],
+        "release": null
+      }
+    },
     "staff.releasePreparation": {
       "request": {
         "method": "POST",
