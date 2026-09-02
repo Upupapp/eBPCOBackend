@@ -602,6 +602,51 @@ describe('answering a Letter of Instruction', () => {
   });
 });
 
+describe('the size of a real building-permit attachment', () => {
+  /**
+   * Measured because the mobile lane is about to send 24 attachments on one
+   * filing, and the numbers here are not the ones the request schema suggests.
+   *
+   * `contentBase64` is capped at 40,000,000 characters by the Zod shape, which
+   * reads like a 30MB file is acceptable. It is not: the Fastify adapter's
+   * `bodyLimit` is `BODY_LIMIT_BYTES`, which defaults to 1MB and is 1MB in
+   * `.env.example`. Base64 inflates by about a third, so the real ceiling on a
+   * FILE is roughly 750KB -- and a scanned building plan is routinely larger.
+   *
+   * The gap matters because of WHERE it is enforced. The adapter refuses the
+   * body before any handler runs, so an applicant does not get the upload
+   * route's careful problem document; they get a bare 413.
+   */
+  const pdfOf = (kilobytes: number): Buffer => Buffer.concat([
+    Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n'),
+    Buffer.alloc(kilobytes * 1024, 0x41),
+    Buffer.from('\ntrailer<</Root 1 0 R>>\n%%EOF\n'),
+  ]);
+
+  it('accepts a file comfortably under the body limit', async () => {
+    const response = await post('/documents', maria, {
+      fileName: 'plan.pdf', label: 'Plan', contentBase64: pdfOf(400).toString('base64'),
+    });
+
+    expect(response.statusCode).toBe(201);
+  });
+
+  it('refuses a file whose BASE64 exceeds the body limit, before the handler', async () => {
+    // ~900KB of PDF is ~1.2MB of base64, over the 1MB default. The refusal
+    // comes from the adapter, so it is not the upload route's problem document
+    // -- worth knowing before a client tries to parse it as one.
+    const response = await post('/documents', maria, {
+      fileName: 'plan.pdf', label: 'Plan', contentBase64: pdfOf(900).toString('base64'),
+    });
+
+    expect(response.statusCode).toBe(413);
+    // Nothing was stored: the body never reached the handler.
+    expect(await count(
+      "select count(*) as n from documents where file_name = 'plan.pdf' and byte_size > 900000",
+    )).toBe(0);
+  });
+});
+
 describe('replacing a rejected document (D-8)', () => {
   /** Files an application carrying one document, and returns both ids. */
   async function filedWithDocument(): Promise<{ applicationId: string; documentId: string }> {

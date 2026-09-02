@@ -328,3 +328,42 @@ Break-checked three ways: dropping the supersession link, removing the
 already-replaced precondition, and disabling the replay each fail a test.
 
 Gate: 82 suites, sample coverage ratchet 38 → 39.
+
+
+---
+
+## C-8 — the real ceiling on an attachment is ~750KB, not 30MB
+
+Raised by the mobile lane's note that a building permit can carry **24
+attachments** and that its first real filing will be the first time `/documents`
+sees that volume. The count is fine; the **size** is the problem.
+
+**24 is safe.** `documentIds` caps at 60, and the rate limit is 300 requests per
+60 seconds against 24 uploads plus one filing.
+
+**The per-file ceiling is not what the schema says.** `contentBase64` is capped
+at 40,000,000 characters by the request shape, which reads as "a 30MB file is
+fine". It is not. The Fastify adapter's `bodyLimit` is `BODY_LIMIT_BYTES`, which
+defaults to **1MB** and is 1MB in `.env.example`. Base64 inflates by about a
+third, so the real ceiling on a FILE is roughly **750KB** — and a scanned
+building plan routinely exceeds that.
+
+**Where it is enforced makes it worse.** The adapter refuses the body before any
+handler runs, so the applicant does not get the upload route's problem document
+explaining what to do. They get a bare **413**. Measured, and now held by a test:
+a ~400KB PDF is accepted 201; a ~900KB PDF is refused 413 with nothing stored.
+
+Two things follow, neither of which this lane should decide alone:
+
+1. **`BODY_LIMIT_BYTES` needs raising for production**, to whatever the LGU's
+   real plan scans are. The value is deliberately configurable — the comment in
+   `app-config.ts` says a value requiring a rebuild is a value nobody tunes — so
+   this is a deployment decision, not a code change.
+2. **The 40,000,000 cap on `contentBase64` should not outrun the body limit.** A
+   schema promising thirty times what the adapter will accept is a promise the
+   server cannot keep, and it is the kind of divergence a client reads as a
+   server bug.
+
+Filed rather than fixed: raising the limit without knowing the real file sizes
+would be picking a number, and the client-visible half (a bare 413) is only
+worth changing once the limit itself is settled.
