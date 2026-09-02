@@ -6,6 +6,7 @@ import { CalendarRepository, CachingCalendarRepository, SqlCalendarRepository }
   from '../compliance/application/calendar.repository';
 import { PaymentsModule } from '../payments/payments.module';
 import { PermitsModule } from '../permits/permits.module';
+import { DocumentsModule } from '../documents/documents.module';
 import { EvaluationService } from './application/evaluation.service';
 import { LifecycleService } from './application/lifecycle.service';
 import { ApplicantQueryService } from './application/applicant-query.service';
@@ -43,7 +44,7 @@ export { CALENDAR_REPOSITORY };
  * met a statutory deadline.
  */
 @Module({
-  imports: [PaymentsModule, PermitsModule, NotificationsModule],
+  imports: [PaymentsModule, PermitsModule, NotificationsModule, DocumentsModule],
   providers: [
     {
       provide: CALENDAR_REPOSITORY,

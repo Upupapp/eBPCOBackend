@@ -11,6 +11,8 @@ import { SubmissionService } from '../application/submission.service';
 import { validateStructure } from '../domain/application-form';
 import { ApplicantQueryService } from '../application/applicant-query.service';
 import { PaymentService } from '../../payments/application/payment.service';
+import { DocumentService } from '../../documents/application/document.service';
+import { requestDigest } from '../../../persistence/idempotency';
 
 /**
  * What an applicant WRITES.
@@ -63,6 +65,20 @@ const resubmitShape = z.object({
     response: z.string().min(1).max(2000),
     documentId: z.string().uuid().nullable().optional(),
   }).strict()).max(50).optional(),
+}).strict();
+
+/**
+ * Replacing one rejected document with a newly supplied file (D-8).
+ *
+ * The same three fields `POST /documents` takes, minus `applicationId`, which
+ * is in the path and must not be contradictable by the body. `.strict()`, so a
+ * client sending the old shape is told rather than silently having half its
+ * request ignored.
+ */
+const documentResubmitShape = z.object({
+  fileName: z.string().min(1).max(255),
+  label: z.string().min(1).max(200),
+  contentBase64: z.string().min(1).max(40_000_000),
 }).strict();
 
 const paymentShape = z.object({
@@ -118,6 +134,7 @@ export class ApplicantWriteController {
     private readonly lifecycle: LifecycleService,
     private readonly applications: ApplicantQueryService,
     private readonly instructions: InstructionResponseService,
+    private readonly documents: DocumentService,
   ) {}
 
   @Post('applications')
@@ -235,6 +252,110 @@ export class ApplicantWriteController {
       ProblemType.conflict, 'The resource is not in a state that permits this',
       HttpStatus.CONFLICT, result.detail,
     );
+  }
+
+  /**
+   * Replacing one document on a filed application (D-8).
+   *
+   * The mobile client has called this route since before it existed; it
+   * returned 404, and the client's own comment recorded that as a hand-off
+   * rather than faking a success. This is it.
+   *
+   * APPENDS, never overwrites. The replacement is a new row pointing at what it
+   * replaces, so the old document keeps its rejection and the reason given for
+   * it -- which is exactly the pair that makes a rejection actionable, and
+   * which `GET /applications/:id/documents` now shows the applicant.
+   *
+   * It does NOT move the application. Responding to a Letter of Instruction is
+   * what returns an application to Under Evaluation, and it already does that
+   * in one transaction; a second route making the same transition would be two
+   * paths to one state, disagreeing the first time either changed.
+   */
+  @Post('applications/:applicationId/documents/:documentId/resubmit')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('documents:write')
+  async resubmitDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Param('documentId') documentId: string,
+    @Body() body: unknown,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<Record<string, unknown>> {
+    const caller = applicantCaller(request);
+    const input = parse(documentResubmitShape, body ?? {});
+    const idempotency = idempotencyKey(key);
+
+    // Ownership first, and the same 404 the detail gives: a document id that
+    // behaves differently on someone else's application is a way to learn that
+    // the application exists.
+    if (await this.applications.byId(caller.accountId, applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.contentBase64, 'base64');
+      if (bytes.length === 0) throw new Error('empty');
+    } catch {
+      throw ProblemException.validation([
+        { pointer: '/contentBase64', message: 'could not be decoded as base64' },
+      ]);
+    }
+
+    const outcome = await this.documents.resubmit({
+      applicationId, supersededDocumentId: documentId, bytes,
+      fileName: input.fileName, label: input.label, caller,
+      idempotencyKey: idempotency,
+      // The file itself is part of the fingerprint. Two different replacements
+      // sent under one key are two different requests, and answering the second
+      // with the first's document id would tell an applicant the wrong file is
+      // now on their application.
+      digest: requestDigest(input),
+    });
+
+    switch (outcome.kind) {
+      case 'created':
+        return {
+          documentId: outcome.documentId,
+          supersedesDocumentId: documentId,
+          status: outcome.status,
+          // Same as the upload route: an applicant is entitled to know the LGU
+          // stripped the GPS coordinates out of their site photograph.
+          removedMetadata: outcome.removedMetadata,
+        };
+
+      case 'replay':
+        // The same answer as the first time, not a second document. This is
+        // the case a dropped connection produces, and reporting a conflict for
+        // one's own success is exactly what the key exists to prevent.
+        return outcome.body as Record<string, unknown>;
+
+      case 'mismatch':
+        throw new ProblemException(
+          ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+          'This Idempotency-Key was already used for a different request. Use a new key.',
+        );
+
+      case 'refused':
+        if (outcome.refusal.reason === 'not-found') {
+          throw ProblemException.notFound('No such document on this application.');
+        }
+        throw new ProblemException(
+          ProblemType.conflict, 'The resource is not in a state that permits this',
+          HttpStatus.CONFLICT, outcome.refusal.detail,
+        );
+
+      default:
+        if (outcome.infected) {
+          throw new ProblemException(
+            ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+            outcome.detail,
+          );
+        }
+        throw ProblemException.validation([
+          { pointer: '/contentBase64', message: outcome.detail },
+        ]);
+    }
   }
 
   /**

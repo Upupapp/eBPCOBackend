@@ -49,6 +49,7 @@
     "PATCH /staff/users/:userId",
     "POST /applications",
     "POST /applications/:applicationId/cancel",
+    "POST /applications/:applicationId/documents/:documentId/resubmit",
     "POST /applications/:applicationId/instructions/:letterId/resubmit",
     "POST /applications/:applicationId/payments",
     "POST /auth/access-request",

@@ -85,6 +85,7 @@ interface Seeded {
   assessable: string;
   approved: string;
   payment: string;
+  rejectedDocument: string;
 }
 
 async function file(db: SqlClient, options: {
@@ -219,6 +220,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
              'documents/2026/08/psa.pdf','Approved',true,now())`,
     [randomUUID(), detailed, applicantAccount],
   );
+  const rejectedDocument = randomUUID();
   // A SECOND document, turned back with a standard reason and custom feedback
   // (C-2). Recorded because a sample of the documents route showing only an
   // approved file would not exercise the fields the route exists for -- the
@@ -234,7 +236,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
              'Rejected','illegible',
              'Page 3 is cut off at the right margin -- the setback dimension cannot be read.',
              now(),$4)`,
-    [randomUUID(), detailed, applicantAccount, evaluator],
+    [rejectedDocument, detailed, applicantAccount, evaluator],
   );
   // Initial and Zoning decided, so the recorded POST is the NEXT stage in turn
   // rather than an out-of-order refusal. The order matters: Fire Safety
@@ -360,6 +362,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
   return {
     official, records, evaluator, assessor, cashier, releasing, receiving,
     applicantAccount, detailed, fresh, completed, assessable, approved, payment,
+    rejectedDocument,
   };
 }
 
@@ -532,6 +535,19 @@ async function main(): Promise<void> {
   // the only recorded response that carries a document id at all.
   await record('applicant.applications.documents', 'GET',
     `/applications/${seeded.detailed}/documents`, applicantToken);
+  // Replacing that rejected document (D-8). Recorded AFTER the documents GET
+  // above, so that sample still shows the state an applicant reads before
+  // acting -- this call is what changes it.
+  await record('applicant.applications.resubmitDocument', 'POST',
+    `/applications/${seeded.detailed}/documents/${seeded.rejectedDocument}/resubmit`,
+    applicantToken,
+    {
+      fileName: 'lot-plan-corrected.pdf',
+      label: 'Lot plan',
+      contentBase64: Buffer.from(
+        '%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n',
+      ).toString('base64'),
+    }, randomUUID());
   await record('applicant.notifications', 'GET', '/notifications', applicantToken);
   await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
   await record('applicant.businesses', 'GET', '/businesses', applicantToken);

@@ -601,3 +601,194 @@ describe('answering a Letter of Instruction', () => {
     expect(again.json().detail).toMatch(/already been answered/i);
   });
 });
+
+describe('replacing a rejected document (D-8)', () => {
+  /** Files an application carrying one document, and returns both ids. */
+  async function filedWithDocument(): Promise<{ applicationId: string; documentId: string }> {
+    const upload = await post('/documents', maria, {
+      fileName: 'lot-plan.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    if (upload.statusCode !== 201) {
+      throw new Error(`upload failed: ${upload.statusCode} ${upload.body}`);
+    }
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    const filed = await post('/applications', maria, submission({ documentIds: [documentId] }));
+    if (filed.statusCode !== 201) {
+      throw new Error(`filing failed: ${filed.statusCode} ${filed.body}`);
+    }
+    return { applicationId: filed.json<{ id: string }>().id, documentId };
+  }
+
+  /** What an officer's verdict leaves on the record. */
+  const reject = (documentId: string): Promise<unknown> => db.query(
+    `update documents
+        set review_status = 'Rejected', review_reason_code = 'illegible',
+            review_remark = 'Page 3 is cut off at the right margin.',
+            reviewed_at = now()
+      where id = $1`,
+    [documentId],
+  );
+
+  const replacement = (): Record<string, unknown> => ({
+    fileName: 'lot-plan-v2.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+  });
+
+  it('appends the replacement and leaves the rejection standing', async () => {
+    // The whole promise. The office keeps every submission: an applicant who
+    // resubmits a rejected land title must not lose the record of what was
+    // rejected or why, and the officer needs to see what changed.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+
+    const sent = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    expect(sent.statusCode).toBe(201);
+    expect(sent.json<{ supersedesDocumentId: string }>().supersedesDocumentId).toBe(documentId);
+
+    // Both rows survive, and the old one still carries its verdict.
+    const documents = (await get(`/applications/${applicationId}/documents`, maria))
+      .json<{ id: string; reviewStatus: string | null; reviewRemark: string | null;
+              supersededByDocumentId: string | null }[]>();
+    const old = documents.find((d) => d.id === documentId)!;
+    expect(documents).toHaveLength(2);
+    expect(old.reviewStatus).toBe('Rejected');
+    expect(old.reviewRemark).toBe('Page 3 is cut off at the right margin.');
+    expect(old.supersededByDocumentId).toBe(sent.json<{ documentId: string }>().documentId);
+  });
+
+  it('reports what metadata it stripped, as the upload route does', async () => {
+    // The replacement goes through the same pipeline -- inspection, scrubbing,
+    // malware scan -- rather than a second path of its own, and says so.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+
+    const sent = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    expect(sent.json()).toHaveProperty('removedMetadata');
+  });
+
+  it('refuses a second replacement of the same document', async () => {
+    // One replacement per superseded document. Two rows both claiming to
+    // replace the same one is an ambiguity nothing downstream could resolve,
+    // and the applicant is told rather than left with a silent no-op.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+    await post(`/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    const again = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    expect(again.statusCode).toBe(409);
+    expect(again.json().detail).toMatch(/already been replaced/i);
+  });
+
+  it('refuses to replace a document an officer has accepted', async () => {
+    // Replacing it would silently undo an approval without telling anyone. The
+    // office can ask for a replacement -- that decision belongs there.
+    const { applicationId, documentId } = await filedWithDocument();
+    await db.query(
+      `update documents set review_status = 'Accepted', reviewed_at = now() where id = $1`,
+      [documentId]);
+
+    const sent = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    expect(sent.statusCode).toBe(409);
+    expect(sent.json().detail).toMatch(/already been accepted/i);
+  });
+
+  it('answers 404 for a document that is not on this application', async () => {
+    // Not 403, and not a distinguishable error: a document id that behaves
+    // differently on someone else's application is a way to learn it exists.
+    const mine = await filedWithDocument();
+    const theirs = await post('/documents', jose, {
+      fileName: 'jose.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    const strangerDocument = theirs.json<{ documentId: string }>().documentId;
+
+    const sent = await post(
+      `/applications/${mine.applicationId}/documents/${strangerDocument}/resubmit`,
+      maria, replacement());
+
+    expect(sent.statusCode).toBe(404);
+  });
+
+  it('answers 404 on someone else’s application', async () => {
+    const { applicationId, documentId } = await filedWithDocument();
+
+    const sent = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, jose, replacement());
+
+    expect(sent.statusCode).toBe(404);
+  });
+
+  it('does not move the application', async () => {
+    // Responding to a Letter of Instruction is what returns an application to
+    // Under Evaluation, in one transaction. A second route making the same
+    // transition would be two paths to one state.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+    const before = (await get(`/applications/${applicationId}`, maria))
+      .json<{ lifecycleStatus: string }>().lifecycleStatus;
+
+    await post(`/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement());
+
+    const after = (await get(`/applications/${applicationId}`, maria))
+      .json<{ lifecycleStatus: string }>().lifecycleStatus;
+    expect(after).toBe(before);
+  });
+
+  it('replays the same answer for a retry, rather than reporting a conflict', async () => {
+    // The case a dropped connection produces: the server committed, the
+    // response was lost, the client retries with the same key. Without this it
+    // would meet the already-replaced refusal and be told its own success was a
+    // conflict -- and an applicant would think their document had not been sent.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+    const key = randomUUID();
+
+    const first = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement(), key);
+    const retry = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria, replacement(), key);
+
+    expect(first.statusCode).toBe(201);
+    expect(retry.statusCode).toBe(201);
+    expect(retry.json()).toEqual(first.json());
+    // And exactly one replacement was stored: the original plus one.
+    expect(await count(
+      'select count(*) as n from documents where application_id = $1', [applicationId])).toBe(2);
+  });
+
+  it('refuses the same key carrying a different file', async () => {
+    // The file is part of the fingerprint. Answering the second request with
+    // the first's document id would tell an applicant the wrong file is now on
+    // their application.
+    const { applicationId, documentId } = await filedWithDocument();
+    await reject(documentId);
+    const key = randomUUID();
+    await post(`/applications/${applicationId}/documents/${documentId}/resubmit`,
+      maria, replacement(), key);
+
+    const different = await post(
+      `/applications/${applicationId}/documents/${documentId}/resubmit`, maria,
+      { ...replacement(), label: 'A completely different document' }, key);
+
+    expect(different.statusCode).toBe(409);
+    expect(different.json().detail).toMatch(/already used for a different request/i);
+  });
+
+  it('refuses something that is not base64, before storing anything', async () => {
+    const { applicationId, documentId } = await filedWithDocument();
+
+    const sent = await post(`/applications/${applicationId}/documents/${documentId}/resubmit`, maria, {
+      fileName: 'x.pdf', label: 'Lot plan', contentBase64: '!!!not base64!!!',
+    });
+
+    expect(sent.statusCode).toBe(400);
+    expect(await count(
+      'select count(*) as n from documents where application_id = $1', [applicationId])).toBe(1);
+  });
+});

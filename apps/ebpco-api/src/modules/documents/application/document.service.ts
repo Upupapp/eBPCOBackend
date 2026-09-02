@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { lookup, remember, type Replay } from '../../../persistence/idempotency';
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../../applications/domain/application';
 import { inspect, InspectionFailure } from '../domain/content-inspection';
@@ -30,6 +31,30 @@ export type UploadOutcome =
   | { readonly ok: false; readonly failure: { reason: 'infected'; detail: string } };
 
 export type DocumentStatus = 'Pending' | 'Approved' | 'Rejected' | 'Missing';
+
+/**
+ * What a resubmission can go wrong with, before any bytes are looked at.
+ *
+ * `not-found` covers three different facts on purpose -- no such document, not
+ * on this application, or deleted -- because telling them apart would let a
+ * citizen probe for document ids that are not theirs.
+ */
+export type ResubmitRefusal =
+  | { readonly reason: 'not-found' }
+  | { readonly reason: 'already-replaced'; readonly detail: string }
+  | { readonly reason: 'accepted'; readonly detail: string };
+
+/** Everything replacing a document can end as, on one axis. */
+export type ResubmitOutcome =
+  | { readonly kind: 'created'; readonly documentId: string; readonly status: DocumentStatus;
+      readonly removedMetadata: readonly string[] }
+  /** This exact request already happened. The stored answer, not a second document. */
+  | { readonly kind: 'replay'; readonly status: number; readonly body: unknown }
+  /** Same key, different request -- a client bug, and answering it would answer for the wrong one. */
+  | { readonly kind: 'mismatch' }
+  | { readonly kind: 'refused'; readonly refusal: ResubmitRefusal }
+  | { readonly kind: 'unusable-file'; readonly detail: string; readonly infected: boolean };
+
 
 export type ContentAccess =
   | { readonly ok: true; readonly url: string }
@@ -64,8 +89,18 @@ export class DocumentService {
     label: string;
     applicationId: string | null;
     caller: Caller;
+    /**
+     * The document this one replaces (D-8), or null for a first submission.
+     *
+     * Carried into the INSERT rather than set by a follow-up update, so the
+     * unique index on it is the authority: two resubmissions racing to replace
+     * the same document cannot both win, and the loser fails before it can be
+     * told it succeeded.
+     */
+    supersedes?: string | null;
   }): Promise<UploadOutcome> {
     const { bytes, fileName, label, applicationId, caller } = options;
+    const supersedes = options.supersedes ?? null;
 
     const inspection = inspect(bytes, fileName);
     if (!inspection.ok) return { ok: false, failure: inspection.failure };
@@ -80,11 +115,12 @@ export class DocumentService {
 
     const inserted = await this.db.query<{ id: string }>(
       `insert into documents (application_id, uploaded_by, label, file_name, content_type,
-                              byte_size, sha256, storage_key, status, scan_cleared)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false)
+                              byte_size, sha256, storage_key, status, scan_cleared,
+                              supersedes_document_id)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false, $9)
        returning id`,
       [applicationId, caller.accountId, label, fileName, inspection.inspection.format,
-       scrubbed.bytes.length, digest, key],
+       scrubbed.bytes.length, digest, key, supersedes],
     );
     const documentId = inserted.rows[0]?.id ?? '';
 
@@ -102,6 +138,114 @@ export class DocumentService {
     }
 
     return { ok: true, documentId, status, removedMetadata: scrubbed.removed };
+  }
+
+  /**
+   * Replacing one document on an application with a newly supplied file (D-8).
+   *
+   * The office keeps every submission, so this APPENDS: the replacement is a
+   * new row pointing at what it replaces, and the old document keeps its
+   * rejection and the reason it was given. An applicant who resubmits a
+   * rejected land title does not lose the record of what was wrong, and the
+   * officer can see what changed. Migration 027 modelled it this way; this is
+   * the route that finally writes it.
+   *
+   * The file goes through `upload` rather than a second path of its own. Magic-
+   * byte inspection, metadata scrubbing, the malware scan and the object store
+   * are the risky parts, and a second implementation of them is a second place
+   * for them to be wrong.
+   */
+  async resubmit(options: {
+    applicationId: string;
+    supersededDocumentId: string;
+    bytes: Buffer;
+    fileName: string;
+    label: string;
+    caller: Caller;
+    /** Do-this-once. Required, as it is on every other applicant write. */
+    idempotencyKey: string;
+    /** Fingerprint of the request, so the same key with a changed body is caught. */
+    digest: string;
+  }): Promise<ResubmitOutcome> {
+    const { applicationId, supersededDocumentId, caller } = options;
+
+    // Before the preconditions, because a replay must answer what it answered
+    // the first time even if the document has since been replaced -- otherwise
+    // a retry after a dropped connection reports a conflict for its own success.
+    const seen = await lookup<Replay<unknown>['body']>(this.db, {
+      accountId: caller.accountId, key: options.idempotencyKey,
+      operation: 'document.resubmit', digest: options.digest,
+    });
+    if (seen.kind === 'replay') {
+      return { kind: 'replay', status: seen.previous.status, body: seen.previous.body };
+    }
+    if (seen.kind === 'mismatch') return { kind: 'mismatch' };
+
+    const existing = await this.db.query<{ review_status: string | null; replaced_by: string | null }>(
+      `select d.review_status,
+              (select r.id from documents r
+                where r.supersedes_document_id = d.id and r.deleted_at is null) as replaced_by
+         from documents d
+        where d.id = $1 and d.application_id = $2 and d.deleted_at is null`,
+      [supersededDocumentId, applicationId],
+    );
+
+    const row = existing.rows[0];
+    if (row === undefined) return { kind: 'refused', refusal: { reason: 'not-found' } };
+
+    if (row.replaced_by !== null) {
+      // The unique index would refuse this anyway, but only after the bytes
+      // were stored and scanned. Refusing here means a citizen who taps twice
+      // does not pay for an upload that was never going to land.
+      return { kind: 'refused', refusal: { reason: 'already-replaced',
+        detail: 'This document has already been replaced. Read the application again to see the current one.' } };
+    }
+
+    if (row.review_status === 'Accepted') {
+      // An officer has approved this one. Replacing it would silently undo
+      // that approval, and the applicant would not be told they had done so.
+      // Reversible from the office's side -- an officer can mark it Expired or
+      // Revision Required -- which is where that decision belongs.
+      return { kind: 'refused', refusal: { reason: 'accepted',
+        detail: 'This document has already been accepted. The office must ask for a replacement before one can be sent.' } };
+    }
+
+    const uploaded = await this.upload({
+      bytes: options.bytes,
+      fileName: options.fileName,
+      label: options.label,
+      applicationId,
+      caller,
+      supersedes: supersededDocumentId,
+    });
+
+    if (!uploaded.ok) {
+      // Not remembered. A key recorded for a failure would replay that failure
+      // to a client retrying with a file that is now fine.
+      return { kind: 'unusable-file', detail: uploaded.failure.detail,
+        infected: uploaded.failure.reason === 'infected' };
+    }
+
+    const body = {
+      documentId: uploaded.documentId,
+      supersedesDocumentId: supersededDocumentId,
+      status: uploaded.status,
+      removedMetadata: uploaded.removedMetadata,
+    };
+    // Recorded AFTER the document exists, not inside its transaction -- the
+    // upload spans an object-store write and a malware scan, and holding a
+    // database transaction across those would be worse than the gap it closes.
+    // The gap is a crash between the two, which leaves a document with no key;
+    // the retry then finds it already replaced and is refused rather than
+    // duplicating it. Safe, and honest about which of the two it is.
+    await remember(this.db, {
+      accountId: caller.accountId, key: options.idempotencyKey,
+      operation: 'document.resubmit', digest: options.digest,
+      status: 201, body,
+    });
+
+    return { kind: 'created', documentId: uploaded.documentId, status: uploaded.status,
+      removedMetadata: uploaded.removedMetadata };
   }
 
   /**

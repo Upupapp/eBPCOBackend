@@ -260,3 +260,71 @@ exist. Filed as **C-7**; it is not reachable through any client flow today.
 
 Gate: 82 suites, 1642 tests, reachability 50/50, recorded responses ok (coverage
 ratchet 37 → 38), secret scan ok over 304 files.
+
+
+---
+
+## D-8 CLOSED — `POST /applications/:applicationId/documents/:documentId/resubmit`
+
+The mobile client had called this route since before it existed. It returned
+404, and the client's own comment recorded that as a hand-off rather than
+faking a success — the right call, and the reason this was a known gap rather
+than a mystery.
+
+**It appends, never overwrites.** The replacement is a new row pointing at what
+it replaces, so the old document keeps its rejection and the reason given for
+it. That is the pair that makes a rejection actionable — what was wrong, and
+what was sent instead — and C-2 now shows the applicant both. Migration 027
+modelled the chain; this is the route that finally writes it.
+
+**The file goes through the existing upload path**, not a second one. Magic-byte
+inspection, metadata scrubbing, the malware scan and the object-store write are
+the risky parts, and a second implementation of them is a second place for them
+to be wrong. `supersedes_document_id` is set in the INSERT rather than by a
+follow-up update, so the unique index is the authority: two resubmissions racing
+to replace one document cannot both win.
+
+### What it refuses, and why
+
+* **Already replaced → 409.** The unique index would refuse it anyway, but only
+  after the bytes were stored and scanned. Refusing first means a citizen who
+  taps twice does not pay for an upload that was never going to land.
+* **Already accepted → 409.** Replacing a document an officer approved would
+  silently undo that approval with nobody told. An officer can mark it Expired
+  or Revision Required; that decision belongs in the office.
+* **Not on this application → 404**, the same 404 as a document that does not
+  exist. A document id that behaves differently on someone else's application is
+  a way to learn that application exists.
+
+### It does not move the application
+
+Responding to a Letter of Instruction is what returns an application to Under
+Evaluation, and it already does that with the item responses in one transaction.
+A second route making the same transition would be two paths to one state,
+disagreeing the first time either changed.
+
+### The idempotency key is honoured, not just accepted
+
+Without it, a dropped connection is the bad case: the server commits, the
+response is lost, the client retries, and meets the already-replaced refusal —
+being told its own success was a conflict, so the applicant believes the
+document was never sent. The key is looked up **before** the preconditions for
+exactly that reason, and the file is part of the fingerprint, so the same key
+carrying a different replacement is refused rather than answered with the first
+document's id.
+
+This uses `src/persistence/idempotency.ts`, which exists because the payments
+module grew one inline and the comment there says plainly that a second inline
+copy is how two operations come to disagree about what a replay means.
+
+**Where it is honest about a gap:** the key is recorded after the document
+exists, not inside its transaction — the upload spans an object-store write and
+a malware scan, and holding a database transaction across those would be worse
+than the gap it closes. A crash between the two leaves a document with no key;
+the retry then finds it already replaced and is refused rather than duplicating
+it. Safe, and the refusal is the wrong message for that one case.
+
+Break-checked three ways: dropping the supersession link, removing the
+already-replaced precondition, and disabling the replay each fail a test.
+
+Gate: 82 suites, sample coverage ratchet 38 → 39.
