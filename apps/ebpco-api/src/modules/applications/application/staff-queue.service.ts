@@ -51,6 +51,11 @@ export interface QueueRow {
    * the same field on ApplicationRecord in applicant-view.ts.
    */
   readonly permitTypeName: string;
+  /**
+   * 'Construction Permit' for the office's nineteen, 'Business Permit' for the
+   * twentieth. The durable way to tell them apart -- see the note on the value.
+   */
+  readonly serviceDomain: string;
   readonly applicationAction: string;
   readonly lifecycleStatus: LifecycleStatus;
   readonly classification: string | null;
@@ -167,6 +172,7 @@ const QUEUE_SQL = `
     a.id,
     a.reference_number,
     a.permit_type,
+    pt.service_domain,
     a.application_action,
     a.lifecycle_status,
     a.classification,
@@ -199,6 +205,7 @@ const QUEUE_SQL = `
         and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at
   from applications a
   join applicants ap on ap.id = a.applicant_id
+  join permit_types pt on pt.permit_type = a.permit_type
   left join businesses b on b.id = a.business_id
   left join charter_entries ce on ce.id = a.charter_entry_id
 `;
@@ -623,6 +630,20 @@ export class StaffQueueService {
       // that the backend moves and the front ends do not. It is redundant, and
       // is the one thing here worth retiring once no client reads it.
       permitTypeName: row['permit_type'] as string,
+      /**
+       * Which service this permit belongs to: 'Construction Permit' for the
+       * office's nineteen, 'Business Permit' for the twentieth.
+       *
+       * Added because the admin portal had to hard-code that 'Business Permit'
+       * is not one of the office's permits in order to render it at all -- its
+       * union holds the nineteen, so the twentieth failed validation and every
+       * legacy application read "Not recorded", which was false. The server
+       * already knew the answer and was not saying it.
+       *
+       * A hard-coded name in a client breaks the next time the LGU adds a
+       * non-construction permit type; this does not.
+       */
+      serviceDomain: row['service_domain'] as string,
       applicationAction: row['application_action'] as string,
       lifecycleStatus: row['lifecycle_status'] as LifecycleStatus,
       classification: (row['classification'] as string | null) ?? null,

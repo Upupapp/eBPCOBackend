@@ -226,6 +226,14 @@ export interface Account {
   readonly passwordHash: string;
   readonly roles: readonly StaffRole[];
   readonly emailVerifiedAt: Date | null;
+  /**
+   * The staff member's own name, as the office entered it on their access
+   * request (migration 034). Null for an applicant -- their name lives on the
+   * applicant profile, split into first and last -- and null for a staff
+   * account created before the access-request flow, which genuinely has no name
+   * on record.
+   */
+  readonly fullName: string | null;
   readonly mobileVerifiedAt: Date | null;
   readonly totpSecret: string | null;
   readonly disabledAt: Date | null;

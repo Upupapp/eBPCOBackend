@@ -207,8 +207,11 @@ export class AccessRequestService {
       };
     }
 
-    const found = await this.db.query<{ email: string; email_normalised: string; status: string }>(
-      'select email, email_normalised, status from access_requests where id = $1', [requestId]);
+    const found = await this.db.query<{
+      email: string; email_normalised: string; status: string; full_name: string;
+    }>(
+      'select email, email_normalised, status, full_name from access_requests where id = $1',
+      [requestId]);
     const request = found.rows[0];
     if (request === undefined || request.status !== 'pending') {
       return {
@@ -229,12 +232,19 @@ export class AccessRequestService {
     const accountId = randomUUID();
     await this.db.transaction(async (tx) => {
       await tx.query(
-        `insert into accounts (id, kind, email, email_normalised, password_hash, created_at)
-         values ($1,'staff',$2,$3,$4,$5)`,
+        `insert into accounts (id, kind, email, email_normalised, password_hash, created_at,
+                               full_name)
+         values ($1,'staff',$2,$3,$4,$5,$6)`,
         // Unusable by construction: the account holder must complete a password
         // reset before they can sign in, which is forced rotation without a
         // flag anyone can forget to set.
-        [accountId, request.email, request.email_normalised, unusablePasswordHash(), this.clock()],
+        //
+        // The name comes across with it (F-32). The office typed it on the
+        // request and the approver read it before deciding; dropping it here
+        // was why every officer saw their own email address in the portal's
+        // topbar.
+        [accountId, request.email, request.email_normalised, unusablePasswordHash(), this.clock(),
+         request.full_name],
       );
       for (const role of approval.roles) {
         await tx.query('insert into account_roles (account_id, role) values ($1,$2)',

@@ -34,6 +34,7 @@ async function seedStaff(
     passwordHash: await hasher.hash(GOOD_PASSWORD),
     roles,
     emailVerifiedAt: new Date(),
+    fullName: 'Ana Reyes',
     mobileVerifiedAt: null,
     totpSecret,
     disabledAt: null,
@@ -169,7 +170,7 @@ describe('authentication', () => {
     await accounts.save({
       id: 'old-1', kind: 'applicant', email: 'old@b.ph',
       passwordHash: await weak.hash(GOOD_PASSWORD), roles: [],
-      emailVerifiedAt: null, mobileVerifiedAt: null, totpSecret: null,
+      emailVerifiedAt: null, mobileVerifiedAt: null, totpSecret: null, fullName: null,
       disabledAt: null, createdAt: new Date(),
     });
 

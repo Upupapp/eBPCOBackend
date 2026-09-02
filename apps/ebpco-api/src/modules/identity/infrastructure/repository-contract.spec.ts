@@ -60,6 +60,7 @@ const implementations: Array<[string, () => Promise<Harness>]> = [
 const anAccount = (overrides: Partial<Account> = {}): Account => ({
   id: randomUUID(),
   kind: 'applicant',
+  fullName: null,
   email: `applicant-${randomUUID().slice(0, 8)}@example.ph`,
   passwordHash: 'scrypt$1024$8$1$c2FsdA$aGFzaA',
   roles: [],

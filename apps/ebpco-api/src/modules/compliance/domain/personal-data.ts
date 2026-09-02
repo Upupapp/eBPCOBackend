@@ -175,6 +175,20 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     id: linkable('account-lifetime', SERVICE_DELIVERY),
     kind: none('account-lifetime'),
     email: direct('account-lifetime', SERVICE_DELIVERY),
+    // The staff member's own name (migration 034). A direct identifier, on the
+    // same row and the same retention as the `email` above it.
+    //
+    // 'account-lifetime' here means the lifetime of the account RECORD, not the
+    // RA 10173 erasure route: `ErasureService` refuses a staff account outright
+    // ('staff-account'), so this column is never reached by a subject's erasure
+    // request -- the same way the staff email beside it is not. Said plainly
+    // because a retention label that implies a deletion which cannot fire is a
+    // promise to a data subject that nothing will keep.
+    //
+    // A second copy lives on `access_requests`, which is a decision record the
+    // office keeps on its own retention. Removing the account does not reach
+    // it, deliberately, and that is recorded there rather than implied here.
+    full_name: direct('account-lifetime', SERVICE_DELIVERY),
     email_normalised: direct('account-lifetime', 'derived from email, same basis'),
     password_hash: secret('authentication'),
     mobile_number: direct('account-lifetime', 'second verification channel (ADR 0004)'),

@@ -200,6 +200,9 @@ export class IdentityService {
         passwordHash: await this.hasher.hash(input.password),
         roles: [],
         emailVerifiedAt: null,
+      // Applicants carry their name on the applicant profile, split into first
+      // and last. This column is the staff member's own name (migration 034).
+      fullName: null,
         mobileVerifiedAt: null,
         totpSecret: null,
         disabledAt: null,

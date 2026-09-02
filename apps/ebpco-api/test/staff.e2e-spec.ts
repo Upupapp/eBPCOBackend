@@ -758,3 +758,77 @@ describe('moving an application', () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe('what an officer learns about themselves (F-32)', () => {
+  it('returns the officer’s own name, not just their email', async () => {
+    // Raised by the admin portal lane: every officer saw their EMAIL ADDRESS in
+    // the topbar, because /me returned no name for a staff account. The name
+    // was never missing — the office types it on the access request — it was
+    // dropped when the account was created.
+    const token = await staffToken('evaluator');
+    await db.query("update accounts set full_name = 'Ana Cruz' where kind = 'staff'");
+
+    const body = (await get('/me', token)).json<{ fullName: string | null; email: string }>();
+
+    expect(body.fullName).toBe('Ana Cruz');
+  });
+
+  it('says null for an officer whose name was never recorded', async () => {
+    // A staff account created before the access-request flow — the seeded super
+    // admin among them — genuinely has no name. Null means not recorded, and a
+    // client showing the email for that case is right to.
+    const token = await staffToken('evaluator');
+
+    const body = (await get('/me', token)).json<{ fullName: string | null }>();
+
+    expect(body.fullName).toBeNull();
+  });
+
+  it('reports all three axes of access, not just roles', async () => {
+    // Role, level, and the permit types an officer may work on. Scopes encode
+    // the level — a view-only token is issued without the authority scopes —
+    // but NOTHING encoded the forms, so a portal could not tell which permit
+    // types to offer and three built screens had nothing to drive them.
+    const token = await staffToken('evaluator');
+
+    const body = (await get('/me', token))
+      .json<{ roles: string[]; level: string; permitTypes: string[] }>();
+
+    expect(body.roles).toEqual(['evaluator']);
+    expect(body.level).toBe('view-edit');
+    // Every seeded type, which is what the 032 backfill grants.
+    expect(body.permitTypes).toContain('Fencing Permit');
+    expect(body.permitTypes.length).toBeGreaterThan(1);
+  });
+
+  it('does not offer a retired permit type', async () => {
+    // An officer keeps the grant on a retired type — it is how their historical
+    // work stays attributable — but a screen must not offer something nobody
+    // can file against today.
+    const token = await staffToken('evaluator');
+    await db.query(
+      "update permit_types set retired_at = now() where permit_type = 'Fencing Permit'");
+
+    const body = (await get('/me', token)).json<{ permitTypes: string[] }>();
+
+    expect(body.permitTypes).not.toContain('Fencing Permit');
+    // Still granted underneath: this is a display rule, not a revocation.
+    const held = await db.query<{ n: string }>(
+      "select count(*)::text as n from staff_permit_access where permit_type = 'Fencing Permit'");
+    expect(Number(held.rows[0]!.n)).toBeGreaterThan(0);
+  });
+
+  it('tells an applicant nothing about staff access', async () => {
+    // The three axes are meaningless for an applicant and their presence would
+    // suggest an account kind they do not have.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: ['profile:read'],
+    })).token;
+
+    const body = (await get('/me', token)).json<Record<string, unknown>>();
+
+    expect(body).not.toHaveProperty('level');
+    expect(body).not.toHaveProperty('permitTypes');
+    expect(body).not.toHaveProperty('fullName');
+  });
+});

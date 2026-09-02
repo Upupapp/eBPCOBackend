@@ -14,12 +14,13 @@ interface AccountRow {
   totp_secret_encrypted: Buffer | null;
   disabled_at: Date | null;
   created_at: Date;
+  full_name: string | null;
   roles: string[] | null;
 }
 
 const SELECT = `
   select a.id, a.kind, a.email, a.password_hash, a.email_verified_at, a.mobile_verified_at,
-         a.totp_secret_encrypted, a.disabled_at, a.created_at,
+         a.totp_secret_encrypted, a.disabled_at, a.created_at, a.full_name,
          coalesce(array_agg(r.role) filter (where r.role is not null), '{}') as roles
     from accounts a
     left join account_roles r on r.account_id = a.id
@@ -153,6 +154,7 @@ export class PostgresAccountRepository implements AccountRepository {
       passwordHash: row.password_hash,
       roles: (row.roles ?? []) as StaffRole[],
       emailVerifiedAt: row.email_verified_at,
+      fullName: row.full_name,
       mobileVerifiedAt: row.mobile_verified_at,
       // Decryption belongs to the key service, not here. Presence is what the
       // domain asks about; the value is fetched only when a code is verified.

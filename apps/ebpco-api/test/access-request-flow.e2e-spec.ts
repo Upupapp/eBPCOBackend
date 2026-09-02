@@ -481,3 +481,58 @@ describe('demoting or disabling the last super admin is refused', () => {
     })).ok).toBe(true);
   });
 });
+
+describe('the officer’s own name survives approval (F-32)', () => {
+  it('carries the name from the request onto the account', async () => {
+    // Raised by the admin portal lane: every officer saw their own EMAIL
+    // ADDRESS in the topbar. The name was never missing -- the office types it
+    // on the access request and the approver reads it before deciding -- it was
+    // dropped in the same transaction that created the account.
+    const admin = await superAdmin();
+    const id = await raise();
+
+    await requests.approve(id, {
+      roles: ['evaluator'], level: 'view-edit',
+      permitTypes: ['Building Permit – New Construction'],
+    }, { accountId: admin, role: 'super-admin' });
+
+    const [created] = await query<{ full_name: string | null }>(
+      "select full_name from accounts where email_normalised = 'ana@castilla.gov.ph'");
+    expect(created!.full_name).toBe('Ana Cruz');
+  });
+
+  it('recovers the names of officers approved before the column existed', async () => {
+    // Migration 034 backfills from access_requests on the normalised email --
+    // the same identity the approval itself used, not a fuzzy match. Simulated
+    // by clearing the name the way an account created before 034 would have it.
+    const admin = await superAdmin();
+    const id = await raise();
+    await requests.approve(id, {
+      roles: ['evaluator'], level: 'view-edit',
+      permitTypes: ['Building Permit – New Construction'],
+    }, { accountId: admin, role: 'super-admin' });
+    await query("update accounts set full_name = null where email_normalised = 'ana@castilla.gov.ph'");
+
+    await query(`update accounts a set full_name = r.full_name
+                   from access_requests r
+                  where r.email_normalised = a.email_normalised
+                    and r.status = 'approved' and a.kind = 'staff' and a.full_name is null`);
+
+    const [recovered] = await query<{ full_name: string | null }>(
+      "select full_name from accounts where email_normalised = 'ana@castilla.gov.ph'");
+    expect(recovered!.full_name).toBe('Ana Cruz');
+  });
+
+  it('leaves a rejected applicant’s name off any account', async () => {
+    // The backfill takes only 'approved' rows. A rejected request names
+    // somebody the office declined, and a pending one names somebody with no
+    // account at all.
+    const admin = await superAdmin();
+    const id = await raise();
+    await requests.reject(id, 'Not a member of this office.',
+      { accountId: admin, role: 'super-admin' });
+
+    expect(await query(
+      "select 1 from accounts where email_normalised = 'ana@castilla.gov.ph'")).toEqual([]);
+  });
+});

@@ -5,6 +5,7 @@ import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { ACCOUNT_REPOSITORY, AccountRepository } from '../application/account.repository';
 import { IdentityService } from '../application/identity.service';
 import { ErasureService } from '../../compliance/application/erasure.service';
+import { StaffAccessService } from '../application/staff-access.service';
 import { DataExportService } from '../../compliance/application/data-export.service';
 import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
@@ -204,6 +205,7 @@ export class MeController {
     @Inject(ACCOUNT_REPOSITORY) private readonly accounts: AccountRepository,
     private readonly erasure: ErasureService,
     private readonly dataExports: DataExportService,
+    private readonly staffAccess: StaffAccessService,
   ) {}
 
   /**
@@ -296,7 +298,36 @@ export class MeController {
     };
 
     if (account.kind === 'staff') {
-      return { ...common, roles: account.roles, scopes: caller.scopes };
+      // F-32, raised by the admin portal lane. Two omissions, both of which
+      // left something built and inert.
+      //
+      // `fullName`: every officer saw their own EMAIL ADDRESS in the topbar.
+      // The name was never missing -- the office types it on the access
+      // request and the approver reads it before deciding -- it was dropped
+      // when the account was created (migration 034 fixes that, and recovers
+      // the names already collected). Null means genuinely not on record, for
+      // an account made before that flow existed; it does not mean blank.
+      //
+      // `level` and `permitTypes`: the access model has three axes -- role,
+      // level, and the permit types an officer may work on -- and only roles
+      // and scopes were reported. Scopes encode the level, because a view-only
+      // officer's token is issued without the authority scopes; nothing
+      // encoded the FORMS. So a portal could not tell which permit types to
+      // offer, and three built screens had nothing to drive them.
+      //
+      // `liveAccessFor`, not `accessFor`: a retired permit type must not be
+      // offered on a screen. An officer still holds the grant -- it is how
+      // their historical work stays attributable -- but it is not something
+      // they can file against today.
+      const access = await this.staffAccess.liveAccessFor(account.id);
+      return {
+        ...common,
+        fullName: account.fullName,
+        roles: account.roles,
+        scopes: caller.scopes,
+        level: access.level,
+        permitTypes: access.permitTypes,
+      };
     }
 
     // An applicant's name and mobile number, which the mobile client reads to
