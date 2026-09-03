@@ -195,9 +195,9 @@ describe('a confirmed head must be nameable', () => {
   it('refuses an office claiming a head from both sources at once', async () => {
     // Two answers to "who runs this office" means whichever the query reads
     // first wins, silently.
-    await db.exec(`insert into officials (id, slug, name, position, office, initials, ordinal)
+    await db.exec(`insert into officials (id, slug, name, position, office, initials, ordinal, role)
                    values ('22222222-2222-4222-8222-222222222222', 'a-person', 'A Person',
-                           'Municipal Mayor', 'Office of the Municipal Mayor', 'AP', 1)`);
+                           'Municipal Mayor', 'Office of the Municipal Mayor', 'AP', 1, 'mayor')`);
 
     await expect(db.exec(
       `update offices set head_official_id = '22222222-2222-4222-8222-222222222222'

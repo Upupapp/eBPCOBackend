@@ -12,6 +12,8 @@ export interface OfficeSummary {
 export interface OfficeHead {
   name: string;
   position: string;
+  /** Authored, never derived. Absent when nobody has written them down. */
+  initials?: string;
 }
 
 export interface OfficeDetail extends OfficeSummary {
@@ -55,16 +57,31 @@ export class OfficesRepository {
   }
 
   async categories(): Promise<string[]> {
-    const { rows } = await this.db.query<{ id: string }>(
-      'select id from office_categories order by ordinal');
-    return rows.map((row) => row.id);
+    return (await this.labelledCategories()).map((category) => category.id);
+  }
+
+  /**
+   * The categories a client renders filter chips from, with their labels.
+   *
+   * `office_categories` has held `(id, label, ordinal)` since migration 001 and
+   * only the id ever reached the wire, so the website had to keep its own
+   * id-to-label mapping — a copy of something this service already holds, which
+   * is a copy that drifts the first time a label is reworded.
+   *
+   * Ordered by `ordinal`, which is the order the LGU wants them read in and is
+   * neither alphabetical nor insertion order.
+   */
+  async labelledCategories(): Promise<{ id: string; label: string }[]> {
+    const { rows } = await this.db.query<{ id: string; label: string }>(
+      'select id, label from office_categories order by ordinal');
+    return rows;
   }
 
   async detail(slug: string): Promise<OfficeDetail | null> {
     const { rows } = await this.db.query<{
       id: string; slug: string; name: string; category: string;
       shortDescription: string; aboutText: string;
-      headName: string | null; headPosition: string | null;
+      headName: string | null; headPosition: string | null; headInitials: string | null;
     }>(
       `select o.id, o.slug, o.name, o.category_id as category,
               o.short_description as "shortDescription", o.about_text as "aboutText",
@@ -74,7 +91,13 @@ export class OfficesRepository {
               case when fs.state = 'confirmed'
                    then coalesce(x.name, o.head_name) end as "headName",
               case when fs.state = 'confirmed'
-                   then coalesce(x.position, o.head_position) end as "headPosition"
+                   then coalesce(x.position, o.head_position) end as "headPosition",
+              -- Authored on both sides: an elected head carries their own, and
+              -- a head written on the office carries head_initials. Neither
+              -- is derived from the name, because deriving is wrong for
+              -- honorifics, suffixes, post-nominals and nicknames.
+              case when fs.state = 'confirmed'
+                   then coalesce(x.initials, o.head_initials) end as "headInitials"
          from offices o
          left join officials x on x.id = o.head_official_id
          left join field_state fs
@@ -110,6 +133,11 @@ export class OfficesRepository {
     // `head: null` later, which is the shape TAB 03 forbids.
     if (office.headName !== null && office.headPosition !== null) {
       detail.head = { name: office.headName, position: office.headPosition };
+      // Same rule as `photoUrl` and `contact`: assigned only when there is one,
+      // so absent means "not authored" rather than serialising a null that a
+      // client has to special-case. Elected heads have initials today; heads
+      // written inline on an office will once the source data carries them.
+      if (office.headInitials !== null) detail.head.initials = office.headInitials;
     }
     if (Object.keys(contact).length > 0) detail.contact = contact;
 

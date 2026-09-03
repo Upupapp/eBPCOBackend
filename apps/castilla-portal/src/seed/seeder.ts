@@ -1,6 +1,7 @@
 import { ExtractedEntity, ExtractedPortalData, expressionOf, spreadsOf } from './extracted';
 import { formatMagnitude } from '../municipality/magnitude';
 import { provenanceFor } from './provenance';
+import type { OfficialRole } from '../officials/officials.repository';
 
 /**
  * Importing the portal's committed data without losing a field, a source or a
@@ -84,6 +85,38 @@ function assetPath(data: ExtractedPortalData, value: unknown): string | null {
   return named === null ? null : assetPath(data, named);
 }
 
+/**
+ * Which seat an official holds, from the portal's OWN constant name.
+ *
+ * `source` is the identifier the website declares the record under --
+ * `SB_EXOFFICIO_MEMBERS`, not a sentence about it -- so this is a mapping
+ * between two vocabularies rather than a guess about one. The alternative,
+ * matching on `position`, is prose written for a citizen to read: "Sangguniang
+ * Bayan Member (ABC President)" is one edit away from matching nothing, and it
+ * is the brittleness the website lane removed once already as F-07.
+ *
+ * Refuses an unknown source rather than defaulting. A new kind of seat is a
+ * content decision somebody has to make deliberately, and defaulting it to
+ * `sb-member` would silently seat them with the councillors.
+ */
+const ROLE_BY_SOURCE: Readonly<Record<string, OfficialRole>> = {
+  MAYOR: 'mayor',
+  VICE_MAYOR: 'vice-mayor',
+  SB_MEMBERS: 'sb-member',
+  SB_EXOFFICIO_MEMBERS: 'sb-ex-officio',
+};
+
+function roleOf(source: string): OfficialRole {
+  const role = ROLE_BY_SOURCE[source];
+  if (role === undefined) {
+    throw new Error(
+      `officials.data.ts declares ${source}, which has no seat kind. Add it to `
+      + 'ROLE_BY_SOURCE deliberately -- defaulting it would seat somebody with the councillors.',
+    );
+  }
+  return role;
+}
+
 export class Seeder {
   private writes = 0;
 
@@ -133,14 +166,14 @@ export class Seeder {
       const name = String(o.fields['name']);
       const slug = slugify(name);
       const id = await this.upsertReturningId(
-        `insert into officials (slug, name, position, office, initials, photo_url, ordinal)
-         values ($1,$2,$3,$4,$5,$6,$7)
+        `insert into officials (slug, name, position, office, initials, photo_url, ordinal, role)
+         values ($1,$2,$3,$4,$5,$6,$7,$8)
          on conflict (slug) do update set name = excluded.name, position = excluded.position,
            office = excluded.office, initials = excluded.initials,
-           photo_url = excluded.photo_url, ordinal = excluded.ordinal
+           photo_url = excluded.photo_url, ordinal = excluded.ordinal, role = excluded.role
          returning id`,
         [slug, name, o.fields['position'], o.fields['office'], o.fields['initials'],
-         o.fields['photoUrl'] ?? null, ordinal],
+         o.fields['photoUrl'] ?? null, ordinal, roleOf(o.source)],
         `select id from officials where slug = $1`, [slug],
       );
       officialIdBySlug.set(slug, id);

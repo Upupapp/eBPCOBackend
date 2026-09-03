@@ -115,6 +115,32 @@
         "category": "administrative",
         "shortDescription": "Manages municipal property, procurement support, and general facilities upkeep."
       }
+    ],
+    "categories": [
+      {
+        "id": "executive",
+        "label": "Executive"
+      },
+      {
+        "id": "administrative",
+        "label": "Administrative"
+      },
+      {
+        "id": "finance",
+        "label": "Finance"
+      },
+      {
+        "id": "social-services",
+        "label": "Social Services"
+      },
+      {
+        "id": "development",
+        "label": "Development"
+      },
+      {
+        "id": "public-safety",
+        "label": "Public Safety"
+      }
     ]
   },
   "GET /offices/{slug}": {
@@ -217,6 +243,7 @@
         "position": "Municipal Mayor",
         "office": "Office of the Municipal Mayor",
         "initials": "IM",
+        "role": "mayor",
         "photoUrl": "assets/officials/mayor-isagani-mendoza.jpg"
       },
       {
@@ -224,70 +251,80 @@
         "name": "Jesus \"Boy\" Agarap",
         "position": "Municipal Vice Mayor",
         "office": "Office of the Municipal Vice Mayor",
-        "initials": "JA"
+        "initials": "JA",
+        "role": "vice-mayor"
       },
       {
         "slug": "camille-mendoza",
         "name": "Camille Mendoza",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "CM"
+        "initials": "CM",
+        "role": "sb-member"
       },
       {
         "slug": "vicente-manata",
         "name": "Vicente Manata",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "VM"
+        "initials": "VM",
+        "role": "sb-member"
       },
       {
         "slug": "erick-navas",
         "name": "Erick Navas",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "EN"
+        "initials": "EN",
+        "role": "sb-member"
       },
       {
         "slug": "joel-agripa",
         "name": "Joel Agripa",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "JA"
+        "initials": "JA",
+        "role": "sb-member"
       },
       {
         "slug": "allan-canon",
         "name": "Allan Canon",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "AC"
+        "initials": "AC",
+        "role": "sb-member"
       },
       {
         "slug": "kap-luna-luna",
         "name": "Kap Luna Luna",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "LL"
+        "initials": "LL",
+        "role": "sb-member"
       },
       {
         "slug": "kap-budoy-mirandilla",
         "name": "Kap Budoy Mirandilla",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "BM"
+        "initials": "BM",
+        "role": "sb-member"
       },
       {
         "slug": "ian-llona",
         "name": "Ian Llona",
         "position": "Sangguniang Bayan Member",
         "office": "Sangguniang Bayan",
-        "initials": "IL"
+        "initials": "IL",
+        "role": "sb-member"
       },
       {
         "slug": "hon-ronard-l-lladones",
         "name": "Hon. Ronard L. Lladones",
         "position": "SK Federation President",
         "office": "Sangguniang Bayan",
-        "initials": "RL"
+        "initials": "RL",
+        "role": "sb-ex-officio"
       }
     ]
   },
@@ -510,7 +547,7 @@
         "body": "Before 1827, the settlement that became Castilla was a barrio of Bulabog (in what is now Sorsogon City), formed from the nearby settlements of Inarihan, Capuy, Macalaya, and Cumadcad. Spanish Dominican friars had founded the original town along the western coast of Sorsogon Bay, and in 1827 it was formalized as an independent town under the old Provincia de Albay. Don Eugenio Santos Martinez, a wealthy Spanish landowner native to Castilla, Spain, recommended both relocating the seat of government and renaming the town in honor of his hometown — itself the birthplace of Queen Isabella I of Castile (r. 1451–1504). Castilla received its own parish in 1876, with Father Teodosio Homillano as its first priest; the church’s inauguration fell on the Feast of Saint John the Baptist, June 24, still celebrated locally today. When Sorsogon was separated into its own province in 1894, Castilla was annexed as one of its constituent towns.",
         "state": "confirmed",
         "isPlaceholder": false,
-        "updatedAt": "2026-08-31T03:10:55.252Z",
+        "updatedAt": "2026-09-03T11:49:29.676Z",
         "sourceNote": "portal 55c1cfa: HISTORY_TEXT"
       },
       {
@@ -519,7 +556,7 @@
         "body": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla.",
         "state": "pending",
         "isPlaceholder": true,
-        "updatedAt": "2026-08-31T03:10:55.252Z",
+        "updatedAt": "2026-09-03T11:49:29.678Z",
         "sourceNote": "portal 55c1cfa: VISION_PLACEHOLDER"
       },
       {
@@ -528,7 +565,7 @@
         "body": "To pursue a holistic development of Castilla in an ecologically-sound environment through the convergent efforts in the provision of quality basic services and equitable distribution of resources and opportunities.",
         "state": "confirmed",
         "isPlaceholder": false,
-        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "updatedAt": "2026-09-03T11:49:29.678Z",
         "sourceNote": "portal 55c1cfa: MISSION_TEXT"
       },
       {
@@ -537,7 +574,7 @@
         "body": "The official seal of Castilla — \"Sagisag ng Bayan ng Castilla\" — features a mountain range, a coconut palm, farm produce, and a leaping dolphin over a coastline, framed by a golden rope border, with the municipality’s name and \"Sorsogon\" inscribed along the rim. A full official description of the seal’s symbolism is pending confirmation from LGU Castilla.",
         "state": "pending",
         "isPlaceholder": true,
-        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "updatedAt": "2026-09-03T11:49:29.679Z",
         "sourceNote": "portal 55c1cfa: SEAL_DESCRIPTION"
       },
       {
@@ -546,7 +583,7 @@
         "body": "This information portal is primarily a read-only public resource and does not currently collect personal data through forms or accounts. Once LGU Castilla publishes an official privacy policy, it will replace this placeholder notice.",
         "state": "pending",
         "isPlaceholder": true,
-        "updatedAt": "2026-08-31T03:10:55.253Z",
+        "updatedAt": "2026-09-03T11:49:29.679Z",
         "sourceNote": "portal 55c1cfa: src/app/pages/privacy/privacy.html"
       }
     ]
@@ -557,7 +594,7 @@
     "body": "The municipality’s official Vision statement will be published here once confirmed with LGU Castilla.",
     "state": "pending",
     "isPlaceholder": true,
-    "updatedAt": "2026-08-31T03:10:55.252Z",
+    "updatedAt": "2026-09-03T11:49:29.678Z",
     "sourceNote": "portal 55c1cfa: VISION_PLACEHOLDER"
   },
   "GET /pages/{key}/revisions": {
@@ -566,7 +603,7 @@
   "GET /forms": {
     "forms": [
       {
-        "id": "d8c9d1fd-514f-4ab1-8f28-d841d495e818",
+        "id": "638a0dc3-ae2a-461c-8a93-8669d89810f4",
         "familySlug": "building-permit-unified-application-form",
         "originalFilename": "Building-Permit-Unified-Application-Form.pdf",
         "contentType": "application/pdf",
@@ -576,7 +613,7 @@
         "isCurrent": true
       },
       {
-        "id": "68f8cd09-06b8-4efe-b232-bb7905e8d526",
+        "id": "f0521a1f-4b9f-4b89-926b-8d3e63c521f9",
         "familySlug": "building-permit-and-occupancy-checklist",
         "originalFilename": "Building-Permit-and-Occupancy-Checklist.pdf",
         "contentType": "application/pdf",
@@ -586,7 +623,7 @@
         "isCurrent": true
       },
       {
-        "id": "0beb003d-3655-4642-8f3c-d0a00a9dfd92",
+        "id": "2be53d2f-e49b-483e-a037-9e20ce9fb051",
         "familySlug": "civil-structural-permit-form",
         "originalFilename": "Civil-Structural-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -596,7 +633,7 @@
         "isCurrent": true
       },
       {
-        "id": "b80be000-f61a-4f99-831e-14ad84d0968a",
+        "id": "c9c9851b-5ab0-467a-a066-57c83d5929e9",
         "familySlug": "electrical-permit-form",
         "originalFilename": "Electrical-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -606,7 +643,7 @@
         "isCurrent": true
       },
       {
-        "id": "77ca60aa-9941-40b4-9338-4b152b47e4e3",
+        "id": "59674346-746b-444f-814b-3f713f37c402",
         "familySlug": "electronics-permit-form",
         "originalFilename": "Electronics-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -616,7 +653,7 @@
         "isCurrent": true
       },
       {
-        "id": "cef4f34d-b746-46e6-9838-a6c45ddfd22f",
+        "id": "2cd1055d-815e-445e-9184-c6cf2ae143b8",
         "familySlug": "excavation-permit-form",
         "originalFilename": "Excavation-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -626,7 +663,7 @@
         "isCurrent": true
       },
       {
-        "id": "f92d1349-f76e-41ea-90b9-a07a0849a2a4",
+        "id": "fcd1016c-ab32-4791-8e56-a8b1120a36af",
         "familySlug": "fsec-for-building-permit-bfp",
         "originalFilename": "FSEC-for-Building-Permit-BFP.pdf",
         "contentType": "application/pdf",
@@ -637,7 +674,7 @@
         "revisionLabel": "BFP-QSF-FSED-001 REV.02 (08.24.20)"
       },
       {
-        "id": "70dc60e7-a815-43dc-8255-a53a86279224",
+        "id": "2fbf3c9a-7247-4727-adbf-f01d94e1d28d",
         "familySlug": "fsic-for-occupancy-permit-bfp",
         "originalFilename": "FSIC-for-Occupancy-Permit-BFP.pdf",
         "contentType": "application/pdf",
@@ -648,7 +685,7 @@
         "revisionLabel": "BFP-QSF-FSED-002 REV.02 (08.24.20)"
       },
       {
-        "id": "ef94781f-d2bb-499f-89e6-b4f2650905f7",
+        "id": "0adb6144-c94e-4fcf-934a-6e6233522918",
         "familySlug": "fencing-permit-form",
         "originalFilename": "Fencing-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -658,7 +695,7 @@
         "isCurrent": true
       },
       {
-        "id": "bd6c71ae-cbed-41eb-9792-3a4c2e7894fb",
+        "id": "1beff86d-0b70-4fa4-b2e8-a8784818d2b1",
         "familySlug": "mechanical-permit-form",
         "originalFilename": "Mechanical-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -668,7 +705,7 @@
         "isCurrent": true
       },
       {
-        "id": "95a56b80-66cd-475d-9736-4719bbd999b3",
+        "id": "c3852aa4-ddb7-4cc8-a6a2-c911d10f52dd",
         "familySlug": "plumbing-permit-form",
         "originalFilename": "Plumbing-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -678,7 +715,7 @@
         "isCurrent": true
       },
       {
-        "id": "b5a365dd-90b9-4036-8973-53dca2b3ecc1",
+        "id": "11bda290-6a67-4d7c-b7a6-0cc086b39bf4",
         "familySlug": "sanitary-permit-form",
         "originalFilename": "Sanitary-Permit-Form.pdf",
         "contentType": "application/pdf",
@@ -688,7 +725,7 @@
         "isCurrent": true
       },
       {
-        "id": "2261414d-4d3d-42d0-aaa0-3b5c3d71d2a0",
+        "id": "35155a8c-bd56-468c-b0a8-3dbe257f4d69",
         "familySlug": "zoning-locational-clearance-form",
         "originalFilename": "Zoning-Locational-Clearance-Form.pdf",
         "contentType": "application/pdf",
@@ -703,7 +740,7 @@
   "GET /forms/{familySlug}/revisions": {
     "revisions": [
       {
-        "id": "b5a365dd-90b9-4036-8973-53dca2b3ecc1",
+        "id": "11bda290-6a67-4d7c-b7a6-0cc086b39bf4",
         "familySlug": "sanitary-permit-form",
         "originalFilename": "Sanitary-Permit-Form.pdf",
         "contentType": "application/pdf",

@@ -23,7 +23,14 @@ export class OfficesController {
           `Unknown category '${category}'. Known categories: ${known.join(', ')}.`);
       }
     }
-    return { offices: await this.offices.list(category) };
+    // The full category list travels with the offices, even when filtered: a
+    // client rendering filter chips needs the options it has NOT selected, and
+    // a second request for six rows that never change is a round trip for
+    // nothing.
+    return {
+      offices: await this.offices.list(category),
+      categories: await this.offices.labelledCategories(),
+    };
   }
 
   @Cacheable(POLICIES.reference, (p: Record<string, string>) => `office:${p['slug'] ?? ''}`)

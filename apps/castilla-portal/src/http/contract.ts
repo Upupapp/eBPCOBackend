@@ -21,6 +21,18 @@ export const officeSummarySchema = z.object({
 export const officeHeadSchema = z.object({
   name: z.string().min(1),
   position: z.string().min(1),
+  /**
+   * AUTHORED, never derived — which is why it is served rather than left to a
+   * client. Deriving initials means handling honorifics (Atty., Dr.),
+   * generational suffixes (Jr.), post-nominals after a comma (, RSW) and
+   * quoted nicknames: Isagani "Bong" B. Mendoza is IM, not IBM.
+   *
+   * Optional only because an office head written inline on the office (rather
+   * than being an elected official) has none authored YET — the source data
+   * has to gain them. Absent means "nobody has written these down", never
+   * "this person has no initials".
+   */
+  initials: z.string().min(1).optional(),
 }).strict();
 
 const officeLinkSchema = z.object({
@@ -41,6 +53,19 @@ export const officeDetailSchema = officeSummarySchema.extend({
 
 export const officeListSchema = z.object({
   offices: z.array(officeSummarySchema),
+  /**
+   * Every category, with its label, in the order the LGU wants them read.
+   *
+   * Same shape as `PermitCatalogue.groups` deliberately: one shape for "a list
+   * of labelled groups" rather than two spellings of the idea.
+   *
+   * ALWAYS the full list, even when `?category=` filtered the offices — a
+   * filter bar has to show the options that are not currently selected.
+   */
+  categories: z.array(z.object({
+    id: z.string().min(1),
+    label: z.string().min(1),
+  }).strict()),
 }).strict();
 
 export type OfficeListResponse = z.infer<typeof officeListSchema>;
@@ -57,6 +82,16 @@ export const profileFieldSchema = z.object({
 }).strict();
 
 export const municipalityProfileSchema = z.object({
+  /**
+   * CONFIRMED FIELDS ONLY. A guarantee, not an accident of the current query:
+   * `municipality.repository.ts` filters on `fs.state = 'confirmed'`, so an
+   * unconfirmed field has never been able to reach this array.
+   *
+   * Said here because the website lane was filtering again on its side to
+   * honour the same rule, which is a rule enforced twice and therefore
+   * enforceable in neither place once the two disagree. Clients may render
+   * everything they receive.
+   */
   fields: z.array(profileFieldSchema),
 }).strict();
 
@@ -66,6 +101,16 @@ export const officialSchema = z.object({
   position: z.string().min(1),
   office: z.string().min(1),
   initials: z.string().min(1),
+  /**
+   * Which seat this official holds, so a client can group them without
+   * matching on `position`. The position is prose written for a citizen to
+   * read; the role is the fact underneath it.
+   *
+   * `sb-ex-officio` covers both ex-officio seats (the ABC president and the SK
+   * federation president). If they ever need telling apart, that is an
+   * additional value here, not a different shape.
+   */
+  role: z.enum(['mayor', 'vice-mayor', 'sb-member', 'sb-ex-officio']),
   photoUrl: z.string().min(1).optional(),
 }).strict();
 

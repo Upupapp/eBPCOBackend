@@ -1117,10 +1117,32 @@
               ],
               "additionalProperties": false
             }
+          },
+          "categories": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "label": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "required": [
+                "id",
+                "label"
+              ],
+              "additionalProperties": false
+            }
           }
         },
         "required": [
-          "offices"
+          "offices",
+          "categories"
         ],
         "additionalProperties": false
       },
@@ -1162,6 +1184,10 @@
                 "minLength": 1
               },
               "position": {
+                "type": "string",
+                "minLength": 1
+              },
+              "initials": {
                 "type": "string",
                 "minLength": 1
               }
@@ -1242,6 +1268,15 @@
             "type": "string",
             "minLength": 1
           },
+          "role": {
+            "type": "string",
+            "enum": [
+              "mayor",
+              "vice-mayor",
+              "sb-member",
+              "sb-ex-officio"
+            ]
+          },
           "photoUrl": {
             "type": "string",
             "minLength": 1
@@ -1252,7 +1287,8 @@
           "name",
           "position",
           "office",
-          "initials"
+          "initials",
+          "role"
         ],
         "additionalProperties": false
       },
@@ -2297,6 +2333,15 @@
                   "type": "string",
                   "minLength": 1
                 },
+                "role": {
+                  "type": "string",
+                  "enum": [
+                    "mayor",
+                    "vice-mayor",
+                    "sb-member",
+                    "sb-ex-officio"
+                  ]
+                },
                 "photoUrl": {
                   "type": "string",
                   "minLength": 1
@@ -2307,7 +2352,8 @@
                 "name",
                 "position",
                 "office",
-                "initials"
+                "initials",
+                "role"
               ],
               "additionalProperties": false
             }

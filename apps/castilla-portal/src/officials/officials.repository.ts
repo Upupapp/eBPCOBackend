@@ -2,12 +2,24 @@ import { Inject, Injectable } from '@nestjs/common';
 
 import { SQL_CLIENT, SqlClient } from '../persistence/sql-client';
 
+/** The four seats the municipal council actually has. */
+export type OfficialRole = 'mayor' | 'vice-mayor' | 'sb-member' | 'sb-ex-officio';
+
 export interface Official {
   slug: string;
   name: string;
   position: string;
   office: string;
   initials: string;
+  /**
+   * Which seat this official holds.
+   *
+   * The website renders four groups and could only reconstruct them by matching
+   * on `position`, which is prose written for a citizen: "Sangguniang Bayan
+   * Member (ABC President)" is one edit from matching nothing. The role is the
+   * fact; the position is how it is worded.
+   */
+  role: OfficialRole;
   photoUrl?: string;
 }
 
@@ -28,9 +40,9 @@ export class OfficialsRepository {
   async list(): Promise<Official[]> {
     const { rows } = await this.db.query<{
       slug: string; name: string; position: string;
-      office: string; initials: string; photo_url: string | null;
+      office: string; initials: string; photo_url: string | null; role: OfficialRole;
     }>(
-      `select x.slug, x.name, x.position, x.office, x.initials, x.photo_url
+      `select x.slug, x.name, x.position, x.office, x.initials, x.photo_url, x.role
          from officials x
          join field_state fs
               on fs.entity_type = 'official' and fs.entity_id = x.id::text
@@ -42,7 +54,7 @@ export class OfficialsRepository {
     return rows.map((row) => {
       const official: Official = {
         slug: row.slug, name: row.name, position: row.position,
-        office: row.office, initials: row.initials,
+        office: row.office, initials: row.initials, role: row.role,
       };
       if (row.photo_url !== null) official.photoUrl = row.photo_url;
       return official;
