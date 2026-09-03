@@ -48,6 +48,21 @@ async function main(): Promise<number> {
     statementTimeoutMs: 0,
   });
 
+  // WHICH database, said out loud before anything is applied.
+  //
+  // Migrating the wrong one is not a loud failure: if something else answers
+  // the port with a similar schema, the run succeeds, touches records nobody
+  // meant to touch, and reports no error. That is not hypothetical -- an UPDATE
+  // against the wrong port matched 0 rows with no clue, and cost a day.
+  //
+  // Parsed rather than printed raw, because a DATABASE_URL carries a password
+  // and this line goes into terminals and CI logs.
+  const target = new URL(config.DATABASE_URL);
+  process.stdout.write(
+    `migrating ${target.hostname}:${target.port || '5432'}${target.pathname} `
+    + `(${migrations.length} migration(s) on disk)\n`,
+  );
+
   try {
     const result = await migrate(client, migrations, (migration) => {
       process.stdout.write(`applied ${migration.version} ${migration.name}\n`);

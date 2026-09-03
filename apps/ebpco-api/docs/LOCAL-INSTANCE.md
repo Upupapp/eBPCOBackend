@@ -75,9 +75,12 @@ repository, which is why this page does not print one.
 ```sh
 # 1. A database. Port 5433 — 5432 may already be taken on a shared machine,
 #    and running 31 migrations into someone else's database is destructive.
-PGDATA_DIR=/tmp/ebpco-pg node serve.mjs      # see the note on PGDATA_DIR below
+PGDATA_DIR=/tmp/ebpco-pg node tool/pg-bridge.mjs   # tracked; see PGDATA_DIR below
 
-# 2. Schema. DATABASE_URL comes from your .env, pointing at localhost:5433.
+# 2. Schema. DATABASE_URL comes from your .env, pointing at localhost:5433 —
+#    which is what .env.example now says. It said 5432 until 3 September, so a
+#    copied .env could not reach the bridge; check yours if it predates that.
+#    `migrate` prints the host, port and database it is about to touch.
 npm run migrate
 
 # 3. The service
@@ -112,15 +115,13 @@ curl -X POST localhost:3000/auth/token -H 'content-type: application/json' \
   -d '{"grantType":"password","email":"a@example.ph","password":"a-long-enough-passphrase"}'
 ```
 
-**Then you will hit D-9 below**: a self-registered account cannot file, because
-nothing creates its applicant profile. Until that is fixed, seed one:
+That account can file immediately. **D-9 is fixed** (`dc10ce8`): registration
+writes the applicant profile in the same transaction as the account. This page
+used to print a hand-written `insert into applicants` here as a workaround, and
+kept printing it for days after the defect was closed — a runbook goes stale
+silently, because nothing fails when prose is wrong.
 
-```sql
-insert into applicants (id, account_id, first_name, last_name)
-select gen_random_uuid(), id, 'A', 'B' from accounts where email_normalised = 'a@example.ph';
-```
-
-After that a filing works:
+A filing works straight away:
 
 ```sh
 curl -X POST localhost:3000/applications \
@@ -172,8 +173,17 @@ There is no path through the API to it, deliberately: `POST /staff/users` and
 applicant or a row somebody else must act on. A service that could bootstrap its
 own administrator over HTTP would be one anyone could.
 
+**Stop the API first.** The bridge serves ONE CONNECTION AT A TIME, in total —
+not one per client — so while the service is running it holds the only one and
+the seed dies with `read ECONNRESET` at `postgres-client.ts`. This is the first
+thing every new instance has to run, so it is the sequence most likely to be
+hit before anything else works:
+
 ```sh
+# API down  ->  seed  ->  API up
+#   (stop `npm run start:dev`)
 EBPCO_SUPERADMIN_PASSWORD='…' npm run seed:super-admin
+npm run start:dev
 ```
 
 It refuses to run without one and refuses anything under 12 characters. It never
