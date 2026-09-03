@@ -438,7 +438,10 @@ async function main(): Promise<void> {
     const response = await app.inject({
       method, url,
       headers: {
-        authorization: `Bearer ${token}`,
+        // An empty token means an UNAUTHENTICATED call, which is what the three
+        // public auth routes are. Sending `Bearer ` there would record a sample
+        // carrying a header no real client sends.
+        ...(token === '' ? {} : { authorization: `Bearer ${token}` }),
         ...(idempotencyKey === undefined ? {} : { 'idempotency-key': idempotencyKey }),
       },
       ...(payload === undefined ? {} : { payload }),
@@ -450,9 +453,47 @@ async function main(): Promise<void> {
       contentType: response.headers['content-type'],
       // `json()` is typed `any` by light-my-request; narrowed here rather than
       // left to spread through the sample file's type.
-      body: response.json<unknown>(),
+      //
+      // An EMPTY body is recorded as null rather than crashing the emitter.
+      // `POST /auth/register` answers 202 with nothing at all, which is a fact
+      // a client needs -- it must not try to parse a body -- and losing the
+      // whole run to it would be the evidence tool refusing to record the
+      // truth.
+      body: response.body === '' ? null : response.json<unknown>(),
     };
   }
+
+  // ── How a citizen gets a token ──────────────────────────────────────────
+  //
+  // Recorded end to end, through the API, because the citizen web portal is
+  // writing an HTTP client from scratch and asked what issues a bearer token.
+  // The seeded applicant cannot be used: its password hash is a fixture and
+  // unusable by construction, so this registers a real one and signs in as
+  // them -- which is also the only way the sample proves the path works.
+  //
+  // The tokens themselves are REDACTED by `stabilise` before this file is
+  // written. This repository is public, and evidence of a working sign-in must
+  // not be a published credential.
+  await record('limits', 'GET', '/limits', '');
+
+  const citizenEmail = 'juan.delacruz@example.ph';
+  const citizenPassword = 'a-long-enough-passphrase-for-a-citizen';
+  await record('auth.register', 'POST', '/auth/register', '', {
+    firstName: 'Juan', lastName: 'Dela Cruz', email: citizenEmail,
+    mobileNumber: '09171234567', password: citizenPassword,
+  });
+  await record('auth.token', 'POST', '/auth/token', '', {
+    grantType: 'password', email: citizenEmail, password: citizenPassword,
+  });
+  // Read BEFORE the file is written, so this is the real token rather than the
+  // redacted placeholder the sample will carry.
+  const issued = (samples['auth.token'] as { body?: { refreshToken?: string } } | undefined)?.body;
+  if (issued?.refreshToken === undefined) {
+    throw new Error('sign-in did not return a refresh token; the auth samples would be a lie');
+  }
+  await record('auth.token.refresh', 'POST', '/auth/token/refresh', '', {
+    refreshToken: issued.refreshToken,
+  });
 
   await record('me.staff', 'GET', '/me', officialToken);
   // The applicant shape too: the two are different responses from one path, and

@@ -11,6 +11,7 @@ import { LocalSignatureScanner, MalwareScanner } from './domain/malware-scanner'
 import { ObjectStore } from './domain/object-store';
 import { FilesystemObjectStore } from './infrastructure/filesystem-object-store';
 import { DocumentsController } from './transport/documents.controller';
+import { LimitsController } from './transport/limits.controller';
 import { AuditService } from '../compliance/application/audit.service';
 import { documentSecurityEvent } from '../compliance/domain/security-events';
 import { S3ObjectStore, s3ClientFor } from './infrastructure/s3-object-store';
@@ -67,7 +68,7 @@ export const MALWARE_SCANNER = Symbol('EBPCO_MALWARE_SCANNER');
         }),
     },
   ],
-  controllers: [DocumentsController],
+  controllers: [DocumentsController, LimitsController],
   exports: [DocumentService, OBJECT_STORE, MALWARE_SCANNER],
 })
 export class DocumentsModule implements OnApplicationBootstrap {

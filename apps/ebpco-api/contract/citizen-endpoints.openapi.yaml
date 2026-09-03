@@ -26,6 +26,113 @@ info:
     neighbour has applied.
 
 paths:
+  /limits:
+    get:
+      operationId: getLimits
+      summary: What a client must not exceed — read this, do not hard-code it
+      description: |
+        PUBLIC: an upload screen validates a file before the applicant has
+        signed in to send it.
+
+        `maxFileBytes` is DERIVED from the server's body limit and moves with
+        it. Read it rather than mirroring it: a constant on the client refuses
+        files the server would accept the moment the limit is raised for
+        production. A file of exactly `maxFileBytes` is accepted — that is
+        asserted against the running server, not calculated on paper.
+      responses:
+        '200':
+          description: The limits in force on this deployment.
+          content: { application/json: { schema: { $ref: '#/components/schemas/Limits' } } }
+
+  /auth/register:
+    post:
+      operationId: register
+      summary: Create a citizen account
+      description: |
+        **202 with NO BODY.** Do not parse one.
+
+        Identical 202 whether or not the address was already in use — telling
+        the two apart would let anyone test which addresses have accounts. A
+        weak password IS reported (400), because that is the caller's own input
+        rather than a fact about somebody else.
+      responses:
+        '202': { description: Accepted. Empty body. }
+        '400':
+          description: The password was rejected, or a field failed validation.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [firstName, lastName, email, mobileNumber, password]
+              properties:
+                firstName: { type: string, minLength: 1, maxLength: 100 }
+                lastName: { type: string, minLength: 1, maxLength: 100 }
+                email: { type: string, format: email, maxLength: 320 }
+                mobileNumber:
+                  type: string
+                  pattern: '^(09\\d{9}|\\+639\\d{9})$'
+                  description: 09XXXXXXXXX or +639XXXXXXXXX.
+                password: { type: string, minLength: 1, maxLength: 512 }
+
+  /auth/token:
+    post:
+      operationId: signIn
+      summary: Exchange an email and password for a bearer token
+      description: |
+        THIS is what issues a citizen bearer token. `grantType` is the literal
+        string `password`. `totp` is not sent by citizens — MFA is required of
+        staff, not applicants.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [grantType, email, password]
+              properties:
+                grantType: { type: string, enum: [password] }
+                email: { type: string, format: email, maxLength: 320 }
+                password: { type: string, minLength: 1, maxLength: 512 }
+                totp: { type: string, pattern: '^\\d{6}$' }
+      responses:
+        '200':
+          description: A token pair.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } }
+        '401':
+          description: |
+            One answer for a wrong password, an unknown address and a disabled
+            account. Do not try to tell them apart in the UI; the server will not.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /auth/token/refresh:
+    post:
+      operationId: refreshToken
+      summary: Exchange a refresh token for a new pair
+      description: |
+        Returns a NEW refresh token as well as a new access token — store both
+        and discard the old pair. The access token lives `expiresIn` seconds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [refreshToken]
+              properties: { refreshToken: { type: string, minLength: 1 } }
+      responses:
+        '200':
+          description: A fresh token pair.
+          content: { application/json: { schema: { $ref: '#/components/schemas/TokenPair' } } }
+        '401':
+          description: Expired, revoked, or already used.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /applications/{applicationId}/permit:
     get:
       operationId: getPermit
@@ -157,6 +264,54 @@ components:
     bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
 
   schemas:
+    Limits:
+      type: object
+      additionalProperties: false
+      required: [upload]
+      properties:
+        upload:
+          type: object
+          additionalProperties: false
+          required: [maxRequestBytes, maxFileBytes, encoding]
+          properties:
+            maxRequestBytes:
+              type: integer
+              description: |
+                The largest request body the server reads. Over it, the HTTP
+                adapter answers a bare 413 BEFORE any handler — not a problem
+                document.
+            maxFileBytes:
+              type: integer
+              description: |
+                The largest FILE that fits, allowing for base64 inflation and
+                the JSON envelope. This is the number to validate against.
+            encoding:
+              type: string
+              enum: [base64-in-json]
+              description: Not multipart, and never a pre-signed upload to object storage.
+
+    TokenPair:
+      type: object
+      additionalProperties: false
+      required: [accessToken, refreshToken, tokenType, expiresIn, scopes]
+      properties:
+        accessToken:
+          type: string
+          description: |
+            Send as `Authorization: Bearer <accessToken>`. REDACTED in the
+            recorded samples — this repository is public, and evidence of a
+            working sign-in must not be a published credential.
+        refreshToken: { type: string, description: Redacted in the samples, as above. }
+        tokenType: { type: string, enum: [Bearer] }
+        expiresIn: { type: integer, description: Seconds until the access token expires. }
+        scopes:
+          type: array
+          items: { type: string }
+          description: |
+            What this token actually carries. Read it rather than inferring from
+            the account kind — a menu built on a guess offers actions the server
+            refuses.
+
     Permit:
       type: object
       additionalProperties: false

@@ -58,6 +58,8 @@ describe('the citizen contract fragment matches the recorded responses', () => {
     ['Permit', 'applicant.applications.permit'],
     ['ResubmitResult', 'applicant.applications.resubmitDocument'],
     ['ApplicationRequirements', 'applicant.applications.requirements'],
+    ['TokenPair', 'auth.token'],
+    ['Limits', 'limits'],
   ])('%s declares exactly the keys %s returns', (schema, sample) => {
     expect([...requiredOf(schema)].sort()).toEqual(Object.keys(bodyOf(sample)).sort());
   });
@@ -108,6 +110,41 @@ describe('the citizen contract fragment matches the recorded responses', () => {
     const entries = body['requirements'] as Record<string, unknown>[];
     expect(entries.some((entry) => entry['status'] === 'provided')).toBe(true);
     expect(entries.some((entry) => entry['status'] === 'not-provided')).toBe(true);
+  });
+
+  it('publishes no credential, having recorded a real sign-in', () => {
+    // The auth samples are recorded end to end through the API, so without
+    // redaction this public repository would carry a signed token. Checked on
+    // the FILE rather than on one sample: a credential added to any other
+    // recording later is the same defect.
+    const raw = readFileSync(
+      join(__dirname, '../../contract/response-samples.json'), 'utf8');
+
+    expect(raw).not.toMatch(/eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}/);
+    const pair = bodyOf('auth.token');
+    expect(pair['accessToken']).toBe('<redacted>');
+    expect(pair['refreshToken']).toBe('<redacted>');
+    // And the shape is still real: the fields a client reads are all there.
+    expect(pair['tokenType']).toBe('Bearer');
+    expect(typeof pair['expiresIn']).toBe('number');
+  });
+
+  it('records that registration answers with no body at all', () => {
+    // A client must not try to parse one. Recorded as null rather than the
+    // emitter crashing on an empty body, which is how this was found.
+    const registration = SAMPLES.samples['auth.register']!;
+
+    expect(registration.status).toBe(202);
+    expect(registration.body).toBeNull();
+  });
+
+  it('serves a file ceiling below the request ceiling, as base64 requires', () => {
+    // The citizen lane hard-coded 750,000; this is the number to read instead,
+    // and it moves with the server's configuration.
+    const limits = bodyOf('limits')['upload'] as Record<string, number | string>;
+
+    expect(limits['maxFileBytes']).toBeLessThan(limits['maxRequestBytes'] as number);
+    expect(limits['encoding']).toBe('base64-in-json');
   });
 
   it('keeps byteSize a string, because a bigint does not survive a JSON number', () => {

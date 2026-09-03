@@ -22,6 +22,33 @@ export const STABLE_UUID = '00000000-0000-4000-8000-000000000000';
 export const STABLE_INSTANT = '2026-01-01T00:00:00.000Z';
 export const STABLE_CURSOR = 'MjAyNi0wMS0wMVQwMDowMDowMC4wMDBafDAwMDAwMDAw';
 
+/**
+ * What a credential is replaced with.
+ *
+ * Redaction, not stabilisation, and the difference matters. Everything else in
+ * this file is replaced only if it is ALREADY VALID, so a malformed value still
+ * reaches the validator and still fails. A credential is replaced whatever it
+ * looks like, because the reason is secrecy rather than noise: a malformed
+ * token left in place to "keep the gate honest" is a token published in a
+ * public repository, and this one is public.
+ *
+ * It is not a plausible token either. A placeholder shaped like a real JWT
+ * would be copied into a client as a fixture and then wondered about.
+ */
+export const REDACTED = '<redacted>';
+
+/**
+ * Keys whose VALUE is a credential, whatever shape it arrives in.
+ *
+ * By name rather than by pattern. A bearer token is an opaque string, so there
+ * is nothing about the value itself that reliably says "this is a secret" --
+ * and a pattern that tried would either miss an unusual one or redact an
+ * innocent field that happened to match.
+ */
+const CREDENTIAL_KEYS: ReadonlySet<string> = new Set([
+  'accessToken', 'refreshToken', 'token', 'password', 'otpauthUri', 'secret',
+]);
+
 const UUID_BODY = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const UUID = new RegExp(`^${UUID_BODY}$`, 'i');
 
@@ -43,6 +70,12 @@ export function stabilise(value: unknown, key = ''): unknown {
   }
 
   if (typeof value !== 'string') return value;
+
+  // Before every other rule, and before the "only if already valid" constraint:
+  // a credential is redacted whatever it looks like. A refresh token that
+  // happens to be a UUID would otherwise be stabilised into a plausible-looking
+  // one rather than removed.
+  if (CREDENTIAL_KEYS.has(key) && value.length > 0) return REDACTED;
 
   if (UUID.test(value)) return STABLE_UUID;
   if (INSTANT.test(value)) return STABLE_INSTANT;

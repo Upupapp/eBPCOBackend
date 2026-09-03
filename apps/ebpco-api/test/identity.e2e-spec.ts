@@ -107,6 +107,22 @@ const PUBLIC_ROUTES = new Set([
   // address AND per IP, and it answers 202 identically whether or not the
   // address is known — matching /auth/register's anti-enumeration.
   'POST /auth/access-request',
+
+  // The upload limits a client must not exceed.
+  //
+  // Public because a client needs them BEFORE it has a token: an upload screen
+  // validates a file before the applicant has signed in to send it. Requiring
+  // authentication would mean the one screen that most needs the number is the
+  // one that cannot read it.
+  //
+  // What makes it safe is that it discloses nothing a caller cannot already
+  // determine: a body limit is discoverable by sending one byte too many and
+  // reading the 413. Publishing it saves every client from finding out that
+  // way, and saves them from hard-coding a number that goes stale the moment
+  // the limit is raised -- which is the defect it exists to prevent.
+  //
+  // It reads configuration and touches no database and no account.
+  'GET /limits',
 ]);
 
 describe('deny by default', () => {

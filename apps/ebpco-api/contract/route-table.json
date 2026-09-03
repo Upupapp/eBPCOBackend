@@ -15,6 +15,7 @@
     "GET /documents/:documentId/content",
     "GET /documents/content",
     "GET /health",
+    "GET /limits",
     "GET /me",
     "GET /me/contacts",
     "GET /me/export/:requestId",

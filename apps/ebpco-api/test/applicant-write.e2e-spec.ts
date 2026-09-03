@@ -977,3 +977,45 @@ describe('which checklist entry a document answers (C-6)', () => {
     expect(response.statusCode).toBe(404);
   });
 });
+
+describe('the limits a client must not exceed', () => {
+  it('serves them without a token, because an upload screen validates before sign-in', async () => {
+    const response = await app.inject({ method: 'GET', url: '/limits' });
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('derives the file ceiling from the body limit rather than stating a constant', async () => {
+    // The citizen web lane had hard-coded 750,000 -- correct for a 1MB body
+    // limit and wrong the moment it is raised, because a constant on the client
+    // refuses files the server would accept. This moves with the config.
+    const body = (await app.inject({ method: 'GET', url: '/limits' }))
+      .json<{ upload: { maxRequestBytes: number; maxFileBytes: number; encoding: string } }>();
+
+    expect(body.upload.maxRequestBytes).toBe(1_048_576);
+    // A third smaller than the body limit, because base64 inflates by a third.
+    expect(body.upload.maxFileBytes).toBeLessThan(body.upload.maxRequestBytes);
+    expect(body.upload.maxFileBytes).toBeGreaterThan(700_000);
+    expect(body.upload.encoding).toBe('base64-in-json');
+  });
+
+  it('reports a ceiling the server actually accepts', async () => {
+    // The number is only worth serving if a file of exactly that size gets
+    // through. A ceiling a client obeys and the server still refuses is worse
+    // than no ceiling at all -- the applicant is told the file is fine and then
+    // sees a bare 413.
+    const ceiling = (await app.inject({ method: 'GET', url: '/limits' }))
+      .json<{ upload: { maxFileBytes: number } }>().upload.maxFileBytes;
+    const atTheLimit = Buffer.concat([
+      Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n'),
+      Buffer.alloc(ceiling - 70, 0x41),
+      Buffer.from('\ntrailer<</Root 1 0 R>>\n%%EOF\n'),
+    ]);
+
+    const response = await post('/documents', maria, {
+      fileName: 'plan.pdf', label: 'Plan', contentBase64: atTheLimit.toString('base64'),
+    });
+
+    expect(response.statusCode).toBe(201);
+  });
+});
