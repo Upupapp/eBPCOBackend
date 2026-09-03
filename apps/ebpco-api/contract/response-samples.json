@@ -418,22 +418,22 @@
         "documents": [
           {
             "id": "00000000-0000-4000-8000-000000000000",
-            "label": "Valid identity document",
-            "fileName": "psa-birth-certificate.pdf",
+            "label": "Lot plan",
+            "fileName": "lot-plan.pdf",
             "contentType": "application/pdf",
-            "byteSize": 182344,
-            "status": "Approved",
+            "byteSize": 941233,
+            "status": "Pending",
             "scanCleared": true,
             "expiresOn": null,
             "uploadedAt": "2026-01-01T00:00:00.000Z"
           },
           {
             "id": "00000000-0000-4000-8000-000000000000",
-            "label": "Lot plan",
-            "fileName": "lot-plan.pdf",
+            "label": "Valid identity document",
+            "fileName": "psa-birth-certificate.pdf",
             "contentType": "application/pdf",
-            "byteSize": 941233,
-            "status": "Pending",
+            "byteSize": 182344,
+            "status": "Approved",
             "scanCleared": true,
             "expiresOn": null,
             "uploadedAt": "2026-01-01T00:00:00.000Z"
@@ -1258,25 +1258,6 @@
       "body": [
         {
           "id": "00000000-0000-4000-8000-000000000000",
-          "label": "Valid identity document",
-          "fileName": "psa-birth-certificate.pdf",
-          "contentType": "application/pdf",
-          "byteSize": "182344",
-          "sha256": "3b1f2c9a4d8e7f60112233445566778899aabbccddeeff00112233445566778f",
-          "uploadedAt": "2026-01-01T00:00:00.000Z",
-          "expiresOn": null,
-          "requirementCode": null,
-          "reviewStatus": null,
-          "reviewedAt": null,
-          "reviewReason": null,
-          "reviewRemark": null,
-          "supersedesDocumentId": null,
-          "supersededByDocumentId": null,
-          "scanCleared": true,
-          "quarantined": false
-        },
-        {
-          "id": "00000000-0000-4000-8000-000000000000",
           "label": "Lot plan",
           "fileName": "lot-plan.pdf",
           "contentType": "application/pdf",
@@ -1293,6 +1274,25 @@
             "description": "The scan or photograph cannot be read."
           },
           "reviewRemark": "Page 3 is cut off at the right margin -- the setback dimension cannot be read.",
+          "supersedesDocumentId": null,
+          "supersededByDocumentId": null,
+          "scanCleared": true,
+          "quarantined": false
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Valid identity document",
+          "fileName": "psa-birth-certificate.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "182344",
+          "sha256": "3b1f2c9a4d8e7f60112233445566778899aabbccddeeff00112233445566778f",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "expiresOn": null,
+          "requirementCode": null,
+          "reviewStatus": null,
+          "reviewedAt": null,
+          "reviewReason": null,
+          "reviewRemark": null,
           "supersedesDocumentId": null,
           "supersededByDocumentId": null,
           "scanCleared": true,
@@ -1373,6 +1373,7 @@
           "byteSize": "221844",
           "uploadedAt": "2026-01-01T00:00:00.000Z",
           "requirementCode": "site-photographs",
+          "expiresOn": null,
           "scanCleared": true,
           "quarantined": false
         }

@@ -133,6 +133,127 @@ paths:
           description: Expired, revoked, or already used.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
+  /auth/password/forgot:
+    post:
+      operationId: beginPasswordReset
+      summary: Ask for a password reset
+      description: |
+        **202 with NO BODY, identically, whether or not the address has an
+        account.** That is the whole design: answering differently would turn
+        this into a way to enumerate who holds an eBPCO account.
+
+        The ticket is NOT returned. It is delivered out of band; returning it
+        would make this endpoint a password reset for anyone who knows an
+        address.
+
+        NOTE the deployment reality: the LGU has no message provider configured
+        yet, so nothing is actually delivered today. The endpoint is correct and
+        the delivery is not — do not build a screen promising a mail the citizen
+        will not receive.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties: { email: { type: string, format: email, maxLength: 320 } }
+      responses:
+        '202': { description: Accepted, identically in every case. Empty body. }
+
+  /auth/password/reset:
+    post:
+      operationId: completePasswordReset
+      summary: Redeem a reset ticket
+      description: |
+        **204 No Content on success.** Single-use and expiring; a spent or stale
+        ticket is a 400 saying to request a new one, which is deliberately the
+        same answer as a ticket that never existed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, password]
+              properties:
+                token: { type: string, format: uuid }
+                password: { type: string, minLength: 1, maxLength: 512 }
+      responses:
+        '204': { description: The password was changed. }
+        '400':
+          description: |
+            A weak password (`/password` pointer, with the reasons), or a ticket
+            that is spent, expired or unknown — the three are one answer.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
+  /me:
+    get:
+      operationId: getProfile
+      summary: The signed-in citizen's own record
+      security: [{ bearerAuth: [profile:read] }]
+      responses:
+        '200':
+          description: The account and, for a citizen, their profile.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CitizenProfile' } } }
+
+    patch:
+      operationId: rectifyProfile
+      summary: Correct what the LGU holds about you (RA 10173 §16(d))
+      description: |
+        A statutory right, not a settings screen: the change is audited, and a
+        field that cannot be applied is REFUSED rather than ignored.
+
+        **`email` is deliberately absent and sending it is a 400.** It is the
+        sign-in identity, so changing it is a transfer of who can reach the
+        account rather than a correction; doing that without first proving
+        control of the new address would make this an account-takeover route.
+        The schema is `additionalProperties: false` so a client is told, instead
+        of watching the field be dropped and believing the address changed.
+
+        **At least one field is required.** An empty body is a 400: answering
+        200 would report a correction that never happened.
+
+        **Changing `mobileNumber` un-verifies it.** The verification belonged to
+        the OLD number -- a code was sent there and answered from there -- so
+        `mobileVerifiedAt` is cleared and any pending challenge for the channel
+        is deleted, or a code sent to the old phone could be confirmed
+        afterwards and would verify the new number. The response says
+        `mobileVerificationCleared: true` so a client re-prompts rather than
+        leaving a citizen with an unverified contact they believe is verified.
+
+        This applies the change immediately rather than holding it pending
+        verification, and that is forced by the deployment rather than
+        preferred: `POST /me/contacts/mobile/request` currently answers
+        `delivery: "not-sent"` because the LGU has no message provider
+        configured, so under a pending model a number change could never
+        complete and every citizen who moved would be stranded on the old
+        number.
+
+        **Staff cannot use this.** An officer's name is set by the office on
+        their access request and stands against their acts in the audit trail;
+        correcting it is an administrator's job. A staff token gets 422.
+      security: [{ bearerAuth: [profile:write] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProfileCorrection' }
+      responses:
+        '200':
+          description: The corrected record, read back.
+          content: { application/json: { schema: { $ref: '#/components/schemas/CorrectedProfile' } } }
+        '400':
+          description: |
+            An unknown field (`email` among them), an empty body, a mobile
+            number that is not `09XXXXXXXXX` or `+639XXXXXXXXX`, a `postalCode`
+            that is not four digits, or an EMPTY STRING where a clear was meant
+            -- see `ProfileCorrection`.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: This account has no applicant profile to correct (a staff account).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /applications/{applicationId}/permit:
     get:
       operationId: getPermit
@@ -311,6 +432,100 @@ components:
             What this token actually carries. Read it rather than inferring from
             the account kind — a menu built on a guess offers actions the server
             refuses.
+
+    ProfileCorrection:
+      type: object
+      additionalProperties: false
+      minProperties: 1
+      description: |
+        Every field optional; at least one required.
+
+        **ABSENT and NULL mean different things.** Absent leaves a field as it
+        is; `null` CLEARS it. A citizen who typed a middle name by mistake, or
+        has none, must be able to remove it -- a right to correct that cannot
+        remove is half a right.
+
+        **An empty string is NOT a clear and is refused (400).** Every field is
+        `minLength: 1` when a string is supplied, so `""` fails validation
+        rather than quietly erasing the value. Send `null`. This is the detail
+        the citizen web lane measured off the source and reported as
+        unguessable, which is why it is stated here.
+      properties:
+        firstName: { type: string, minLength: 1, maxLength: 100 }
+        middleName:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 100
+          description: Send `null` to clear. `""` is a 400, not a clear.
+        lastName: { type: string, minLength: 1, maxLength: 100 }
+        mobileNumber:
+          type: string
+          pattern: '^(09\\d{9}|\\+639\\d{9})$'
+          description: |
+            `09XXXXXXXXX` or `+639XXXXXXXXX`. **A bare `639XXXXXXXXX` is
+            REFUSED** -- reject it client-side rather than spending a round trip
+            on a 400. Changing this un-verifies the number.
+        street:
+          type: [string, 'null']
+          minLength: 1
+          maxLength: 200
+          description: |
+            `street`, NOT `address`. `businesses` already calls it street, and
+            two spellings of one idea in one service is what D-10 spent a
+            migration undoing.
+        barangay: { type: [string, 'null'], minLength: 1, maxLength: 100 }
+        city: { type: [string, 'null'], minLength: 1, maxLength: 100 }
+        province: { type: [string, 'null'], minLength: 1, maxLength: 100 }
+        postalCode:
+          type: [string, 'null']
+          pattern: '^[0-9]{4}$'
+          description: Four digits. An address the office cannot post to is worse than none.
+
+    CitizenProfile:
+      type: object
+      description: |
+        `GET /me`. The address parts are null for every citizen who has not been
+        asked -- **null means NOT RECORDED**, never a blank the citizen chose to
+        leave empty.
+      properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [applicant, staff] }
+        email: { type: string, format: email }
+        emailVerifiedAt: { type: [string, 'null'], format: date-time }
+        firstName: { type: [string, 'null'] }
+        middleName: { type: [string, 'null'] }
+        lastName: { type: [string, 'null'] }
+        mobileNumber: { type: [string, 'null'] }
+        street: { type: [string, 'null'] }
+        barangay: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        province: { type: [string, 'null'] }
+        postalCode: { type: [string, 'null'] }
+
+    CorrectedProfile:
+      type: object
+      additionalProperties: false
+      required:
+        [firstName, middleName, lastName, mobileNumber, street, barangay, city,
+         province, postalCode, mobileVerifiedAt, mobileVerificationCleared]
+      properties:
+        firstName: { type: [string, 'null'] }
+        middleName: { type: [string, 'null'] }
+        lastName: { type: [string, 'null'] }
+        mobileNumber: { type: [string, 'null'] }
+        street: { type: [string, 'null'] }
+        barangay: { type: [string, 'null'] }
+        city: { type: [string, 'null'] }
+        province: { type: [string, 'null'] }
+        postalCode: { type: [string, 'null'] }
+        mobileVerifiedAt: { type: [string, 'null'], format: date-time }
+        mobileVerificationCleared:
+          type: boolean
+          description: |
+            True when this request changed the number and therefore cleared its
+            verification. Read it and re-prompt: a citizen left believing an
+            unverified contact is verified will not receive what the office
+            sends there.
 
     Permit:
       type: object

@@ -154,10 +154,18 @@ export class DocumentService {
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; uploaded_at: Date; requirement_code: string | null;
-      scan_cleared: boolean; quarantined: boolean;
+      expires_on: string | null; scan_cleared: boolean; quarantined: boolean;
     }>(
       `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
               d.uploaded_at, d.requirement_code, d.scan_cleared,
+              -- The document's OWN validity, which is the thing that matters
+              -- most here and was missing. This list is what a citizen reuses a
+              -- document from, and without it a client can only show when the
+              -- file was uploaded -- not whether it is still good. A tax
+              -- clearance uploaded in March and reused in December is the exact
+              -- case, and "uploaded 9 months ago" is not the same statement as
+              -- "expired".
+              to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
               (d.status = 'Rejected' and not d.scan_cleared) as quarantined
          from documents d
         where d.uploaded_by = $1 and d.application_id is null and d.deleted_at is null
@@ -173,6 +181,9 @@ export class DocumentService {
       byteSize: row.byte_size,
       uploadedAt: row.uploaded_at.toISOString(),
       requirementCode: row.requirement_code,
+      // Null means NO EXPIRY RECORDED, never "does not expire". A client should
+      // say it does not know rather than imply the document is good for ever.
+      expiresOn: row.expires_on,
       scanCleared: row.scan_cleared,
       quarantined: row.quarantined,
       // No review fields: nothing here has been reviewed, because review

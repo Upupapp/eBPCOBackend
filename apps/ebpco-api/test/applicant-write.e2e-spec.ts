@@ -1078,3 +1078,37 @@ describe('uploads that were never filed (C-7)', () => {
     expect(document).not.toHaveProperty('reviewReason');
   });
 });
+
+describe('the reusable document library shows validity, not just age', () => {
+  it('carries expiresOn, which is the field reuse depends on', async () => {
+    // Raised by the citizen web lane: they show validity on an application's
+    // documents, but the library a citizen REUSES from had no expiry at all --
+    // so a tax clearance uploaded in March and reused in December could only be
+    // described as "uploaded 9 months ago", which is not the same statement as
+    // "expired".
+    const upload = await post('/documents', maria, {
+      fileName: 'tax-clearance.pdf', label: 'Tax clearance',
+      contentBase64: PDF.toString('base64'),
+    });
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    await db.query(
+      "update documents set expires_on = '2026-12-31' where id = $1", [documentId]);
+
+    const [document] = (await get('/documents/me', maria))
+      .json<{ expiresOn: string | null }[]>();
+
+    expect(document!.expiresOn).toBe('2026-12-31');
+  });
+
+  it('says null when no expiry was recorded, which is not "never expires"', async () => {
+    // A client must say it does not know, rather than imply the document is
+    // good for ever.
+    await post('/documents', maria, {
+      fileName: 'photo.pdf', label: 'Site photograph', contentBase64: PDF.toString('base64'),
+    });
+
+    const [document] = (await get('/documents/me', maria)).json<{ expiresOn: string | null }[]>();
+
+    expect(document!.expiresOn).toBeNull();
+  });
+});

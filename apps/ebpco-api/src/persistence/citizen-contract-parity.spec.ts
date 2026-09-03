@@ -60,6 +60,7 @@ describe('the citizen contract fragment matches the recorded responses', () => {
     ['ApplicationRequirements', 'applicant.applications.requirements'],
     ['TokenPair', 'auth.token'],
     ['Limits', 'limits'],
+    ['CorrectedProfile', 'me.rectify'],
   ])('%s declares exactly the keys %s returns', (schema, sample) => {
     expect([...requiredOf(schema)].sort()).toEqual(Object.keys(bodyOf(sample)).sort());
   });
@@ -145,6 +146,27 @@ describe('the citizen contract fragment matches the recorded responses', () => {
 
     expect(limits['maxFileBytes']).toBeLessThan(limits['maxRequestBytes'] as number);
     expect(limits['encoding']).toBe('base64-in-json');
+  });
+
+  it('declares /me, which shipped as a handler for a day without a path in the spec', () => {
+    // The gap the hub caught: PATCH /me was live, the sample was recorded and
+    // pushed, and the CONTRACT never gained the path -- so a lane working from
+    // the contract, which is what a contract is for, could not see it. The
+    // citizen web portal only got it right by reading the zod schema directly.
+    expect(FRAGMENT).toContain('  /me:');
+    expect(FRAGMENT).toMatch(/operationId: rectifyProfile/);
+  });
+
+  it('states the two details a client author cannot guess', () => {
+    // Both measured off the source by the citizen web lane and reported as
+    // unguessable, which is the definition of something that belongs in a
+    // contract rather than in a handover message.
+    //
+    // A bare 639XXXXXXXXX is refused, and clearing a field needs an explicit
+    // null because every string is minLength 1 -- so `""` is a 400, not a
+    // clear. A client author reading only "nullable" sends the empty string.
+    expect(FRAGMENT).toContain('639');
+    expect(FRAGMENT).toMatch(/is a 400, not a clear/);
   });
 
   it('keeps byteSize a string, because a bigint does not survive a JSON number', () => {
