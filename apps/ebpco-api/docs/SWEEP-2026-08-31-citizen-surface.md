@@ -434,3 +434,77 @@ what it replaced.
 uploaded with `applicationId: null` is reachable from no route.
 
 Gate: 83 suites, 1675 tests, coverage ratchet 39 → 40.
+
+
+---
+
+## C-7 CLOSED — an upload that was never filed
+
+Worse than this document originally recorded, and the correction matters.
+
+**It was not "reachable from nowhere".** `ownedBy` reads `uploaded_by` as well
+as the application's applicant, so a citizen holding the id could always
+retrieve the file. The accurate word is **undiscoverable**: nothing listed it.
+
+What made it serious is that an abandoned upload was invisible to **all three**
+mechanisms that would otherwise handle it:
+
+1. **Retention could not reach it, by construction.** `runRetention` joins
+   `applications` to find the closing transition that starts the clock, so a
+   document with no application is dropped by the INNER JOIN. Not "not yet
+   eligible" — unable ever to become eligible.
+2. **Erasure does not delete it.** `ERASE_IN_ORDER` covers the
+   `account-lifetime` tables; `documents` is classified `statutory` on the
+   basis of being part of a permit record, which an orphan never was.
+3. **Nothing listed it**, so the citizen could not see it to act on it.
+
+Net effect: a PSA certificate, or a lot plan carrying a home address, uploaded
+during a session somebody abandoned, held **indefinitely** — nobody's permit
+record and nobody's to find.
+
+### What shipped
+
+**Retention now reaches them**, keyed on `uploaded_at` because there is no
+closure event to read, deleting the object bytes and soft-deleting the row with
+a chained audit entry exactly as the filed path does.
+
+**The period is the LGU's, and the same one, deliberately.** `runRetention`'s
+own comment says a retention period invented in this service "would be a
+data-minimisation decision made by the wrong party", and that applies no less to
+abandoned uploads. They are **counted and reported separately**, so an operator
+can see the difference and ask for a shorter clock — which they probably should,
+since an abandoned upload is part of no record at all. **Filed as an owner
+question.**
+
+**`GET /documents/me`** lists the caller's unattached uploads. Only unattached
+ones: documents on an application are already served in context by
+`GET /applications/:id/documents`, and a second answer to an answered question
+drifts from the first the moment either changes. No review fields, because
+nothing here has been reviewed — returning nulls would invite a client to render
+"not yet reviewed", which suggests somebody will.
+
+**The dangerous case is the one worth testing.** A citizen part-way through a
+filing has documents uploaded minutes ago and no application yet — structurally
+identical to an abandoned one. Deleting those would break the very flow the
+nullable `application_id` exists to support. Both directions are break-checked:
+excluding orphans again fails the first test, ignoring the clock fails the
+second.
+
+### Still open, and NOT fixed here
+
+**Erasure deletes no document rows and no object bytes at all.** It is a
+database-row deleter with no object-store access, and an object deletion cannot
+participate in its transaction — if the transaction rolled back after the bytes
+were gone, the row would survive pointing at nothing.
+
+For an attached document that is coherent: the statutory basis keeps both. For
+an orphan there is no such basis, so a citizen who asks to be forgotten keeps
+their abandoned uploads until retention collects them, which is far longer than
+an erasure request implies.
+
+Fixing it properly needs a decision about how object deletion participates in
+erasure — a purge pass over soft-deleted rows is the likely shape. Filed rather
+than half-built, because a partly-implemented privacy mechanism is worse than a
+documented gap.
+
+Gate: 84 suites, 1693 tests, coverage ratchet 44 → 45.

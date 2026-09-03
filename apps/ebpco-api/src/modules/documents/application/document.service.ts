@@ -144,6 +144,45 @@ export class DocumentService {
   }
 
   /**
+   * What this account has uploaded and never filed.
+   *
+   * Keyed on `uploaded_by`, which is the only ownership this document has: it
+   * belongs to no application, so there is no applicant to reach it through.
+   * That is exactly why `ownedBy` reads both -- see the note on it.
+   */
+  async unattachedFor(accountId: string): Promise<ReadonlyArray<Record<string, unknown>>> {
+    const result = await this.db.query<{
+      id: string; label: string; file_name: string; content_type: string;
+      byte_size: string; uploaded_at: Date; requirement_code: string | null;
+      scan_cleared: boolean; quarantined: boolean;
+    }>(
+      `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
+              d.uploaded_at, d.requirement_code, d.scan_cleared,
+              (d.status = 'Rejected' and not d.scan_cleared) as quarantined
+         from documents d
+        where d.uploaded_by = $1 and d.application_id is null and d.deleted_at is null
+        order by d.uploaded_at desc, d.id`,
+      [accountId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      label: row.label,
+      fileName: row.file_name,
+      contentType: row.content_type,
+      byteSize: row.byte_size,
+      uploadedAt: row.uploaded_at.toISOString(),
+      requirementCode: row.requirement_code,
+      scanCleared: row.scan_cleared,
+      quarantined: row.quarantined,
+      // No review fields: nothing here has been reviewed, because review
+      // happens on an application and these are attached to none. Returning
+      // them as null would invite a client to render "not yet reviewed", which
+      // suggests somebody will.
+    }));
+  }
+
+  /**
    * Replacing one document on an application with a newly supplied file (D-8).
    *
    * The office keeps every submission, so this APPENDS: the replacement is a
@@ -384,7 +423,9 @@ export class DocumentService {
    * a default for it: a retention period invented here would be a
    * data-minimisation decision made by the wrong party.
    */
-  async runRetention(retainForDays: number): Promise<{ deleted: number; skippedOpen: number }> {
+  async runRetention(retainForDays: number): Promise<{
+    deleted: number; skippedOpen: number; abandoned: number;
+  }> {
     const cutoff = new Date(this.clock().getTime() - retainForDays * 24 * 60 * 60 * 1000);
 
     // The closing transition is the event that starts the clock. Reading it
@@ -429,7 +470,53 @@ export class DocumentService {
       });
     }
 
-    return { deleted: eligible.rows.length, skippedOpen: Number(open.rows[0]?.n ?? 0) };
+    // ── Uploads that were never filed (C-7) ────────────────────────────────
+    //
+    // A document created by `POST /documents` and never attached is invisible
+    // to every mechanism that would otherwise handle it. The query above joins
+    // `applications` to find the closing transition that starts the clock, so
+    // an orphan is dropped by the INNER JOIN and can never become eligible --
+    // not "is not yet eligible", but cannot be, by construction. Nothing lists
+    // it either, and erasure does not delete it.
+    //
+    // So a PSA birth certificate or a lot plan carrying a home address,
+    // uploaded during a wizard session somebody abandoned, was held for ever
+    // with no purpose: nobody's permit record, and nobody's to find.
+    //
+    // The clock is `uploaded_at`, because there is no closure event to read.
+    //
+    // THE PERIOD IS THE LGU'S, and the same one, deliberately. An abandoned
+    // upload arguably deserves a SHORTER clock than a closed permit's file --
+    // it is not part of any record -- but choosing that number here would be
+    // the data-minimisation decision this method already refuses to make on
+    // the LGU's behalf. Reported separately so an operator can see the
+    // difference and ask for one.
+    const abandoned = await this.db.query<{ id: string; storage_key: string }>(
+      `select d.id, d.storage_key
+         from documents d
+        where d.deleted_at is null
+          and d.application_id is null
+          and d.uploaded_at < $1`,
+      [cutoff],
+    );
+
+    for (const document of abandoned.rows) {
+      await this.store.delete(document.storage_key);
+      await this.db.query('update documents set deleted_at = $1 where id = $2',
+        [this.clock(), document.id]);
+      await this.audit.append({
+        action: 'document.deleted-on-retention',
+        subjectType: 'document',
+        subjectId: document.id,
+        outcome: 'allowed',
+      });
+    }
+
+    return {
+      deleted: eligible.rows.length,
+      skippedOpen: Number(open.rows[0]?.n ?? 0),
+      abandoned: abandoned.rows.length,
+    };
   }
 
   /**

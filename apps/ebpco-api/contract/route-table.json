@@ -14,6 +14,7 @@
     "GET /businesses",
     "GET /documents/:documentId/content",
     "GET /documents/content",
+    "GET /documents/me",
     "GET /health",
     "GET /limits",
     "GET /me",

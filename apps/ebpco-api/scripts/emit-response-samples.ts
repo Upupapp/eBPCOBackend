@@ -474,6 +474,18 @@ async function main(): Promise<void> {
   // The tokens themselves are REDACTED by `stabilise` before this file is
   // written. This repository is public, and evidence of a working sign-in must
   // not be a published credential.
+  // An upload the applicant started and never filed (C-7), so the sample shows
+  // the state this route exists for rather than an empty list.
+  await db.query(
+    `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                            byte_size, sha256, storage_key, status, scan_cleared, scanned_at,
+                            requirement_code)
+     values (gen_random_uuid(), null, $1,'Site photographs','site-photos.jpg','image/jpeg',
+             221844,'9a1c4e7b2f5d3068334455667788990011aabbccddeeff00112233445566bb02',
+             'documents/2026/08/site-photos.jpg','Pending',true,now(),'site-photographs')`,
+    [seeded.applicantAccount],
+  );
+
   await record('limits', 'GET', '/limits', '');
 
   const citizenEmail = 'juan.delacruz@example.ph';
@@ -619,6 +631,8 @@ async function main(): Promise<void> {
   // one a client must render correctly.
   await record('applicant.applications.requirements', 'GET',
     `/applications/${seeded.detailed}/requirements`, applicantToken);
+  // What the citizen uploaded and never filed. Listed by nothing before C-7.
+  await record('applicant.documents.unattached', 'GET', '/documents/me', applicantToken);
   await record('applicant.notifications', 'GET', '/notifications', applicantToken);
   await record('applicant.notificationPreferences', 'GET', '/notification-preferences', applicantToken);
   await record('applicant.businesses', 'GET', '/businesses', applicantToken);

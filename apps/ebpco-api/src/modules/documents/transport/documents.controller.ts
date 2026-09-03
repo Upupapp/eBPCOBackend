@@ -65,6 +65,27 @@ function callerOf(request: AuthenticatedRequest): Caller {
 export class DocumentsController {
   constructor(private readonly documents: DocumentService) {}
 
+  /**
+   * The caller's own uploads that are not attached to any application (C-7).
+   *
+   * `POST /documents` takes a nullable application id because both clients
+   * upload before they file -- so an abandoned wizard session leaves real
+   * documents belonging to a real person, attached to nothing. They were
+   * retrievable by id and listed by nothing, which means undiscoverable in
+   * practice: a citizen could not see what they had left behind, still less
+   * decide to finish or abandon it.
+   *
+   * Only the unattached ones. Documents on an application are already served,
+   * in context, by `GET /applications/:id/documents` -- and returning them here
+   * too would be a second answer to a question already answered, drifting from
+   * the first the moment either changed.
+   */
+  @Get('me')
+  @RequireScopes('documents:read')
+  async mine(@Req() request: AuthenticatedRequest): Promise<ReadonlyArray<Record<string, unknown>>> {
+    return this.documents.unattachedFor(callerOf(request).accountId);
+  }
+
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RequireScopes('documents:write')

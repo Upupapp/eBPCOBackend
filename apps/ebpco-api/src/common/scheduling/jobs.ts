@@ -43,7 +43,14 @@ export function retentionJob(
         return 'no retention period configured (M-15); nothing deleted';
       }
       const outcome = await documents.runRetention(retainForDays);
-      return `deleted ${outcome.deleted}, held back ${outcome.skippedOpen} on open applications`;
+      // Abandoned uploads counted separately from filed ones (C-7). An
+      // operator reading "deleted 40" cannot tell whether the LGU is disposing
+      // of closed permit files or of documents citizens never managed to file
+      // -- and a large or growing second number is a signal about the wizard,
+      // not about retention.
+      return `deleted ${outcome.deleted} on closed applications and `
+        + `${outcome.abandoned} never-filed uploads, held back ${outcome.skippedOpen} `
+        + 'on open applications';
     },
   };
 }

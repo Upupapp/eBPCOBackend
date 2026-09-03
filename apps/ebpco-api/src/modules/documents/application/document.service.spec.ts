@@ -391,7 +391,7 @@ describe('retention', () => {
     await closed(1);
 
     expect(await service({ now: () => new Date() }).runRetention(3650))
-      .toEqual({ deleted: 0, skippedOpen: 0 });
+      .toEqual({ deleted: 0, skippedOpen: 0, abandoned: 0 });
   });
 
   it('NEVER deletes a document on an application still in progress', async () => {
@@ -420,6 +420,60 @@ describe('retention', () => {
     expect((await service({ now: () => new Date() }).runRetention(3650)).skippedOpen).toBe(1);
   });
 
+  it('reaches an upload that was never filed, which nothing else could (C-7)', async () => {
+    // The eligible-documents query joins `applications` to find the closing
+    // transition that starts the clock, so a document with no application was
+    // dropped by the INNER JOIN and could never become eligible -- not "not yet
+    // eligible", but unreachable by construction. Nothing lists it either, and
+    // erasure does not delete it, so an abandoned upload was held for ever: a
+    // PSA certificate or a plan carrying a home address, nobody's permit record
+    // and nobody's to find.
+    const result = await service().upload({
+      bytes: makePdf(), fileName: 'abandoned.pdf', label: 'Lot plan',
+      applicationId: null, caller: owner,
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const key = (await db.query<{ storage_key: string }>(
+      'select storage_key from documents where id = $1', [result.documentId],
+    )).rows[0]!.storage_key;
+    // Uploaded long enough ago to be past the period.
+    await db.query('update documents set uploaded_at = $1 where id = $2',
+      [daysAgo(4000), result.documentId]);
+
+    const outcome = await service({ now: () => new Date() }).runRetention(3650);
+
+    // Counted apart from filed documents: an operator reading one number cannot
+    // tell disposal of closed permit files from documents citizens never
+    // managed to file, and the second is a signal about the wizard.
+    expect(outcome.abandoned).toBe(1);
+    expect(outcome.deleted).toBe(0);
+    // The bytes go, not just the row.
+    expect(await store.get(key)).toBeNull();
+    const row = await db.query<{ deleted_at: Date | null }>(
+      'select deleted_at from documents where id = $1', [result.documentId]);
+    expect(row.rows[0]?.deleted_at).not.toBeNull();
+  });
+
+  it('leaves a recent unfiled upload alone, because a wizard is still open', async () => {
+    // The dangerous half of the previous test. A citizen part-way through a
+    // filing has documents uploaded minutes ago and no application yet --
+    // exactly the shape of an abandoned one. Deleting those would break the
+    // flow the nullable application_id exists to support.
+    const result = await service().upload({
+      bytes: makePdf(), fileName: 'in-progress.pdf', label: 'Lot plan',
+      applicationId: null, caller: owner,
+    });
+    if (!result.ok) return;
+
+    const outcome = await service({ now: () => new Date() }).runRetention(3650);
+
+    expect(outcome.abandoned).toBe(0);
+    const row = await db.query<{ deleted_at: Date | null }>(
+      'select deleted_at from documents where id = $1', [result.documentId]);
+    expect(row.rows[0]?.deleted_at).toBeNull();
+  });
+
   it('deletes the object and marks the row', async () => {
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
@@ -430,7 +484,7 @@ describe('retention', () => {
     )).rows[0]!.storage_key;
 
     expect(await service({ now: () => new Date() }).runRetention(3650))
-      .toEqual({ deleted: 1, skippedOpen: 0 });
+      .toEqual({ deleted: 1, skippedOpen: 0, abandoned: 0 });
     expect(await store.get(key)).toBeNull();
 
     const row = await db.query<{ deleted_at: Date | null }>(
@@ -461,7 +515,7 @@ describe('retention', () => {
 
     const svc = service({ now: () => new Date() });
     await svc.runRetention(3650);
-    expect(await svc.runRetention(3650)).toEqual({ deleted: 0, skippedOpen: 0 });
+    expect(await svc.runRetention(3650)).toEqual({ deleted: 0, skippedOpen: 0, abandoned: 0 });
 
     const audit = await db.query<{ count: number }>(
       "select count(*)::int as count from audit_events where action = 'document.deleted-on-retention'",

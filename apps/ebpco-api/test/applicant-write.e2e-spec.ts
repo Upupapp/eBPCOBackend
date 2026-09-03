@@ -1019,3 +1019,62 @@ describe('the limits a client must not exceed', () => {
     expect(response.statusCode).toBe(201);
   });
 });
+
+describe('uploads that were never filed (C-7)', () => {
+  it('lists what the citizen left behind, which nothing did before', async () => {
+    // POST /documents takes a nullable applicationId because both clients
+    // upload before they file. An abandoned wizard leaves real documents
+    // belonging to a real person, attached to nothing -- retrievable by id and
+    // listed by nothing, so undiscoverable in practice.
+    const upload = await post('/documents', maria, {
+      fileName: 'abandoned.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    expect(upload.statusCode).toBe(201);
+
+    const body = (await get('/documents/me', maria))
+      .json<{ id: string; label: string; fileName: string }[]>();
+
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({
+      id: upload.json<{ documentId: string }>().documentId,
+      label: 'Lot plan', fileName: 'abandoned.pdf',
+    });
+  });
+
+  it('stops listing one once it is filed, because it is answered elsewhere', async () => {
+    // Documents on an application are served in context by
+    // GET /applications/:id/documents. Returning them here too would be a
+    // second answer to a question already answered.
+    const upload = await post('/documents', maria, {
+      fileName: 'filed.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    await post('/applications', maria, submission({ documentIds: [documentId] }));
+
+    expect((await get('/documents/me', maria)).json()).toEqual([]);
+  });
+
+  it('never lists another citizen’s unfiled uploads', async () => {
+    // uploaded_by is the ONLY ownership an unattached document has: it belongs
+    // to no application, so there is no applicant to reach it through.
+    await post('/documents', jose, {
+      fileName: 'jose.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+
+    expect((await get('/documents/me', maria)).json()).toEqual([]);
+  });
+
+  it('offers no review fields, because nothing here has been reviewed', async () => {
+    // Review happens on an application and these are attached to none.
+    // Returning nulls would invite a client to render "not yet reviewed",
+    // which suggests somebody will.
+    await post('/documents', maria, {
+      fileName: 'abandoned.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
+    });
+
+    const [document] = (await get('/documents/me', maria)).json<Record<string, unknown>[]>();
+
+    expect(document).not.toHaveProperty('reviewStatus');
+    expect(document).not.toHaveProperty('reviewReason');
+  });
+});
