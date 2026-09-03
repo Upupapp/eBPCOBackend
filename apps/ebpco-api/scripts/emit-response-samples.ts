@@ -523,7 +523,14 @@ async function main(): Promise<void> {
   // NAME change rather than a number, so the sample shows the ordinary case --
   // and `mobileVerificationCleared: false`, which is the field a client must
   // read before deciding whether to re-prompt for verification.
-  await record('me.rectify', 'PATCH', '/me', applicantToken, { firstName: 'Maria Cristina' });
+  await record('me.rectify', 'PATCH', '/me', applicantToken, {
+    firstName: 'Maria Cristina',
+    // A real address, because a sample of all-nulls shows a client nothing
+    // about the shape it has to render. Both citizen lanes are building this
+    // screen from these bytes.
+    street: '12 Rizal Street', barangay: 'Poblacion Uno',
+    city: 'Castilla', province: 'Sorsogon', postalCode: '4718',
+  });
   await record('staff.applications.list', 'GET', '/staff/applications?limit=3', officialToken);
   await record('staff.applications.list.filtered', 'GET', '/staff/applications?status=Submitted', officialToken);
   await record('staff.applications.metrics', 'GET', '/staff/applications/metrics', officialToken);

@@ -125,11 +125,19 @@ describe('accounts', () => {
 
       await harness.accounts.save(account, {
         firstName: 'Maria', lastName: 'Santos', mobileNumber: '09171234567',
+        middleName: null, street: null, barangay: null, city: null,
+        province: null, postalCode: null,
       });
 
       const profile = await harness.accounts.profileOf(account.id);
+      // The WHOLE profile, both repositories alike. The address parts read back
+      // null because registration does not collect them (migration 036) --
+      // null meaning NOT RECORDED, which a client must not render as a blank
+      // the citizen chose to leave empty.
       expect(profile).toEqual({
-        firstName: 'Maria', lastName: 'Santos', mobileNumber: '09171234567',
+        firstName: 'Maria', middleName: null, lastName: 'Santos',
+        mobileNumber: '09171234567',
+        street: null, barangay: null, city: null, province: null, postalCode: null,
       });
     });
 

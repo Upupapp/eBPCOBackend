@@ -86,6 +86,16 @@ const content = (retention: Retention, basis: string): ColumnRule =>
 const secret = (basis: string): ColumnRule =>
   ({ dataClass: 'secret', retention: 'account-lifetime', basis });
 
+/**
+ * Reaching the applicant about their own application.
+ *
+ * Named separately from PERMIT_RECORD because it is a different purpose under
+ * RA 10173, even though it sits on the same row: the name identifies who holds
+ * the permit, the address exists so the office can write to them about it.
+ */
+const CORRESPONDENCE = 'performance of a public task — correspondence with an applicant '
+  + 'about their application (PD 1096 permit issuance)';
+
 const PERMIT_RECORD = 'PD 1096 and the LGU records schedule: a permit record is evidence '
   + 'that a structure was authorised, and outlives the applicant’s relationship with the LGU';
 const SERVICE_DELIVERY = 'performance of a public task (RA 11032 service delivery)';
@@ -224,7 +234,31 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     account_id: linkable('statutory', PERMIT_RECORD),
     // Not account-lifetime. The name on a permit is part of the permit.
     first_name: direct('statutory', PERMIT_RECORD),
+    middle_name: direct('statutory', PERMIT_RECORD),
     last_name: direct('statutory', PERMIT_RECORD),
+    // ── The address the office writes to (migration 036) ──────────────────
+    //
+    // A DIFFERENT purpose from the name beside it, and the register is where
+    // that has to be said. The name is on the permit; the address is how the
+    // office reaches the applicant about it -- a notice, a letter of
+    // instruction, a permit ready for collection. Both citizen front ends
+    // reported that a citizen who moves currently has to telephone the
+    // Municipal Engineer.
+    //
+    // `statutory`, not `account-lifetime`, for the same reason as the name: a
+    // permit record includes who it was issued to and where they were written
+    // to, and erasure yields to the LGU's retention obligation over issued
+    // permits.
+    //
+    // Not to be confused with two addresses already in this register:
+    // `applications.location` is the SITE, `businesses.street` is where a
+    // business operates. Three addresses, three purposes, none of them
+    // interchangeable.
+    street: direct('statutory', CORRESPONDENCE),
+    barangay: direct('statutory', CORRESPONDENCE),
+    city: direct('statutory', CORRESPONDENCE),
+    province: direct('statutory', CORRESPONDENCE),
+    postal_code: direct('statutory', CORRESPONDENCE),
     created_at: none('statutory'),
     updated_at: none('statutory'),
   },

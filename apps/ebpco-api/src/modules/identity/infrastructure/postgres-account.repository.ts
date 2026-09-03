@@ -81,12 +81,30 @@ export class PostgresAccountRepository implements AccountRepository {
       // creates one afterwards.
       if (profile !== undefined) {
         await tx.query(
-          `insert into applicants (id, account_id, first_name, last_name)
-           values ($1, $2, $3, $4)
+          // Every field the profile carries, not just the names. Writing a
+          // subset would silently drop whatever the caller passed -- the
+          // defect this service keeps finding in other people's code.
+          //
+          // COALESCE on the update half, and that is the important part.
+          // Registration passes nulls for the address (it does not collect
+          // one), so a plain `excluded.street` would ERASE a citizen's real
+          // address the moment a second registration hit the same account.
+          // Nulls here mean "not supplied by this caller", never "clear it";
+          // clearing is PATCH /me's job, which writes the column directly.
+          `insert into applicants (id, account_id, first_name, middle_name, last_name,
+                                   street, barangay, city, province, postal_code)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
            on conflict (account_id) do update set
-             first_name = excluded.first_name,
-             last_name  = excluded.last_name`,
-          [randomUUID(), account.id, profile.firstName, profile.lastName],
+             first_name  = excluded.first_name,
+             middle_name = coalesce(excluded.middle_name, applicants.middle_name),
+             last_name   = excluded.last_name,
+             street      = coalesce(excluded.street,      applicants.street),
+             barangay    = coalesce(excluded.barangay,    applicants.barangay),
+             city        = coalesce(excluded.city,        applicants.city),
+             province    = coalesce(excluded.province,    applicants.province),
+             postal_code = coalesce(excluded.postal_code, applicants.postal_code)`,
+          [randomUUID(), account.id, profile.firstName, profile.middleName, profile.lastName,
+           profile.street, profile.barangay, profile.city, profile.province, profile.postalCode],
         );
       }
 
@@ -128,9 +146,12 @@ export class PostgresAccountRepository implements AccountRepository {
 
   async profileOf(accountId: string): Promise<ApplicantProfile | null> {
     const result = await this.db.query<{
-      first_name: string; last_name: string; mobile_number: string | null;
+      first_name: string; middle_name: string | null; last_name: string;
+      mobile_number: string | null; street: string | null; barangay: string | null;
+      city: string | null; province: string | null; postal_code: string | null;
     }>(
-      `select ap.first_name, ap.last_name, acc.mobile_number
+      `select ap.first_name, ap.middle_name, ap.last_name, acc.mobile_number,
+              ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
          from applicants ap
          join accounts acc on acc.id = ap.account_id
         where ap.account_id = $1`,
@@ -140,7 +161,13 @@ export class PostgresAccountRepository implements AccountRepository {
     if (row === undefined) return null;
     return {
       firstName: row.first_name,
+      middleName: row.middle_name,
       lastName: row.last_name,
+      street: row.street,
+      barangay: row.barangay,
+      city: row.city,
+      province: row.province,
+      postalCode: row.postal_code,
       mobileNumber: row.mobile_number,
     };
   }

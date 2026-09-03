@@ -143,8 +143,14 @@
         "email": "maria.santos@example.ph",
         "emailVerifiedAt": null,
         "firstName": "Maria",
+        "middleName": null,
         "lastName": "Santos",
-        "mobileNumber": null
+        "mobileNumber": null,
+        "street": null,
+        "barangay": null,
+        "city": null,
+        "province": null,
+        "postalCode": null
       }
     },
     "me.rectify": {
@@ -157,8 +163,14 @@
       "contentType": "application/json; charset=utf-8",
       "body": {
         "firstName": "Maria Cristina",
+        "middleName": null,
         "lastName": "Santos",
         "mobileNumber": null,
+        "street": "12 Rizal Street",
+        "barangay": "Poblacion Uno",
+        "city": "Castilla",
+        "province": "Sorsogon",
+        "postalCode": "4718",
         "mobileVerifiedAt": null,
         "mobileVerificationCleared": false
       }

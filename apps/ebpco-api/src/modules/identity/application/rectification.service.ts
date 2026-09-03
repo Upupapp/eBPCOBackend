@@ -45,8 +45,22 @@ export class RectificationService {
     // present-and-undefined. Declaring what actually arrives beats making the
     // controller construct an object to satisfy a narrower signature.
     firstName?: string | undefined;
+    middleName?: string | null | undefined;
     lastName?: string | undefined;
     mobileNumber?: string | undefined;
+    /**
+     * Where the office writes about an application (migration 036).
+     *
+     * `null` is meaningful and distinct from absent: absent means "leave it
+     * as it is", null means "I have no middle name" or "clear this". A
+     * citizen who cannot clear a field they once entered wrongly has not been
+     * given the §16(d) right, only half of it.
+     */
+    street?: string | null | undefined;
+    barangay?: string | null | undefined;
+    city?: string | null | undefined;
+    province?: string | null | undefined;
+    postalCode?: string | null | undefined;
   }): Promise<RectificationResult> {
     const { accountId } = options;
 
@@ -71,14 +85,38 @@ export class RectificationService {
         };
       }
 
-      const firstName = options.firstName ?? before.first_name;
-      const lastName = options.lastName ?? before.last_name;
       const now = this.clock();
 
-      if (firstName !== before.first_name || lastName !== before.last_name) {
+      // Absent means "leave it"; null means "clear it". `??` cannot express
+      // that -- it treats null as absent -- so the presence of the KEY is what
+      // decides, and the value is passed through untouched.
+      const has = (name: string): boolean => Object.hasOwn(options, name)
+        && (options as Record<string, unknown>)[name] !== undefined;
+
+      const columns: Array<[string, unknown]> = [];
+      const consider = (column: string, key: string, value: unknown): void => {
+        if (has(key)) columns.push([column, value]);
+      };
+      consider('first_name', 'firstName', options.firstName);
+      consider('middle_name', 'middleName', options.middleName);
+      consider('last_name', 'lastName', options.lastName);
+      consider('street', 'street', options.street);
+      consider('barangay', 'barangay', options.barangay);
+      consider('city', 'city', options.city);
+      consider('province', 'province', options.province);
+      consider('postal_code', 'postalCode', options.postalCode);
+
+      if (columns.length > 0) {
+        // Column names come from the fixed list above, never from the request,
+        // so this cannot become an injection point no matter what a caller
+        // sends. The VALUES are always bound.
+        const assignments = columns
+          .map(([column], index) => `${column} = $${index + 1}`)
+          .join(', ');
         await tx.query(
-          'update applicants set first_name = $1, last_name = $2, updated_at = $3 where account_id = $4',
-          [firstName, lastName, now, accountId],
+          `update applicants set ${assignments}, updated_at = $${columns.length + 1}
+            where account_id = $${columns.length + 2}`,
+          [...columns.map(([, value]) => value), now, accountId],
         );
       }
 

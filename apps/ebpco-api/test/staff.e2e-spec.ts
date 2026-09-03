@@ -957,3 +957,90 @@ describe('correcting what the LGU holds about you (C-3, RA 10173 s.16(d))', () =
     expect(JSON.stringify(entries.rows)).not.toContain('09181112222');
   });
 });
+
+describe('the address the office writes to (both citizen lanes)', () => {
+  const patch = (token: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'PATCH', url: '/me',
+      headers: { authorization: `Bearer ${token}` }, payload,
+    });
+
+  const citizen = async (): Promise<string> => (await tokens.issueAccessToken({
+    sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+    scopes: ['profile:read', 'profile:write'],
+  })).token;
+
+  it('accepts a full postal address and reads it back from /me', async () => {
+    // Asked for independently by mobile and the citizen web portal. Until
+    // migration 036 there was nowhere to store any of this, so both clients
+    // accepted the change, showed it back, and sent nothing.
+    const token = await citizen();
+
+    const response = await patch(token, {
+      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion Uno',
+      city: 'Castilla', province: 'Sorsogon', postalCode: '4718',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion Uno',
+      city: 'Castilla', province: 'Sorsogon', postalCode: '4718',
+    });
+    // And it is what /me answers afterwards, not just what PATCH echoed back.
+    expect((await get('/me', token)).json()).toMatchObject({
+      street: '12 Rizal Street', postalCode: '4718',
+    });
+  });
+
+  it('leaves untouched fields alone, so a partial correction is partial', async () => {
+    // A citizen fixing a barangay must not lose the street they entered last
+    // month.
+    const token = await citizen();
+    await patch(token, { street: '12 Rizal Street', barangay: 'Poblacion Uno' });
+
+    await patch(token, { barangay: 'Poblacion Dos' });
+
+    expect((await get('/me', token)).json()).toMatchObject({
+      street: '12 Rizal Street', barangay: 'Poblacion Dos',
+    });
+  });
+
+  it('lets a citizen CLEAR a field, because a right to correct that cannot remove is half a right', async () => {
+    // null is distinct from absent: absent leaves it, null clears it. Somebody
+    // who has no middle name, or typed one by mistake, has to be able to say so.
+    const token = await citizen();
+    await patch(token, { middleName: 'Reyes' });
+
+    await patch(token, { middleName: null });
+
+    expect((await get('/me', token)).json<{ middleName: string | null }>().middleName).toBeNull();
+  });
+
+  it('refuses a ZIP that is not four digits', async () => {
+    // An address the office cannot post to is worse than none, because it is
+    // acted on.
+    const response = await patch(await citizen(), { postalCode: '47' });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('starts a newly registered citizen with the address NOT RECORDED', async () => {
+    // Null, not empty strings. Registration does not collect an address, and a
+    // blank would read as a citizen who chose to leave it out.
+    const registered = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: {
+        firstName: 'Juan', lastName: 'Dela Cruz', email: 'juan.address@example.ph',
+        mobileNumber: '09171234567', password: 'a-long-enough-passphrase-here',
+      },
+    });
+    expect(registered.statusCode).toBe(202);
+
+    const [row] = (await db.query<{ street: string | null; middle_name: string | null }>(
+      `select ap.street, ap.middle_name from applicants ap
+         join accounts a on a.id = ap.account_id
+        where a.email_normalised = 'juan.address@example.ph'`)).rows;
+    expect(row!.street).toBeNull();
+    expect(row!.middle_name).toBeNull();
+  });
+});

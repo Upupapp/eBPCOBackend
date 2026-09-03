@@ -568,3 +568,67 @@ request` takes no new destination. C-3 closes that for the mobile number. Email
 remains open, by design.
 
 Gate: 84 suites, 1702 tests, coverage ratchet 45 → 46.
+
+
+---
+
+## The citizen's own address — asked for by BOTH front ends
+
+Migration 036. `applicants` was `(id, account_id, first_name, last_name)`: there
+was nowhere to store an address at all, so both clients accepted the change,
+showed it back to the citizen, and sent nothing. Both changed what the screen
+says rather than inventing a call, which is why this was a gap and not a live
+lie.
+
+**The purpose, which is what unblocked it.** I had told the mobile lane this
+needed an owner decision, because RA 10173 requires a purpose and a lawful basis
+per field and "the app has a box for it" is neither. The web portal supplied
+one: *this is the address the office writes to about an application* — a notice,
+a letter of instruction, a permit ready for collection — and a citizen who moves
+currently has to telephone the Municipal Engineer. That is recorded in the
+register as its own basis, `CORRESPONDENCE`, deliberately separate from
+`PERMIT_RECORD` on the name beside it: the name says who holds the permit, the
+address exists so the office can reach them about it.
+
+**Three addresses, three purposes, none interchangeable:**
+`applications.location` is the SITE, `businesses.street` is where a business
+operates, and this is where to post a letter to the applicant.
+
+### One vocabulary
+
+`street`, `barangay`, `city`, `province` are what `businesses` already calls
+these, verbatim. Both clients asked for `address`; that would be a second
+spelling of one idea inside one service, which is the defect D-10 spent a
+migration undoing. **Where the server already has a name, the server's name
+wins; where it has none — `postalCode` — the clients' name stands.**
+
+### null and absent mean different things
+
+Absent leaves a field alone; **null clears it**. A citizen who typed a middle
+name by mistake, or has none, must be able to remove it: a right to correct that
+cannot remove is half a right. `??` cannot express this — it treats null as
+absent — so the presence of the KEY decides and the value passes through
+untouched. Break-checked.
+
+Every existing applicant reads null, meaning NOT RECORDED. Nobody has ever been
+asked for this, and a client must not render it as a blank the citizen chose.
+
+### The mobile-number model, decided by measurement
+
+Both lanes asked whether a number change should take effect immediately or wait
+on verification. **Immediately, with verification reset** — and the reason is
+not a preference: `POST /me/contacts/mobile/request` returns
+`delivery: 'not-sent'`, because the LGU has **no message provider configured**.
+Under a pending-verification model a number change could never complete, and
+every citizen who moved would be stranded on their old number for ever.
+Apply-then-re-verify is the only model the existing infrastructure supports.
+
+### Registration is now strict
+
+`POST /auth/register` was not `.strict()`, so Zod **silently stripped** unknown
+keys: a client adding `address` there would have received **202** with the field
+discarded. Verified against the live mobile client first — it sends exactly the
+five accepted fields, so nothing breaks — and now a client's next addition fails
+loudly instead of vanishing.
+
+Gate: 84 suites, 1707 tests.

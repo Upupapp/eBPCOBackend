@@ -41,7 +41,13 @@ const registration = z.object({
   email: z.string().email().max(320),
   mobileNumber: z.string().regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX'),
   password: z.string().min(1).max(512),
-});
+// `.strict()`, because Zod's default SILENTLY STRIPS what it does not know.
+// A client adding `address` here would get 202 and the field would vanish --
+// success reported over data thrown away, which is the failure this service
+// has already found in three other places. Verified against the live mobile
+// client first: it sends exactly these five, so nothing breaks today. The
+// address is corrected through PATCH /me, not collected at registration.
+}).strict();
 
 /**
  * The RA 10173 §16(d) right to have inaccurate personal data corrected.
@@ -57,9 +63,23 @@ const registration = z.object({
  */
 const rectification = z.object({
   firstName: z.string().min(1).max(100).optional(),
+  // Nullable as well as optional, and the two mean different things: absent
+  // leaves the field alone, null clears it. A citizen who has no middle name,
+  // or who typed one by mistake, must be able to say so -- a right to correct
+  // that cannot remove is half a right.
+  middleName: z.string().min(1).max(100).nullable().optional(),
   lastName: z.string().min(1).max(100).optional(),
   mobileNumber: z.string()
     .regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX').optional(),
+  // The address the office writes to (migration 036). `street`, not `address`:
+  // `businesses` already calls this street, and a second spelling of one idea
+  // inside one service is the defect D-10 spent a migration undoing.
+  street: z.string().min(1).max(200).nullable().optional(),
+  barangay: z.string().min(1).max(100).nullable().optional(),
+  city: z.string().min(1).max(100).nullable().optional(),
+  province: z.string().min(1).max(100).nullable().optional(),
+  postalCode: z.string().regex(/^[0-9]{4}$/, 'a Philippine ZIP is four digits')
+    .nullable().optional(),
 }).strict().refine(
   (value) => Object.keys(value).length > 0,
   { message: 'name at least one field to correct' },
@@ -330,8 +350,14 @@ export class MeController {
     const profile = await this.accounts.profileOf(caller.sub);
     return {
       firstName: profile?.firstName ?? null,
+      middleName: profile?.middleName ?? null,
       lastName: profile?.lastName ?? null,
       mobileNumber: profile?.mobileNumber ?? null,
+      street: profile?.street ?? null,
+      barangay: profile?.barangay ?? null,
+      city: profile?.city ?? null,
+      province: profile?.province ?? null,
+      postalCode: profile?.postalCode ?? null,
       mobileVerifiedAt: account?.mobileVerifiedAt?.toISOString() ?? null,
       // Stated, not implied. Changing the number cleared the verification that
       // belonged to the old one, and a client that does not re-prompt would
@@ -411,8 +437,16 @@ export class MeController {
     return {
       ...common,
       firstName: profile?.firstName ?? null,
+      middleName: profile?.middleName ?? null,
       lastName: profile?.lastName ?? null,
       mobileNumber: profile?.mobileNumber ?? null,
+      // Where the office writes about an application. Null means NOT RECORDED
+      // -- never a blank the citizen chose to leave.
+      street: profile?.street ?? null,
+      barangay: profile?.barangay ?? null,
+      city: profile?.city ?? null,
+      province: profile?.province ?? null,
+      postalCode: profile?.postalCode ?? null,
     };
   }
 

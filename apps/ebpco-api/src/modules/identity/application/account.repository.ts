@@ -54,8 +54,24 @@ export interface AccountRepository {
 
 export interface ApplicantProfile {
   readonly firstName: string;
+  /** Optional in fact, not just in type: many people do not use one. */
+  readonly middleName: string | null;
   readonly lastName: string;
   readonly mobileNumber: string | null;
+  /**
+   * Where the office writes to this applicant about an application (migration
+   * 036). Distinct from `applications.location`, which is the site, and from
+   * `businesses.street`, which is where a business operates.
+   *
+   * Every part nullable and null means NOT RECORDED: the data was never
+   * collected before 036, so every existing applicant has none of it, and a
+   * client must not render null as blank-and-confirmed.
+   */
+  readonly street: string | null;
+  readonly barangay: string | null;
+  readonly city: string | null;
+  readonly province: string | null;
+  readonly postalCode: string | null;
 }
 
 /**

@@ -213,6 +213,15 @@ export class IdentityService {
         // worse than a registration that failed because it looks like success.
         firstName: input.firstName,
         lastName: input.lastName,
+        // Registration does not collect these (migration 036). They arrive via
+        // PATCH /me, so a new account starts with them NOT RECORDED rather
+        // than with empty strings that read as "the citizen left it blank".
+        middleName: null,
+        street: null,
+        barangay: null,
+        city: null,
+        province: null,
+        postalCode: null,
         mobileNumber: input.mobileNumber ?? null,
       });
     }
