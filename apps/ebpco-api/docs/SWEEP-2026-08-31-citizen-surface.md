@@ -508,3 +508,63 @@ than half-built, because a partly-implemented privacy mechanism is worse than a
 documented gap.
 
 Gate: 84 suites, 1693 tests, coverage ratchet 44 → 45.
+
+
+---
+
+## C-3 CLOSED — `PATCH /me`, the RA 10173 §16(d) right to rectification
+
+A citizen can correct their name and mobile number. Not a settings screen: a
+statutory right, which is why it is audited and why it refuses a field it
+cannot apply rather than ignoring it.
+
+**Email is deliberately NOT rectifiable.** It is the sign-in identity, so a
+change is not a correction but a transfer of who can reach the account —
+performing it without first proving control of the new address would turn a
+rectification route into account takeover. The schema is `.strict()`, so a
+client sending `email` is told (400) rather than watching the field be dropped
+and believing the address changed. It needs the request/confirm shape the
+contact channels already have. **Filed as an open piece of work.**
+
+**Changing the number un-verifies it.** The verification belonged to the OLD
+number — a code was sent there and answered from there — so carrying
+`mobile_verified_at` across would assert that somebody proved control of a
+number nobody ever messaged. Pending challenges for the channel are deleted
+too: one outstanding against the old number would otherwise be confirmable
+afterwards and would verify the NEW one. Both break-checked.
+
+`mobileVerificationCleared` is returned explicitly, so a client re-prompts
+rather than leaving a citizen with an unverified contact they believe is
+verified.
+
+**A staff member's name is not self-service.** It is set by the office on their
+access request and stands against their acts in the audit trail; correcting it
+belongs to an administrator.
+
+**The audit entry carries no values.** Recording the old and new number would
+re-create the personal data the citizen just corrected, in an append-only table
+nobody can edit afterwards.
+
+### Two defects found while building it
+
+**A self-inflicted deadlock.** `AuditService.append(input, tx = this.db)`
+defaults to the POOL, so calling it inside a transaction took a second
+connection while the first was held — and PGlite serves one, so every request
+that reached the database hung until the test timed out at 21 seconds. It
+presented as a slow query. It was also wrong for correctness: an entry written
+outside the transaction survives a rollback and claims a correction that never
+happened, which is the rule `remember()` already states for idempotency keys.
+
+**Tests written against a table that does not exist.** They asserted on
+`audit_entries`; the table is `audit_events`, with `before_state`/`after_state`
+rather than a `payload` column. Reading the schema turned a green-looking
+assertion into a real one.
+
+### Also established
+
+**There was no way to change a mobile number or an email at all.** The contact
+channels only verify what is already on record — `POST /me/contacts/:channel/
+request` takes no new destination. C-3 closes that for the mobile number. Email
+remains open, by design.
+
+Gate: 84 suites, 1702 tests, coverage ratchet 45 → 46.

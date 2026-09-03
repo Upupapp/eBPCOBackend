@@ -25,6 +25,7 @@ import { StaffDirectoryService } from './application/staff-directory.service';
 import { StaffDirectoryController } from './transport/staff-directory.controller';
 import { AccessRequestService } from './application/access-request.service';
 import { StaffAccessService } from './application/staff-access.service';
+import { RectificationService } from './application/rectification.service';
 import {
   AccessRequestController, StaffAccessController, StaffAccessRequestsController,
 } from './transport/access-request.controller';
@@ -92,6 +93,12 @@ import { RefusalRecorder } from './application/refusal-recorder';
       provide: StaffAccessService,
       inject: [SQL_CLIENT, AuditService],
       useFactory: (db: SqlClient, audit: AuditService) => new StaffAccessService(db, audit),
+    },
+    {
+      provide: RectificationService,
+      inject: [SQL_CLIENT, AuditService],
+      useFactory: (db: SqlClient, audit: AuditService) =>
+        new RectificationService(db, () => new Date(), audit),
     },
     {
       provide: AccountStatusReader,

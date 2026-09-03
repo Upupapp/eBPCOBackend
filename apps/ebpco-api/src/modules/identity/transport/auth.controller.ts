@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -6,6 +6,7 @@ import { ACCOUNT_REPOSITORY, AccountRepository } from '../application/account.re
 import { IdentityService } from '../application/identity.service';
 import { ErasureService } from '../../compliance/application/erasure.service';
 import { StaffAccessService } from '../application/staff-access.service';
+import { RectificationService } from '../application/rectification.service';
 import { DataExportService } from '../../compliance/application/data-export.service';
 import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
@@ -41,6 +42,28 @@ const registration = z.object({
   mobileNumber: z.string().regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX'),
   password: z.string().min(1).max(512),
 });
+
+/**
+ * The RA 10173 §16(d) right to have inaccurate personal data corrected.
+ *
+ * `.strict()`, and that is the point rather than a habit: `email` is the
+ * sign-in identity and is deliberately NOT rectifiable here, so a client
+ * sending it is told so instead of watching the field be silently dropped and
+ * believing the address changed.
+ *
+ * Every field optional, but at least one required -- an empty PATCH is a
+ * request that means nothing, and answering it 200 would report a correction
+ * that never happened.
+ */
+const rectification = z.object({
+  firstName: z.string().min(1).max(100).optional(),
+  lastName: z.string().min(1).max(100).optional(),
+  mobileNumber: z.string()
+    .regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX').optional(),
+}).strict().refine(
+  (value) => Object.keys(value).length > 0,
+  { message: 'name at least one field to correct' },
+);
 
 const refreshRequest = z.object({ refreshToken: z.string().min(1) });
 const revokeRequest = z.object({ allSessions: z.boolean().optional() });
@@ -206,6 +229,7 @@ export class MeController {
     private readonly erasure: ErasureService,
     private readonly dataExports: DataExportService,
     private readonly staffAccess: StaffAccessService,
+    private readonly rectification: RectificationService,
   ) {}
 
   /**
@@ -267,6 +291,53 @@ export class MeController {
       throw ProblemException.notFound('That export is not available. It may still be being produced, or it may have expired.');
     }
     return { url };
+  }
+
+  /**
+   * Correcting what the LGU holds about you (C-3, RA 10173 §16(d)).
+   *
+   * A statutory right rather than a settings screen, which is why it is
+   * audited and why it refuses a field it cannot apply instead of ignoring it.
+   *
+   * Applicants only. A staff member's name is set by the office on their
+   * access request and stands against their acts in the audit trail;
+   * correcting it belongs to an administrator, not to self-service.
+   */
+  @Patch()
+  @RequireScopes('profile:write')
+  async rectify(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = request.caller;
+    if (caller === undefined) {
+      throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);
+    }
+    const input = parse(rectification, body ?? {});
+
+    const outcome = await this.rectification.rectify({ accountId: caller.sub, ...input });
+    if (!outcome.ok) {
+      throw new ProblemException(
+        ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+        outcome.detail,
+      );
+    }
+
+    // The corrected record, read back. A client that has just changed a name
+    // should not have to guess whether it took, and returning the row is
+    // cheaper than a second request on the screen that most needs certainty.
+    const account = await this.accounts.findById(caller.sub);
+    const profile = await this.accounts.profileOf(caller.sub);
+    return {
+      firstName: profile?.firstName ?? null,
+      lastName: profile?.lastName ?? null,
+      mobileNumber: profile?.mobileNumber ?? null,
+      mobileVerifiedAt: account?.mobileVerifiedAt?.toISOString() ?? null,
+      // Stated, not implied. Changing the number cleared the verification that
+      // belonged to the old one, and a client that does not re-prompt would
+      // leave the citizen with an unverified contact they think is verified.
+      mobileVerificationCleared: outcome.mobileVerificationCleared,
+    };
   }
 
   @Get()

@@ -519,6 +519,11 @@ async function main(): Promise<void> {
     scopes: [...APPLICANT_SCOPES],
   })).token;
   await record('me.applicant', 'GET', '/me', applicantToken);
+  // Correcting an inaccurate record (C-3, RA 10173 s.16(d)). Recorded with a
+  // NAME change rather than a number, so the sample shows the ordinary case --
+  // and `mobileVerificationCleared: false`, which is the field a client must
+  // read before deciding whether to re-prompt for verification.
+  await record('me.rectify', 'PATCH', '/me', applicantToken, { firstName: 'Maria Cristina' });
   await record('staff.applications.list', 'GET', '/staff/applications?limit=3', officialToken);
   await record('staff.applications.list.filtered', 'GET', '/staff/applications?status=Submitted', officialToken);
   await record('staff.applications.metrics', 'GET', '/staff/applications/metrics', officialToken);

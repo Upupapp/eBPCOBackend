@@ -147,6 +147,22 @@
         "mobileNumber": null
       }
     },
+    "me.rectify": {
+      "request": {
+        "method": "PATCH",
+        "path": "/me",
+        "query": null
+      },
+      "status": 200,
+      "contentType": "application/json; charset=utf-8",
+      "body": {
+        "firstName": "Maria Cristina",
+        "lastName": "Santos",
+        "mobileNumber": null,
+        "mobileVerifiedAt": null,
+        "mobileVerificationCleared": false
+      }
+    },
     "staff.applications.list": {
       "request": {
         "method": "GET",
@@ -167,7 +183,7 @@
             "lifecycleStatus": "Approved",
             "classification": "Simple",
             "businessName": "Aling Nena Sari-Sari Store",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
             "submittedAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -196,7 +212,7 @@
             "lifecycleStatus": "Under Evaluation",
             "classification": "Simple",
             "businessName": "Aling Nena Sari-Sari Store",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
             "submittedAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -225,7 +241,7 @@
             "lifecycleStatus": "Ready for Release",
             "classification": "Simple",
             "businessName": "Aling Nena Sari-Sari Store",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
             "submittedAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -268,7 +284,7 @@
             "lifecycleStatus": "Submitted",
             "classification": "Simple",
             "businessName": null,
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
             "submittedAt": "2026-01-01T00:00:00.000Z",
             "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -353,7 +369,7 @@
           "lifecycleStatus": "Under Evaluation",
           "classification": "Simple",
           "businessName": "Aling Nena Sari-Sari Store",
-          "applicantName": "Maria Santos",
+          "applicantName": "Maria Cristina Santos",
           "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
           "submittedAt": "2026-01-01T00:00:00.000Z",
           "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -490,7 +506,7 @@
           "lifecycleStatus": "Ready for Release",
           "classification": "Simple",
           "businessName": "Aling Nena Sari-Sari Store",
-          "applicantName": "Maria Santos",
+          "applicantName": "Maria Cristina Santos",
           "location": "12 Rizal Street, Poblacion Uno, Cabuyao",
           "submittedAt": "2026-01-01T00:00:00.000Z",
           "updatedAt": "2026-01-01T00:00:00.000Z",
@@ -862,7 +878,7 @@
             "applicationId": "00000000-0000-4000-8000-000000000000",
             "applicationReference": "BP-2026-000045",
             "referenceNumber": "BT-7741209",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "amountCentavos": 682000,
             "method": "Bank Transfer",
             "status": "Pending Verification",
@@ -2226,7 +2242,7 @@
             "createdAt": "2026-01-01T00:00:00.000Z",
             "owner": {
               "applicantId": "00000000-0000-4000-8000-000000000000",
-              "name": "Maria Santos",
+              "name": "Maria Cristina Santos",
               "email": "maria.santos@example.ph",
               "mobileNumber": null
             },
@@ -2250,7 +2266,7 @@
             "referenceNumber": "BP-2026-000044",
             "permitType": "Fencing Permit",
             "lifecycleStatus": "Under Evaluation",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
             "submittedAt": "2026-01-01T00:00:00.000Z",
@@ -2300,7 +2316,7 @@
             "referenceNumber": "BP-2026-000041",
             "permitType": "Fencing Permit",
             "lifecycleStatus": "Under Evaluation",
-            "applicantName": "Maria Santos",
+            "applicantName": "Maria Cristina Santos",
             "businessId": "00000000-0000-4000-8000-000000000000",
             "businessName": "Aling Nena Sari-Sari Store",
             "submittedAt": "2026-01-01T00:00:00.000Z",
@@ -2443,7 +2459,7 @@
       "body": {
         "entries": [
           {
-            "sequence": 7,
+            "sequence": 8,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "application.submitted",
             "outcome": "allowed",
@@ -2454,7 +2470,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 6,
+            "sequence": 7,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "permit.release-prepared",
             "outcome": "allowed",
@@ -2465,7 +2481,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 5,
+            "sequence": 6,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "permit.generated",
             "outcome": "allowed",
@@ -2476,7 +2492,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 4,
+            "sequence": 5,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "authorisation.refused",
             "outcome": "denied",
@@ -2487,7 +2503,7 @@
             "sourceAddress": "127.0.0.1"
           },
           {
-            "sequence": 3,
+            "sequence": 4,
             "occurredAt": "2026-01-01T00:00:00.000Z",
             "action": "evaluation.recorded",
             "outcome": "allowed",
@@ -2498,7 +2514,7 @@
             "sourceAddress": "127.0.0.1"
           }
         ],
-        "nextCursor": 3
+        "nextCursor": 4
       }
     },
     "staff.notifications": {

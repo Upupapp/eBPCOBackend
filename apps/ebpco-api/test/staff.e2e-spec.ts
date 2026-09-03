@@ -832,3 +832,128 @@ describe('what an officer learns about themselves (F-32)', () => {
     expect(body).not.toHaveProperty('fullName');
   });
 });
+
+describe('correcting what the LGU holds about you (C-3, RA 10173 s.16(d))', () => {
+  const patch = (token: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'PATCH', url: '/me',
+      headers: { authorization: `Bearer ${token}` }, payload,
+    });
+
+  const applicantToken = async (): Promise<string> => (await tokens.issueAccessToken({
+    sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+    scopes: ['profile:read', 'profile:write'],
+  })).token;
+
+  it('corrects a name and reads it back', async () => {
+    const token = await applicantToken();
+
+    const response = await patch(token, { firstName: 'Maria Cristina', lastName: 'Santos-Reyes' });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      firstName: 'Maria Cristina', lastName: 'Santos-Reyes',
+    });
+    // And it is what /me answers afterwards, not just what PATCH echoed.
+    expect((await get('/me', token)).json()).toMatchObject({ firstName: 'Maria Cristina' });
+  });
+
+  it('un-verifies the mobile number when the number changes', async () => {
+    // THE one that matters. The verification belonged to the OLD number -- a
+    // code was sent there and answered from there. Carrying the verified stamp
+    // across would assert somebody proved control of a number nobody ever sent
+    // anything to.
+    const token = await applicantToken();
+    await db.query(
+      'update accounts set mobile_number = $1, mobile_verified_at = now() where id = $2',
+      ['09171234567', APPLICANT_ACCOUNT]);
+
+    const response = await patch(token, { mobileNumber: '09181112222' });
+
+    expect(response.json()).toMatchObject({
+      mobileNumber: '09181112222',
+      mobileVerifiedAt: null,
+      // Said out loud, so a client re-prompts rather than leaving the citizen
+      // with an unverified contact they believe is verified.
+      mobileVerificationCleared: true,
+    });
+  });
+
+  it('keeps the verification when the number is unchanged', async () => {
+    // Correcting a name must not cost a citizen a verification they already
+    // completed.
+    const token = await applicantToken();
+    await db.query(
+      'update accounts set mobile_number = $1, mobile_verified_at = now() where id = $2',
+      ['09171234567', APPLICANT_ACCOUNT]);
+
+    const response = await patch(token, { firstName: 'Maria Cristina' });
+
+    expect(response.json<{ mobileVerifiedAt: string | null }>().mobileVerifiedAt).not.toBeNull();
+    expect(response.json()).toMatchObject({ mobileVerificationCleared: false });
+  });
+
+  it('deletes a pending challenge against the old number', async () => {
+    // An outstanding challenge would otherwise be confirmable afterwards and
+    // would verify the NEW number using a code sent to the old one.
+    const token = await applicantToken();
+    await db.query(
+      'update accounts set mobile_number = $1 where id = $2', ['09171234567', APPLICANT_ACCOUNT]);
+    await app.inject({
+      method: 'POST', url: '/me/contacts/mobile/request',
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const pending = async (): Promise<number> => Number((await db.query<{ n: string }>(
+      `select count(*)::text as n from contact_verification_challenges
+        where account_id = $1 and channel = 'mobile'`, [APPLICANT_ACCOUNT])).rows[0]!.n);
+    expect(await pending()).toBeGreaterThan(0);
+
+    await patch(token, { mobileNumber: '09181112222' });
+
+    expect(await pending()).toBe(0);
+  });
+
+  it('refuses to change the email, because that is the sign-in identity', async () => {
+    // Not a correction but a transfer of who can reach the account. The schema
+    // is strict so the client is TOLD, rather than watching the field be
+    // dropped and believing the address changed.
+    const response = await patch(await applicantToken(), { email: 'someone.else@example.ph' });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.stringify(response.json())).toMatch(/email/i);
+  });
+
+  it('refuses an empty correction rather than reporting one', async () => {
+    expect((await patch(await applicantToken(), {})).statusCode).toBe(400);
+  });
+
+  it('tells a staff member their name is not self-service', async () => {
+    // Set by the office on the access request, and standing against their acts
+    // in the audit trail. Correcting it is an administrator's job.
+    const response = await patch(await staffToken('evaluator'), { firstName: 'Renamed' });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/no applicant profile/i);
+  });
+
+  it('records the correction, because s.16(d) is a right the LGU must evidence', async () => {
+    await patch(await applicantToken(), { firstName: 'Maria Cristina' });
+
+    const recorded = await db.query<{ n: string }>(
+      `select count(*)::text as n from audit_events
+        where action = 'profile.rectified' and subject_id = $1`,
+      [APPLICANT_ACCOUNT]);
+    expect(Number(recorded.rows[0]!.n)).toBe(1);
+  });
+
+  it('keeps the corrected values out of the audit entry', async () => {
+    // An append-only table naming the old and new number would re-create the
+    // personal data the citizen just corrected, in the one place nobody can
+    // edit afterwards.
+    await patch(await applicantToken(), { mobileNumber: '09181112222' });
+
+    const entries = await db.query<{ before_state: unknown; after_state: unknown }>(
+      `select before_state, after_state from audit_events where action = 'profile.rectified'`);
+    expect(JSON.stringify(entries.rows)).not.toContain('09181112222');
+  });
+});
