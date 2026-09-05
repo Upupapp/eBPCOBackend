@@ -593,8 +593,9 @@ components:
       additionalProperties: false
       required:
         [id, label, fileName, contentType, byteSize, sha256, uploadedAt, expiresOn,
-         requirementCode, reviewStatus, reviewedAt, reviewReason, reviewRemark,
-         supersedesDocumentId, supersededByDocumentId, scanCleared, quarantined]
+         certifiedOn, requirementCode, reviewStatus, reviewedAt, reviewReason,
+         reviewRemark, supersedesDocumentId, supersededByDocumentId, scanCleared,
+         quarantined]
       properties:
         id: { type: string, format: uuid }
         label: { type: string }
@@ -606,6 +607,25 @@ components:
         sha256: { type: string, pattern: '^[a-f0-9]{64}$' }
         uploadedAt: { type: string, format: date-time }
         expiresOn: { type: [string, 'null'], format: date }
+        certifiedOn:
+          type: [string, 'null']
+          format: date
+          description: |
+            When the ISSUING OFFICE certified this document, read off its face.
+
+            Required by the Municipal ruling of 2026-09-03: the admin note on a
+            reused document says it is reused **and the date it was certified**.
+            An expiry cannot answer that, and an upload date is when the file
+            reached this service — three different dates, and none may stand in
+            for another. A test asserts they are distinct.
+
+            **NULL MEANS NOT RECORDED**, never that the document was
+            uncertified. Nobody supplies it yet — who does is a workflow
+            decision with the Municipality — so it is null on every document
+            today. Render "certification date not recorded"; do NOT fall back to
+            the upload date, which would tell an officer a document was
+            certified on the day it reached us.
+          examples: ['2024-03-12']
         requirementCode:
           type: [string, 'null']
           description: |

@@ -344,6 +344,15 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     scan_cleared: none('statutory'),
     scanned_at: none('statutory'),
     expires_on: none('statutory'),
+    // When the issuing office certified the document, read off its face. A date
+    // ABOUT a named citizen's submission, so it is classified rather than left
+    // as a bare timestamp: 'certified 12 March 2024' on a barangay clearance is
+    // a fact about that person's affairs.
+    //
+    // Statutory, like the document it describes: the Municipal ruling of
+    // 2026-09-03 requires the officer to be shown it when deciding, so it is
+    // part of the permit record and outlives an erasure request the same way.
+    certified_on: content('statutory', PERMIT_RECORD),
     uploaded_at: none('statutory'),
     deleted_at: none('statutory'),
     // ── Added by migration 027 (document review) ──────────────────────

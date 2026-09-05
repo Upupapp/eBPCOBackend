@@ -371,8 +371,19 @@ export class StaffQueueService {
              from applications a join businesses b on b.id = a.business_id where a.id = $1`,
           [applicationId]),
         this.db.query(
+          // `certified_on` is here because the Municipal ruling of 2026-09-03
+          // puts it at the point of decision: the officer must see that a
+          // document is reused AND the date it was certified, on the row they
+          // approve or reject from — not behind a preview button, which is what
+          // would have defeated the ruling.
+          //
+          // An expiry cannot answer "when was this certified", and an upload
+          // date is when the file reached this service. Null means NOT
+          // RECORDED, and the admin surface renders it as that rather than as
+          // an absence of certification.
           `select id, label, file_name, content_type, byte_size, status, scan_cleared,
-                  to_char(expires_on, 'YYYY-MM-DD') as expires_on, uploaded_at
+                  to_char(expires_on, 'YYYY-MM-DD') as expires_on,
+                  to_char(certified_on, 'YYYY-MM-DD') as certified_on, uploaded_at
              from documents where application_id = $1 and deleted_at is null
             order by uploaded_at`, [applicationId]),
         // Not a query of its own. Reading evaluations belongs to the

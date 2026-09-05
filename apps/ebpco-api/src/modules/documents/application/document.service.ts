@@ -154,7 +154,8 @@ export class DocumentService {
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; uploaded_at: Date; requirement_code: string | null;
-      expires_on: string | null; scan_cleared: boolean; quarantined: boolean;
+      expires_on: string | null; certified_on: string | null;
+      scan_cleared: boolean; quarantined: boolean;
     }>(
       `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
               d.uploaded_at, d.requirement_code, d.scan_cleared,
@@ -166,6 +167,7 @@ export class DocumentService {
               -- case, and "uploaded 9 months ago" is not the same statement as
               -- "expired".
               to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
+              to_char(d.certified_on, 'YYYY-MM-DD') as certified_on,
               (d.status = 'Rejected' and not d.scan_cleared) as quarantined
          from documents d
         where d.uploaded_by = $1 and d.application_id is null and d.deleted_at is null
@@ -184,6 +186,12 @@ export class DocumentService {
       // Null means NO EXPIRY RECORDED, never "does not expire". A client should
       // say it does not know rather than imply the document is good for ever.
       expiresOn: row.expires_on,
+      // When the issuing office certified it, which is NOT when it was
+      // uploaded. Null means NOT RECORDED -- never a date, and never a blank
+      // that reads as one. The citizen web lane had this falling back to the
+      // upload date and removed it: that would tell an officer a document was
+      // certified on the day it reached us.
+      certifiedOn: row.certified_on,
       scanCleared: row.scan_cleared,
       quarantined: row.quarantined,
       // No review fields: nothing here has been reviewed, because review

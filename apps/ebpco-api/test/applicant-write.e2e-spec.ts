@@ -1112,3 +1112,43 @@ describe('the reusable document library shows validity, not just age', () => {
     expect(document!.expiresOn).toBeNull();
   });
 });
+
+describe('the certification date the ruling requires', () => {
+  it('carries certifiedOn on the library, distinct from expiry and upload', async () => {
+    // The Municipal ruling: the admin note says a document is reused AND the
+    // date it was certified. An expiry cannot answer that, and an upload date
+    // is when the file reached us -- the citizen web lane had certifiedOn
+    // falling back to uploadedAt and removed it, because it would have told an
+    // officer a document was certified on the day it was uploaded.
+    const upload = await post('/documents', maria, {
+      fileName: 'clearance.pdf', label: 'Barangay clearance',
+      contentBase64: PDF.toString('base64'),
+    });
+    const documentId = upload.json<{ documentId: string }>().documentId;
+    await db.query(
+      "update documents set certified_on = '2024-03-12', expires_on = '2025-03-12' where id = $1",
+      [documentId]);
+
+    const [document] = (await get('/documents/me', maria))
+      .json<{ certifiedOn: string | null; expiresOn: string | null; uploadedAt: string }[]>();
+
+    expect(document!.certifiedOn).toBe('2024-03-12');
+    // Three different dates, none standing in for another.
+    expect(document!.expiresOn).toBe('2025-03-12');
+    expect(document!.uploadedAt).not.toContain('2024-03-12');
+  });
+
+  it('says null when no certification date was recorded', async () => {
+    // Nobody supplies this yet -- who does is a workflow decision with the
+    // Municipality. Null means NOT RECORDED, never that the document was not
+    // certified, and the officer is told exactly that.
+    await post('/documents', maria, {
+      fileName: 'photo.pdf', label: 'Site photograph', contentBase64: PDF.toString('base64'),
+    });
+
+    const [document] = (await get('/documents/me', maria))
+      .json<{ certifiedOn: string | null }[]>();
+
+    expect(document!.certifiedOn).toBeNull();
+  });
+});

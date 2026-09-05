@@ -131,6 +131,7 @@ export class ApplicantQueryService {
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; sha256: string; uploaded_at: Date; expires_on: string | null;
+      certified_on: string | null;
       requirement_code: string | null;
       review_status: string | null; review_remark: string | null; reviewed_at: Date | null;
       reason_code: string | null; reason_label: string | null; reason_description: string | null;
@@ -140,6 +141,7 @@ export class ApplicantQueryService {
       `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
               d.requirement_code,
               d.sha256, d.uploaded_at, to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
+              to_char(d.certified_on, 'YYYY-MM-DD') as certified_on,
               d.review_status, d.review_remark, d.reviewed_at,
               r.code as reason_code, r.label as reason_label, r.description as reason_description,
               d.supersedes_document_id,
@@ -167,6 +169,9 @@ export class ApplicantQueryService {
       sha256: row.sha256,
       uploadedAt: row.uploaded_at.toISOString(),
       expiresOn: row.expires_on,
+      // The date the ruling's admin note is built from. Null means NOT
+      // RECORDED; an expiry cannot answer this question.
+      certifiedOn: row.certified_on,
       // Which checklist entry this answers (C-6). Null means NOT ATTRIBUTED --
       // nobody recorded which requirement it is for -- and never that it
       // answers none.
