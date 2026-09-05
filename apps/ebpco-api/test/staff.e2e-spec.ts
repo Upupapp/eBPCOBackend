@@ -1044,3 +1044,46 @@ describe('the address the office writes to (both citizen lanes)', () => {
     expect(row!.middle_name).toBeNull();
   });
 });
+
+describe('GET /me and PATCH /me cannot mislead one interface', () => {
+  it('makes PATCH a strict superset of GET, plus one field a read cannot answer', async () => {
+    // The citizen web lane typed ONE interface for both and getMe() therefore
+    // declared mobileVerifiedAt, a field that was absent at runtime -- it would
+    // have rendered as a verified-looking blank on the one screen where
+    // verification state is the thing being shown.
+    //
+    // Neither shape contained the other: GET had id/kind/email, PATCH had the
+    // verification fields. So whichever way a client typed it, something was
+    // missing. A superset cannot do that.
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+      scopes: ['profile:read', 'profile:write'],
+    })).token;
+
+    const read = Object.keys((await get('/me', token)).json<Record<string, unknown>>()).sort();
+    const corrected = Object.keys((await app.inject({
+      method: 'PATCH', url: '/me',
+      headers: { authorization: `Bearer ${token}` },
+      payload: { firstName: 'Maria Cristina' },
+    })).json<Record<string, unknown>>()).sort();
+
+    // Everything a read returns, a correction returns too.
+    expect(corrected).toEqual(expect.arrayContaining(read));
+    // And exactly one thing more: what THIS request did, which no read can say.
+    expect(corrected.filter((key) => !read.includes(key)))
+      .toEqual(['mobileVerificationCleared']);
+  });
+
+  it('reports verification state on the READ, where a client needs it on load', async () => {
+    const token = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant',
+      scopes: ['profile:read'],
+    })).token;
+    await db.query('update accounts set mobile_verified_at = now() where id = $1',
+      [APPLICANT_ACCOUNT]);
+
+    const body = (await get('/me', token)).json<{ mobileVerifiedAt: string | null }>();
+
+    expect(body.mobileVerifiedAt).not.toBeNull();
+  });
+});

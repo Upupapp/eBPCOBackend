@@ -346,9 +346,22 @@ export class MeController {
     // The corrected record, read back. A client that has just changed a name
     // should not have to guess whether it took, and returning the row is
     // cheaper than a second request on the screen that most needs certainty.
+    //
+    // A STRICT SUPERSET of what GET /me returns, and that is the point rather
+    // than tidiness. These two shapes overlapped without either containing the
+    // other — GET had id/kind/email, PATCH had the verification fields — so a
+    // client typing one interface for both got a field that does not exist at
+    // runtime whichever way it chose. One shape plus one extra field cannot do
+    // that: `mobileVerificationCleared` is the only thing here a read cannot
+    // answer, because it describes what THIS request did rather than what the
+    // account is.
     const account = await this.accounts.findById(caller.sub);
     const profile = await this.accounts.profileOf(caller.sub);
     return {
+      id: caller.sub,
+      kind: account?.kind ?? 'applicant',
+      email: account?.email ?? null,
+      emailVerifiedAt: account?.emailVerifiedAt?.toISOString() ?? null,
       firstName: profile?.firstName ?? null,
       middleName: profile?.middleName ?? null,
       lastName: profile?.lastName ?? null,
@@ -392,6 +405,16 @@ export class MeController {
       kind: account.kind,
       email: account.email,
       emailVerifiedAt: account.emailVerifiedAt?.toISOString() ?? null,
+      // Present on the READ as well as on the correction, and its absence here
+      // was a real defect the citizen web lane hit.
+      //
+      // PATCH /me returned it and GET /me did not, so a client typing ONE
+      // interface for both declared a field that is simply absent at runtime.
+      // `undefined` then renders as a verified-looking blank — on the one
+      // screen where verification state is the thing being shown. Verification
+      // is a property of the account, not a fact about a correction, so the
+      // read is where it belongs most.
+      mobileVerifiedAt: account.mobileVerifiedAt?.toISOString() ?? null,
     };
 
     if (account.kind === 'staff') {

@@ -501,14 +501,41 @@ components:
         city: { type: [string, 'null'] }
         province: { type: [string, 'null'] }
         postalCode: { type: [string, 'null'] }
+        mobileVerifiedAt:
+          type: [string, 'null']
+          format: date-time
+          description: |
+            On the READ as well as the correction. Verification is a property of
+            the account, and a client needs it on load rather than only after a
+            change — its absence here is what made one shared interface lie.
 
     CorrectedProfile:
       type: object
       additionalProperties: false
+      description: |
+        A STRICT SUPERSET of `CitizenProfile`, plus one field.
+
+        Stated because it was not always true, and the difference cost a lane
+        real work: `GET /me` and `PATCH /me` once overlapped without either
+        containing the other — the read carried `id`/`kind`/`email`, the
+        correction carried the verification fields — so a client typing ONE
+        interface for both declared something absent at runtime whichever way it
+        chose. `mobileVerifiedAt` was the casualty: `undefined` renders as a
+        verified-looking blank on the one screen where verification state is the
+        thing being shown.
+
+        `mobileVerificationCleared` is the only field here a read cannot answer,
+        because it describes what THIS request did rather than what the account
+        is. Everything else is the profile.
       required:
-        [firstName, middleName, lastName, mobileNumber, street, barangay, city,
-         province, postalCode, mobileVerifiedAt, mobileVerificationCleared]
+        [id, kind, email, emailVerifiedAt, firstName, middleName, lastName,
+         mobileNumber, street, barangay, city, province, postalCode,
+         mobileVerifiedAt, mobileVerificationCleared]
       properties:
+        id: { type: string, format: uuid }
+        kind: { type: string, enum: [applicant, staff] }
+        email: { type: [string, 'null'], format: email }
+        emailVerifiedAt: { type: [string, 'null'], format: date-time }
         firstName: { type: [string, 'null'] }
         middleName: { type: [string, 'null'] }
         lastName: { type: [string, 'null'] }
