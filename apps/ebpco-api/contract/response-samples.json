@@ -213,8 +213,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-24",
-              "workingDaysElapsed": 35,
-              "workingDaysRemaining": -28,
+              "workingDaysElapsed": 39,
+              "workingDaysRemaining": -32,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -242,8 +242,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-24",
-              "workingDaysElapsed": 15,
-              "workingDaysRemaining": -8,
+              "workingDaysElapsed": 19,
+              "workingDaysRemaining": -12,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -271,8 +271,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-13",
-              "workingDaysElapsed": 44,
-              "workingDaysRemaining": -37,
+              "workingDaysElapsed": 48,
+              "workingDaysRemaining": -41,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -314,8 +314,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-28",
-              "workingDaysElapsed": 11,
-              "workingDaysRemaining": -4,
+              "workingDaysElapsed": 15,
+              "workingDaysRemaining": -8,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -346,12 +346,12 @@
         "pledgeIndeterminate": 5,
         "trend": {
           "total": {
-            "recent": 3,
-            "previous": 1
+            "recent": 2,
+            "previous": 2
           },
           "pendingUnderReview": {
-            "recent": 3,
-            "previous": 0
+            "recent": 2,
+            "previous": 1
           },
           "paymentsAwaitingVerification": {
             "recent": 0,
@@ -399,8 +399,8 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-08-19",
-            "workingDaysElapsed": 17,
-            "workingDaysRemaining": -10,
+            "workingDaysElapsed": 21,
+            "workingDaysRemaining": -14,
             "approximate": true,
             "suspended": false,
             "overdue": false
@@ -538,8 +538,8 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-07-13",
-            "workingDaysElapsed": 44,
-            "workingDaysRemaining": -37,
+            "workingDaysElapsed": 48,
+            "workingDaysRemaining": -41,
             "approximate": true,
             "suspended": false,
             "overdue": false
@@ -1516,7 +1516,7 @@
         "classification": "Simple",
         "pledge": {
           "pledgedWorkingDays": 7,
-          "dueDate": "2026-09-15",
+          "dueDate": "2026-09-21",
           "approximate": true,
           "suspended": false,
           "suspendedSince": null

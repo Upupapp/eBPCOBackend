@@ -238,11 +238,13 @@ export class StaffDirectoryController {
   @HttpCode(HttpStatus.OK)
   @RequireScopes('staff:administer')
   async enable(
-    @Req() request: AuthenticatedRequest, @Param('userId') userId: string,
+    @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
+    const input = parse(disableShape, body ?? {});
     const actor = actorOf(request);
     const result = await this.directory.setDisabled({
       id: userId, disabled: false, actor: actor.accountId, actorRole: actor.role,
+      ...(input.reason === undefined ? {} : { reason: input.reason }),
     });
     if (!result.ok) refuse(result);
     return { ...result.user };

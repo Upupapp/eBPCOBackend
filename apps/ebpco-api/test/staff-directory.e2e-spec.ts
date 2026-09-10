@@ -251,6 +251,20 @@ describe('disabling an account', () => {
     expect(audit.rows[0]?.subject_id).toBe(victim.id);
     expect(audit.rows[0]?.after_state.reason).toBe('Suspected fraud.');
   });
+
+  it('records a reason given when re-enabling an account, the same as disabling it', async () => {
+    const victim = await staffAccount('cashier');
+    await send('POST', `/staff/users/${victim.id}/disable`, adminToken, {});
+    await send('POST', `/staff/users/${victim.id}/enable`, adminToken, {
+      reason: 'Return from suspension confirmed by HR.',
+    });
+
+    const audit = await db.query<{ after_state: { reason: string } }>(
+      `select after_state from audit_events
+        where action = 'staff.account.enabled' order by sequence desc limit 1`,
+    );
+    expect(audit.rows[0]?.after_state.reason).toBe('Return from suspension confirmed by HR.');
+  });
 });
 
 describe('sessions', () => {
