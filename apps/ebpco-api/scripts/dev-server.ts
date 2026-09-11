@@ -33,6 +33,13 @@ import { SqlClient } from '../src/persistence/sql-client';
 import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { PasswordHasher } from '../src/modules/identity/domain/password-hasher';
 import { StaffRole } from '../src/modules/identity/domain/account';
+import { normaliseEmail } from '../src/modules/identity/application/account.repository';
+import { TotpService } from '../src/modules/identity/application/totp.service';
+import { SecretBox } from '../src/modules/identity/domain/secret-box';
+import { codeFor, stepAt } from '../src/modules/identity/domain/totp';
+
+/** Local QA account, added alongside the existing dev roster below it. */
+const QA_EMAIL = 'QA@lguids.com.ph';
 
 const say = (line = ''): void => void process.stdout.write(`${line}\n`);
 
@@ -48,6 +55,7 @@ const say = (line = ''): void => void process.stdout.write(`${line}\n`);
 const PASSWORD = randomBytes(9).toString('base64url');
 
 const STAFF: ReadonlyArray<{ email: string; role: StaffRole }> = [
+  { email: QA_EMAIL, role: 'super-admin' },
   { email: 'super@lgu.gov.ph', role: 'super-admin' },
   { email: 'admin@lgu.gov.ph', role: 'administrator' },
   { email: 'records@lgu.gov.ph', role: 'records-officer' },
@@ -59,17 +67,40 @@ const STAFF: ReadonlyArray<{ email: string; role: StaffRole }> = [
   { email: 'auditor@lgu.gov.ph', role: 'auditor' },
 ];
 
-async function seed(db: SqlClient, hasher: PasswordHasher): Promise<void> {
+async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountId: string }> {
   const hash = await hasher.hash(PASSWORD);
+  let qaAccountId = '';
 
   for (const { email, role } of STAFF) {
     const id = randomUUID();
+    if (email === QA_EMAIL) qaAccountId = id;
+    // email_normalised must actually be normalised — authenticate() looks accounts
+    // up by normaliseEmail(input), which lowercases. Every entry above happened to
+    // already be lowercase; QA_EMAIL is the first one that isn't, and reusing the
+    // raw literal here would silently make this account unable to sign in.
     await db.query(
       `insert into accounts (id, kind, email, email_normalised, password_hash)
-       values ($1,'staff',$2,$2,$3)`,
-      [id, email, hash],
+       values ($1,'staff',$2,$3,$4)`,
+      [id, email, normaliseEmail(email), hash],
     );
     await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+    // `super-admin` is in MFA_REQUIRED_ROLES, and verifyTotp fails closed with no
+    // secret enrolled — an account seeded with this role and nothing else can
+    // never sign in (see D-10 / seed-super-admin.ts). QA_EMAIL is enrolled right
+    // after main() calls this; the other MFA-required roles below are left as
+    // they were, since fixing those wasn't asked for and isn't needed for this.
+    if (email === QA_EMAIL) {
+      // Visibility is gated on granted permit types (an officer assigned none
+      // sees nothing), and nothing here grants any by default — the seeded
+      // applications below would otherwise be invisible through /staff/applications
+      // even though they exist. Same grant seed-super-admin.ts gives the real
+      // account, scoped to QA_EMAIL only.
+      await db.query(
+        `insert into staff_permit_access (account_id, permit_type, granted_by)
+         select $1, permit_type, $1 from permit_types where retired_at is null`,
+        [id],
+      );
+    }
   }
 
   // One applicant with a business and a few applications spread across the
@@ -131,6 +162,8 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<void> {
       [line, amount],
     );
   }
+
+  return { qaAccountId };
 }
 
 async function main(): Promise<void> {
@@ -164,7 +197,23 @@ async function main(): Promise<void> {
   const logger = new StructuredLogger('info', (line) => say(line));
   const db = await PgliteClient.create();
   await migrate(db, loadMigrations(resolve(__dirname, '../db/migrations')));
-  await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
+  const { qaAccountId } = await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
+
+  // QA_EMAIL holds super-admin, which is MFA-required — enrol and activate the
+  // same way seed-super-admin.ts does for the real deployment, so sign-in
+  // actually succeeds instead of failing closed on a missing factor.
+  const totp = new TotpService(
+    db,
+    new SecretBox(config.TOTP_ENCRYPTION_KEY),
+    `eBPCO ${config.EBPCO_ENVIRONMENT}`,
+  );
+  const offer = await totp.begin({ accountId: qaAccountId });
+  if (!offer.ok) throw new Error(`could not begin MFA enrolment for ${QA_EMAIL}: ${offer.detail}`);
+  const activated = await totp.activate({
+    accountId: qaAccountId,
+    code: codeFor(offer.value.secret, stepAt(new Date())),
+  });
+  if (!activated.ok) throw new Error(`could not activate MFA for ${QA_EMAIL}: ${activated.detail}`);
 
   const app = await createApp(config, logger, db);
   await app.listen({ port: config.PORT, host: '127.0.0.1' });
@@ -176,6 +225,13 @@ async function main(): Promise<void> {
   say(`  password for every account below: ${PASSWORD}`);
   for (const { email, role } of STAFF) say(`    ${email.padEnd(26)} ${role}`);
   say(`    ${'maria@example.ph'.padEnd(26)} applicant`);
+  say('');
+  say(`  ${QA_EMAIL} requires MFA. Scan this into an authenticator app now —`);
+  say('  it is generated fresh this run and shown once:');
+  say('');
+  say(`    ${offer.value.uri}`);
+  say('');
+  say('  Use the code AFTER the one your app shows right now — activation just spent the current step.');
   say('');
 }
 
