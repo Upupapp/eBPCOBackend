@@ -130,7 +130,7 @@ export class AuthController {
       }
       throw new ProblemException(
         ProblemType.unauthorized,
-        'Those credentials were not accepted',
+        'Check your email and password and try again',
         HttpStatus.UNAUTHORIZED,
       );
     }
