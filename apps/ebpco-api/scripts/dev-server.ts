@@ -32,7 +32,7 @@ import { PgliteClient } from '../src/persistence/pglite-client';
 import { SqlClient } from '../src/persistence/sql-client';
 import { loadMigrations, migrate } from '../src/persistence/migrator';
 import { PasswordHasher } from '../src/modules/identity/domain/password-hasher';
-import { StaffRole } from '../src/modules/identity/domain/account';
+import { StaffRole, MFA_REQUIRED_ROLES } from '../src/modules/identity/domain/account';
 import { normaliseEmail } from '../src/modules/identity/application/account.repository';
 import { TotpService } from '../src/modules/identity/application/totp.service';
 import { SecretBox } from '../src/modules/identity/domain/secret-box';
@@ -67,13 +67,17 @@ const STAFF: ReadonlyArray<{ email: string; role: StaffRole }> = [
   { email: 'auditor@lgu.gov.ph', role: 'auditor' },
 ];
 
-async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountId: string }> {
+async function seed(
+  db: SqlClient, hasher: PasswordHasher,
+): Promise<{ qaAccountId: string; staffAccountIds: ReadonlyMap<string, string> }> {
   const hash = await hasher.hash(PASSWORD);
   let qaAccountId = '';
+  const staffAccountIds = new Map<string, string>();
 
   for (const { email, role } of STAFF) {
     const id = randomUUID();
     if (email === QA_EMAIL) qaAccountId = id;
+    staffAccountIds.set(email, id);
     // email_normalised must actually be normalised — authenticate() looks accounts
     // up by normaliseEmail(input), which lowercases. Every entry above happened to
     // already be lowercase; QA_EMAIL is the first one that isn't, and reusing the
@@ -84,11 +88,24 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountI
       [id, email, normaliseEmail(email), hash],
     );
     await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
-    // `super-admin` is in MFA_REQUIRED_ROLES, and verifyTotp fails closed with no
-    // secret enrolled — an account seeded with this role and nothing else can
-    // never sign in (see D-10 / seed-super-admin.ts). QA_EMAIL is enrolled right
-    // after main() calls this; the other MFA-required roles below are left as
-    // they were, since fixing those wasn't asked for and isn't needed for this.
+    // Every MFA_REQUIRED_ROLES account is enrolled+activated in main() below,
+    // right after this function returns — verifyTotp fails closed with no
+    // secret enrolled, so a seeded account in one of those roles and nothing
+    // else could never sign in (see D-10 / seed-super-admin.ts).
+    //
+    // Visibility is ALSO gated on a `staff_access` row (formsFor() in
+    // staff-queue.service.ts: no row at all means null access, which means
+    // EVERY permit type is filtered out regardless of staff_permit_access —
+    // "no assignment row means no access, never all access"). Migration 032
+    // added this gate after this seed already existed; nothing here ever
+    // gave any staff account (QA included) that row, so every staff account
+    // saw an empty queue no matter its role or scopes. Every seeded staff
+    // account gets 'view-edit' here so a real (non-QA) role can be tested at
+    // all — matching seed-super-admin.ts's own grant to the real super admin.
+    await db.query(
+      'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
+      [id, 'view-edit'],
+    );
     if (email === QA_EMAIL) {
       // Visibility is gated on granted permit types (an officer assigned none
       // sees nothing), and nothing here grants any by default — the seeded
@@ -98,6 +115,16 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountI
       await db.query(
         `insert into staff_permit_access (account_id, permit_type, granted_by)
          select $1, permit_type, $1 from permit_types where retired_at is null`,
+        [id],
+      );
+    } else {
+      // Every other seeded staff account gets the one permit type the seed
+      // below actually files applications under — enough to test its own
+      // role's real actions against real data, without the blanket grant
+      // QA gets (QA's own account is the only one meant to see everything).
+      await db.query(
+        `insert into staff_permit_access (account_id, permit_type, granted_by)
+         values ($1,'Fencing Permit',$1)`,
         [id],
       );
     }
@@ -133,11 +160,23 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountI
     'Document Verification': ['Received', 'Document Verification'],
     'Under Evaluation': ['Received', 'Document Verification', 'Under Evaluation'],
     'Revision Required': ['Received', 'Document Verification', 'Revision Required'],
+    // Walked all the way to Approved (bypassing the real per-step service
+    // validation the same way every row above does) so Stage 4's
+    // generate/prepare-release/release chain has a real Approved+Paid
+    // application to exercise without a lengthy multi-role manual walk
+    // through evaluation and assessment first.
+    'Approved': [
+      'Received', 'Document Verification', 'Under Evaluation', 'Assessed',
+      'Payment Submitted', 'Payment Under Verification', 'Payment Verified',
+      'For Approval', 'Approved',
+    ],
   };
   let sequence = 0;
+  const idByStatus = new Map<string, string>();
   for (const [status, steps] of Object.entries(path)) {
     sequence += 1;
     const id = randomUUID();
+    idByStatus.set(status, id);
     await db.query(
       `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
                                  application_action, lifecycle_status, location, submitted_at, created_by)
@@ -148,8 +187,46 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountI
     for (const step of steps) {
       await db.query('update applications set lifecycle_status = $1 where id = $2', [step, id]);
     }
-    void status;
   }
+
+  // The Approved row above needs a real, verified Order of Payment too — the
+  // frontend's own same-tick "Generate Permit" hint checks paymentStatus ===
+  // 'Paid' alongside lifecycleStatus === 'Approved', and the queue derives
+  // paymentStatus from a genuinely verified `payments` row, not the
+  // lifecycle status alone.
+  {
+    const approvedId = idByStatus.get('Approved')!;
+    const assessorId = staffAccountIds.get('assessor@lgu.gov.ph')!;
+    const cashierId = staffAccountIds.get('cashier@lgu.gov.ph')!;
+    const orderId = randomUUID();
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos,
+         processing_centavos, architectural_centavos, structural_centavos, electrical_centavos,
+         others_centavos, total_centavos, fee_schedule_version, assessed_by)
+       values ($1,$2,'OP-2026-000001',50000,120000,0,0,0,0,170000,'2026.1',$3)`,
+      [orderId, approvedId, assessorId],
+    );
+    await db.query(
+      `insert into payments (id, order_of_payment_id, application_id, reference_number,
+         amount_centavos, method, status, submitted_by, verified_at, verified_by,
+         official_receipt_number)
+       values ($1,$2,$3,'PAY-2026-000001',170000,'Onsite','Paid',$4,now(),$5,'OR-2026-000001')`,
+      [randomUUID(), orderId, approvedId, account, cashierId],
+    );
+  }
+
+  // The rows above use hand-picked reference numbers instead of the real
+  // `nextReference()` sequence (submission.service.ts), which reads/writes
+  // `document_number_sequences('APP', <year>)`. Without this, that sequence
+  // never learns those numbers were taken, so the first REAL filing after
+  // this seed runs collides with a seeded row on the exact same
+  // "E-BPCO-2026-000001" — every dev-server run, not just occasionally.
+  await db.query(
+    `insert into document_number_sequences (series, year, last_issued)
+     values ('APP', 2026, $1)
+     on conflict (series, year) do update set last_issued = excluded.last_issued`,
+    [sequence],
+  );
 
   await db.query(
     `insert into fee_schedules (version, effective_from, published_by)
@@ -163,7 +240,7 @@ async function seed(db: SqlClient, hasher: PasswordHasher): Promise<{ qaAccountI
     );
   }
 
-  return { qaAccountId };
+  return { qaAccountId, staffAccountIds };
 }
 
 async function main(): Promise<void> {
@@ -197,23 +274,33 @@ async function main(): Promise<void> {
   const logger = new StructuredLogger('info', (line) => say(line));
   const db = await PgliteClient.create();
   await migrate(db, loadMigrations(resolve(__dirname, '../db/migrations')));
-  const { qaAccountId } = await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
+  const { staffAccountIds } = await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
 
-  // QA_EMAIL holds super-admin, which is MFA-required — enrol and activate the
-  // same way seed-super-admin.ts does for the real deployment, so sign-in
-  // actually succeeds instead of failing closed on a missing factor.
+  // Every MFA_REQUIRED_ROLES account is enrolled+activated the same way
+  // seed-super-admin.ts does for the real deployment, so sign-in actually
+  // succeeds instead of failing closed on a missing factor. Previously only
+  // QA_EMAIL was enrolled — assessor/cashier/building-official/releasing-
+  // officer/administrator/super-admin (super@lgu.gov.ph) could never sign in
+  // at all, which blocks testing anything gated on `staff:assess`/
+  // `staff:verify-payment`/etc. with a real (non-QA) account.
   const totp = new TotpService(
     db,
     new SecretBox(config.TOTP_ENCRYPTION_KEY),
     `eBPCO ${config.EBPCO_ENVIRONMENT}`,
   );
-  const offer = await totp.begin({ accountId: qaAccountId });
-  if (!offer.ok) throw new Error(`could not begin MFA enrolment for ${QA_EMAIL}: ${offer.detail}`);
-  const activated = await totp.activate({
-    accountId: qaAccountId,
-    code: codeFor(offer.value.secret, stepAt(new Date())),
-  });
-  if (!activated.ok) throw new Error(`could not activate MFA for ${QA_EMAIL}: ${activated.detail}`);
+  const mfaEnrolled: { email: string; uri: string }[] = [];
+  for (const { email, role } of STAFF) {
+    if (!MFA_REQUIRED_ROLES.includes(role)) continue;
+    const accountId = staffAccountIds.get(email)!;
+    const offer = await totp.begin({ accountId });
+    if (!offer.ok) throw new Error(`could not begin MFA enrolment for ${email}: ${offer.detail}`);
+    const activated = await totp.activate({
+      accountId,
+      code: codeFor(offer.value.secret, stepAt(new Date())),
+    });
+    if (!activated.ok) throw new Error(`could not activate MFA for ${email}: ${activated.detail}`);
+    mfaEnrolled.push({ email, uri: offer.value.uri });
+  }
 
   const app = await createApp(config, logger, db);
   await app.listen({ port: config.PORT, host: '127.0.0.1' });
@@ -226,12 +313,15 @@ async function main(): Promise<void> {
   for (const { email, role } of STAFF) say(`    ${email.padEnd(26)} ${role}`);
   say(`    ${'maria@example.ph'.padEnd(26)} applicant`);
   say('');
-  say(`  ${QA_EMAIL} requires MFA. Scan this into an authenticator app now —`);
-  say('  it is generated fresh this run and shown once:');
+  say('  These accounts require MFA. Scan each into an authenticator app now —');
+  say('  every secret below is generated fresh this run and shown once:');
   say('');
-  say(`    ${offer.value.uri}`);
+  for (const { email, uri } of mfaEnrolled) {
+    say(`    ${email}`);
+    say(`      ${uri}`);
+  }
   say('');
-  say('  Use the code AFTER the one your app shows right now — activation just spent the current step.');
+  say('  Use the code AFTER the one your app shows right now for each — activation just spent the current step.');
   say('');
 }
 

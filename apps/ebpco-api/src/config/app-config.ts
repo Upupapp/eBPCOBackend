@@ -244,6 +244,35 @@ const schema = z
     BUILD_TIME: z.string().min(1).optional(),
 
     DOCS_ENABLED: boolFromEnv(false),
+
+    /**
+     * Which mailer sends account-recovery email (the password-reset link, and
+     * only that, today). `console` — the default — prints the message and the
+     * link instead of delivering it, which is what every environment gets
+     * until an operator deliberately opts into `smtp`. Unlike
+     * `OBJECT_STORE_DRIVER`/`MALWARE_SCANNER_DRIVER`, production has no forced
+     * value: a citizen document served from the wrong disk or an unscanned
+     * upload are safety properties this service must not boot without, but an
+     * officer who never receives a reset email can still be helped by an
+     * administrator directly, so choosing `smtp` is a deployment decision
+     * rather than a floor this service enforces.
+     */
+    MAIL_DRIVER: z.enum(['smtp', 'console']).optional().transform((v) => v ?? 'console'),
+    SMTP_HOST: z.string().optional().transform((v) => v ?? ''),
+    SMTP_PORT: intFromEnv(1, 65535, 587),
+    // 587/STARTTLS is the common default; 465 wants this true.
+    SMTP_SECURE: boolFromEnv(false),
+    SMTP_USER: z.string().optional().transform((v) => v ?? ''),
+    SMTP_PASS: z.string().optional().transform((v) => v ?? ''),
+    MAIL_FROM: z.string().optional().transform((v) => v ?? 'E-BPCO <no-reply@ebpco.local>'),
+
+    /**
+     * Where the admin portal is reachable, for building a link a browser can
+     * open. Not inferred from the request: the API and the portal are
+     * different origins, and a link built from the API's own host would send
+     * an officer to the API.
+     */
+    PORTAL_BASE_URL: z.string().optional().transform((v) => v ?? 'http://localhost:4200'),
   })
   .superRefine((config, ctx) => {
     // An invariant, not a preference. Serving the contract as live documentation
@@ -324,6 +353,24 @@ const schema = z
             code: z.ZodIssueCode.custom,
             path: [key],
             message: 'required when OBJECT_STORE_DRIVER is "s3"',
+          });
+        }
+      }
+    }
+
+    if (config.MAIL_DRIVER === 'smtp') {
+      // Named individually, same as the S3 block above: an operator reading a
+      // crash loop needs the variable, not "SMTP is misconfigured".
+      for (const [key, value] of [
+        ['SMTP_HOST', config.SMTP_HOST],
+        ['SMTP_USER', config.SMTP_USER],
+        ['SMTP_PASS', config.SMTP_PASS],
+      ] as const) {
+        if (value.trim().length === 0) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: [key],
+            message: 'required when MAIL_DRIVER is "smtp"',
           });
         }
       }

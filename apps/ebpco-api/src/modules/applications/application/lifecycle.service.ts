@@ -8,6 +8,7 @@ import { LifecycleStatus } from '../domain/lifecycle';
 import { Refusal } from '../domain/lifecycle-errors';
 import { loadTransitions } from '../domain/transition-repository';
 import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
+import { EVALUATION_STAGES } from './evaluation.service';
 
 /**
  * Moves an application, and records everything that follows, atomically.
@@ -78,11 +79,10 @@ const SNAPSHOT_SQL = `
         join letters_of_instruction l on l.id = ii.letter_id
        where l.application_id = a.id and ii.resolved_at is null
     ) as open_instruction_count,
-    not exists (
-      select 1 from evaluations e where e.application_id = a.id and e.result = 'Pending'
-    ) and exists (
-      select 1 from evaluations e where e.application_id = a.id
-    ) as evaluations_complete,
+    (
+      select count(*)::int from evaluations e
+       where e.application_id = a.id and e.result = 'Passed'
+    ) = ${EVALUATION_STAGES.length} as evaluations_complete,
     exists (
       select 1 from orders_of_payment o
        where o.application_id = a.id and o.superseded_at is null
@@ -239,6 +239,10 @@ export class LifecycleService {
       // The database trigger writes the timeline row and bumps the version, so
       // this update is the single source of both. Guarding on the version we
       // decided against closes the window between the read and the write.
+      // The trigger has no column on `applications` to read the remarks
+      // from, so they are staged here as a transaction-local setting it
+      // reads while building the `application_transitions` row.
+      await tx.query('select set_config($1, $2, true)', ['app.transition_remarks', remarks ?? '']);
       const updated = await tx.query(
         `update applications
             set lifecycle_status = $1,

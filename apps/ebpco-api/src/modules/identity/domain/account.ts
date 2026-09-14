@@ -113,8 +113,14 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  * Least privilege, per role. An evaluator cannot verify a payment; a cashier
  * cannot approve a permit. Separation of duty is the point: the officer who
  * assesses a fee must not also be the one who confirms it was paid.
+ *
+ * Every role except `super-admin` (below). Kept as its own object, rather
+ * than folded into the exported `ROLE_SCOPES`, because `super-admin`'s own
+ * entry is DERIVED from this one — the union of every scope any of these
+ * nine roles holds — and an object literal cannot reference its own sibling
+ * keys while it is still being built.
  */
-export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
+const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, readonly Scope[]>> = {
   'receiving-officer': ['applications:read', 'documents:read', 'staff:receive'],
   // `applications:write` because withdrawing an application on the applicant's
   // behalf, or expiring one after inaction, is maintenance of the record --
@@ -147,24 +153,38 @@ export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
   // absence of a write scope here is the definition of the role, not an
   // omission to be filled in later.
   auditor: ['applications:read', 'documents:read', 'payments:read', 'audit:read'],
+};
 
-  // The portal's Super Admin. It holds every READ scope and the administration
-  // scope, and DELIBERATELY NOT the four acting scopes -- assess, verify,
-  // approve, release.
-  //
-  // Seeing every screen is not the same as being able to perform every act.
-  // Granting all sixteen scopes to one role would dissolve the separation of
-  // duty the rest of this table exists to enforce: the officer who assesses a
-  // fee must not be the one who confirms it was paid, and a role that can do
-  // both makes that rule unenforceable by anyone holding it. An administrator
-  // who genuinely needs to assess can be given the assessor role as well --
-  // visibly, in the role table, where it can be audited.
-  'super-admin': [
-    'applications:read', 'applications:write',
-    'documents:read', 'documents:write',
-    'payments:read', 'notifications:read',
-    'audit:read', 'staff:administer',
-  ],
+/**
+ * The portal's Super Admin. Holds every scope any OTHER staff role holds --
+ * every acting scope (receive, evaluate, assess, verify-payment, approve,
+ * release) in addition to every read scope and staff:administer.
+ *
+ * This is a deliberate reversal of this role's original design, made at the
+ * owner's explicit request (2026-09-13): the separation-of-duty argument that
+ * used to keep the acting scopes off Super Admin -- the officer who assesses
+ * a fee must not be the one who confirms it was paid -- is a real control
+ * this owner has chosen to trade away for one account that can act
+ * everywhere, knowingly. Nothing enforces separation of duty for this role
+ * from here on.
+ *
+ * Derived as the union of `ACTING_ROLE_SCOPES`, not `ALL_SCOPES`: the latter
+ * is the full `Scope` TYPE union, including `payments:write`,
+ * `notifications:write` and `profile:*` -- scopes that exist for APPLICANT
+ * tokens (`APPLICANT_SCOPES`) and that no staff role, this one included, has
+ * ever needed to act on anything gated in the admin portal. Spelling it as a
+ * literal `ALL_SCOPES` copy was tried first and caught by
+ * `staff-access.spec.ts`: `profile:write` grants authority (ends `:write`)
+ * but is also a `SELF_SCOPES` entry every account keeps even at `view` level,
+ * so it survived the view-level filter and broke the one guarantee that
+ * matters most -- a view-only Super Admin must hold no scope that acts.
+ */
+const SUPER_ADMIN_SCOPES: readonly Scope[] =
+  [...new Set(Object.values(ACTING_ROLE_SCOPES).flat())];
+
+export const ROLE_SCOPES: Readonly<Record<StaffRole, readonly Scope[]>> = {
+  ...ACTING_ROLE_SCOPES,
+  'super-admin': SUPER_ADMIN_SCOPES,
 };
 
 /**

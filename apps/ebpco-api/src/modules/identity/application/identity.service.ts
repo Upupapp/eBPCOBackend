@@ -39,11 +39,21 @@ export type AuthenticationOutcome =
    * Distinguishable only because the caller has ALREADY proven the password.
    * Telling them a second factor is required reveals nothing further.
    */
-  | { readonly ok: false; readonly reason: 'mfa-required' };
+  | { readonly ok: false; readonly reason: 'mfa-required' }
+  /**
+   * Same reasoning as `mfa-required`: reaching this point already requires the
+   * correct password, so naming the code (rather than the password) as what
+   * was wrong reveals nothing an attacker without the password didn't already
+   * lack. Telling them to recheck their password here would send someone who
+   * typed the right one back to second-guess the wrong field.
+   */
+  | { readonly ok: false; readonly reason: 'mfa-invalid' };
 
 export interface PasswordResetTicket {
   readonly token: string;
   readonly expiresAt: Date;
+  /** For addressing the email by name. Null means genuinely not on record, not blank. */
+  readonly fullName: string | null;
 }
 
 export class IdentityService {
@@ -115,7 +125,7 @@ export class IdentityService {
         // Named, unlike the refusals above: reaching here requires the correct
         // password, so the account's existence is not news to whoever did.
         await this.record(failedSecondFactor(account.id, account.kind));
-        return { ok: false, reason: 'rejected' };
+        return { ok: false, reason: 'mfa-invalid' };
       }
     }
 
@@ -285,7 +295,7 @@ export class IdentityService {
     // Only the digest is stored. The token goes to the applicant by email, and
     // a leak of this store should not hand over working reset links.
     await this.resetTickets.issue(resetTokenDigest(token), account.id, now, expiresAt);
-    return { token, expiresAt };
+    return { token, expiresAt, fullName: account.fullName };
   }
 
   /**

@@ -64,16 +64,39 @@ export class FeeConfigService {
     const today = isoDate(this.clock());
     const heads = await this.db.query<{
       version: string; effective_from: string; effective_to: string | null; published_by: string | null;
+      created_at: string;
     }>(
       `select version, to_char(effective_from, 'YYYY-MM-DD') as effective_from,
-              to_char(effective_to, 'YYYY-MM-DD') as effective_to, published_by
-         from fee_schedules order by effective_from desc`,
+              to_char(effective_to, 'YYYY-MM-DD') as effective_to, published_by, created_at
+         from fee_schedules order by effective_from desc, created_at desc`,
     );
     const entries = await this.db.query<{
       version: string; permit_type: string; line: FeeLine; amount_centavos: string; basis: string;
     }>(
       'select version, permit_type, line, amount_centavos, basis from fee_schedule_entries',
     );
+
+    // Which started, not-yet-closed schedule is the REAL one in force.
+    // "Not yet closed" means the same thing the per-row status below means
+    // by "In force": `effective_to` is null OR still in the future (a row
+    // properly closed on some later schedule's future effective date must
+    // still read as in force until that date arrives — e.g. `2026.1` closed
+    // today for a schedule taking effect in 30 days is in force for those
+    // 30 days). Normally at most one row matches. But `publish()` cannot
+    // close a same-day predecessor with a `date`-only `effective_to` (the
+    // `fee_schedule_range` constraint requires `effective_to >
+    // effective_from`, and closing "on" the same day both started would set
+    // them equal), so two schedules published on the same calendar day both
+    // match here, both with `effective_to` still null. Between those, the
+    // one published LATER (by `created_at`) is the one actually in force;
+    // any other such row is superseded in every sense that matters even
+    // though its own `effective_to` never got set.
+    const openCandidates = heads.rows.filter(
+      (h) => (h.effective_to === null || h.effective_to > today) && h.effective_from <= today,
+    );
+    const inForceVersion = openCandidates.length === 0 ? null : openCandidates.reduce(
+      (latest, h) => (h.created_at > latest.created_at ? h : latest),
+    ).version;
 
     return heads.rows.map((head) => ({
       version: head.version,
@@ -85,7 +108,9 @@ export class FeeConfigService {
       // to disagree with the server about which fees apply today.
       status: head.effective_to !== null && head.effective_to <= today
         ? 'Superseded'
-        : head.effective_from > today ? 'Scheduled' : 'In force',
+        : head.effective_from > today
+          ? 'Scheduled'
+          : head.version === inForceVersion ? 'In force' : 'Superseded',
       entries: entries.rows
         .filter((entry) => entry.version === head.version)
         .map((entry) => ({

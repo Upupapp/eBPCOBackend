@@ -10,6 +10,8 @@ import { RectificationService } from '../application/rectification.service';
 import { DataExportService } from '../../compliance/application/data-export.service';
 import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
+import { AccountRecoveryMailer } from '../application/account-recovery-mailer';
+import { StructuredLogger } from '../../../common/logging/logger';
 
 /**
  * The identity endpoints.
@@ -108,7 +110,11 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 
 @Controller('auth')
 export class AuthController {
-  constructor(private readonly identity: IdentityService) {}
+  constructor(
+    private readonly identity: IdentityService,
+    private readonly recoveryMailer: AccountRecoveryMailer,
+    private readonly logger: StructuredLogger,
+  ) {}
 
   @Public()
   @Post('token')
@@ -126,6 +132,17 @@ export class AuthController {
           'A second factor is required',
           HttpStatus.UNAUTHORIZED,
           'Enter the code from your authenticator app.',
+        );
+      }
+      if (outcome.reason === 'mfa-invalid') {
+        // Same reasoning as mfa-required above — the password is already
+        // proven by the time this is reachable, so naming the code (not the
+        // password) as what was wrong reveals nothing new.
+        throw new ProblemException(
+          '/problems/mfa-invalid',
+          'The code was not accepted',
+          HttpStatus.UNAUTHORIZED,
+          "That code wasn't accepted. Try the next one from your authenticator app.",
         );
       }
       throw new ProblemException(
@@ -213,10 +230,23 @@ export class AuthController {
   @HttpCode(HttpStatus.ACCEPTED)
   async forgot(@Body() body: unknown): Promise<void> {
     const input = parse(forgotRequest, body);
-    // The ticket is deliberately discarded here: in production it is delivered
-    // out of band. Returning it would make this endpoint a password reset for
-    // anyone who knows an address.
-    await this.identity.beginPasswordReset(input.email);
+    // The ticket itself is never put in the RESPONSE: returning it would make
+    // this endpoint a password reset for anyone who knows an address. It is
+    // still used here, to actually deliver the link — see the module doc
+    // comment in `account-recovery-mailer.ts`.
+    const ticket = await this.identity.beginPasswordReset(input.email);
+
+    // Fire-and-forget, and deliberately not awaited: awaiting an SMTP round
+    // trip only for addresses that resolve to a real account would make this
+    // endpoint measurably slower for a known address than an unknown one,
+    // which is exactly the oracle its identical response is supposed to deny.
+    if (ticket !== null) {
+      void this.recoveryMailer.sendPasswordSetupLink(input.email, ticket).catch((cause: unknown) => {
+        this.logger.error('password-reset email could not be sent', {
+          reason: cause instanceof Error ? cause.message : String(cause),
+        });
+      });
+    }
   }
 
   @Public()

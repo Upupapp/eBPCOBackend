@@ -36,6 +36,9 @@ import { SecretBox } from './domain/secret-box';
 import { TotpService } from './application/totp.service';
 import { replayedRefreshToken } from '../compliance/domain/security-events';
 import { RefusalRecorder } from './application/refusal-recorder';
+import { MAILER, Mailer } from './infrastructure/mailer';
+import { mailerFor } from './infrastructure/mailer-factory';
+import { AccountRecoveryMailer } from './application/account-recovery-mailer';
 
 /**
  * Identity, wired.
@@ -104,6 +107,17 @@ import { RefusalRecorder } from './application/refusal-recorder';
       provide: AccountStatusReader,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new AccountStatusReader(db),
+    },
+    {
+      provide: MAILER,
+      inject: [CONFIG, StructuredLogger],
+      useFactory: (config: AppConfig, logger: StructuredLogger) => mailerFor(config, logger),
+    },
+    {
+      provide: AccountRecoveryMailer,
+      inject: [MAILER, CONFIG],
+      useFactory: (mailer: Mailer, config: AppConfig) =>
+        new AccountRecoveryMailer(mailer, config.PORTAL_BASE_URL),
     },
 
     // Bound here and nowhere else. The in-memory implementations still exist,

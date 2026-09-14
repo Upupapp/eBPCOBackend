@@ -236,7 +236,7 @@ describe('multi-factor for staff', () => {
     // Even the code the account was seeded with.
     expect(await identity.authenticate('officer@lgu.gov.ph', GOOD_PASSWORD, '123456')).toEqual({
       ok: false,
-      reason: 'rejected',
+      reason: 'mfa-invalid',
     });
   });
 
@@ -246,7 +246,7 @@ describe('multi-factor for staff', () => {
 
     expect(await identity.authenticate('officer@lgu.gov.ph', GOOD_PASSWORD, '000000')).toEqual({
       ok: false,
-      reason: 'rejected',
+      reason: 'mfa-invalid',
     });
   });
 
@@ -258,7 +258,7 @@ describe('multi-factor for staff', () => {
 
     expect(await identity.authenticate('officer@lgu.gov.ph', GOOD_PASSWORD, '123456')).toEqual({
       ok: false,
-      reason: 'rejected',
+      reason: 'mfa-invalid',
     });
   });
 

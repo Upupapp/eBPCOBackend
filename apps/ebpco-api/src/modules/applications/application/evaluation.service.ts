@@ -384,7 +384,12 @@ export class EvaluationService {
       }
 
       decided.set(stage, result);
-      const complete = ORDER.every((candidate) => decided.has(candidate));
+      // Every stage decided is not the same as every stage cleared — an
+      // adverse result still counts as "decided" for out-of-order checks
+      // above, but must not report the evaluation cycle as complete, since
+      // that flag is what the lifecycle asks before letting an application
+      // move on to Assessed or Approved.
+      const complete = ORDER.every((candidate) => decided.get(candidate) === 'Passed');
 
       return { ok: true, evaluationId: inserted.rows[0]?.id ?? '', complete };
     });

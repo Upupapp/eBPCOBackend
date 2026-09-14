@@ -355,8 +355,8 @@ export class StaffQueueService {
     const calendar = await this.calendars.load();
     const [account, business, documents, evaluations, payments, oop, permit, release, instructions, timeline] =
       await Promise.all([
-        this.db.query<{ email: string }>(
-          `select acc.email from applications a
+        this.db.query<{ email: string; mobile_number: string | null }>(
+          `select acc.email, acc.mobile_number from applications a
              join applicants ap on ap.id = a.applicant_id
              join accounts acc on acc.id = ap.account_id
             where a.id = $1`, [applicationId]),
@@ -435,6 +435,7 @@ export class StaffQueueService {
     return {
       summary: this.toQueueRow(row, calendar),
       applicantEmail: account.rows[0]?.email ?? '',
+      applicantMobile: account.rows[0]?.mobile_number ?? null,
       form: (row['form'] as Record<string, unknown> | null) ?? {},
       formValidatedAgainst: (row['form_validated_against'] as string | null) ?? null,
       business: one(business),
@@ -762,6 +763,8 @@ function decodeCursor(cursor: string): { updatedAt: Date; id: string } | null {
 export interface StaffApplicationDetail {
   readonly summary: QueueRow;
   readonly applicantEmail: string;
+  /** From the applicant's account (`accounts.mobile_number`), the same source `applicantEmail` reads — `null` when the account has none on file, never fabricated. */
+  readonly applicantMobile: string | null;
   /**
    * The applicant's own answers, and what checked them.
    *

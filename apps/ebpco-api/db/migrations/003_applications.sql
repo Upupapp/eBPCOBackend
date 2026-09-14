@@ -128,9 +128,19 @@ begin
       using errcode = 'check_violation';
   end if;
 
-  -- Every movement leaves a trace, whoever made it and however.
-  insert into application_transitions (application_id, from_status, to_status, actor_account_id)
-  values (new.id, old.lifecycle_status, new.lifecycle_status, new.updated_by);
+  -- Every movement leaves a trace, whoever made it and however. The evaluator's
+  -- words never travel through a column on `applications` itself — that would
+  -- make them a fact about the application rather than about this one move —
+  -- so the caller stages them for the duration of the transaction with
+  -- set_config(), and this trigger is the only reader. `true` as the third
+  -- argument makes both settings transaction-local, so nothing lingers past
+  -- commit for the next unrelated update to pick up by accident.
+  insert into application_transitions (application_id, from_status, to_status, actor_account_id, office, remarks)
+  values (
+    new.id, old.lifecycle_status, new.lifecycle_status, new.updated_by,
+    nullif(current_setting('app.transition_office', true), ''),
+    nullif(current_setting('app.transition_remarks', true), '')
+  );
 
   new.version := old.version + 1;
   new.updated_at := now();

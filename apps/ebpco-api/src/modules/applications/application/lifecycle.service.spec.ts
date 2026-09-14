@@ -227,6 +227,39 @@ describe('what one move records', () => {
     );
     expect(audit.rows[0]?.after_state.remarks).toBe(remarks);
   });
+
+  it('carries evaluator remarks into application_transitions, not just the audit trail', async () => {
+    // The audit trail is not the only reader: staff-queue.service.ts and
+    // applicant-query.service.ts both render `application_transitions.remarks`
+    // directly as the applicant/staff-facing timeline text. The trigger that
+    // writes that table had no way to see the remarks at all until this was
+    // wired through set_config()/current_setting() — this is what a caller
+    // of THAT table, not the audit trail, actually sees.
+    const remarks = 'Lot plan not signed by a geodetic engineer.';
+    await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+    await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Document Verification' });
+    await service.transition({
+      applicationId: APPLICATION, caller: officer, to: 'Revision Required', remarks,
+    });
+
+    const row = await db.query<{ remarks: string | null }>(
+      `select remarks from application_transitions
+        where application_id = $1 and to_status = 'Revision Required'`,
+      [APPLICATION],
+    );
+    expect(row.rows[0]?.remarks).toBe(remarks);
+  });
+
+  it('leaves application_transitions.remarks null when no remarks were given', async () => {
+    await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+
+    const row = await db.query<{ remarks: string | null }>(
+      `select remarks from application_transitions
+        where application_id = $1 and to_status = 'Received'`,
+      [APPLICATION],
+    );
+    expect(row.rows[0]?.remarks).toBeNull();
+  });
 });
 
 describe('optimistic concurrency', () => {
