@@ -40,6 +40,21 @@ async function bootstrap(): Promise<void> {
   });
 
   app.setGlobalPrefix('api');
+
+  // The frontend (castilla-lgu-portal) is deployed on a different origin
+  // (currently AWS/Netlify) from this API (LGUIDS-SHARED-LINODE, exposed at
+  // api.castilla-ebpco.online) — a static, prerendered site with no server
+  // of its own to proxy through, so the browser calls this API directly and
+  // needs CORS to be allowed to. ALLOWED_ORIGINS lets ops add/remove origins
+  // (e.g. a Netlify deploy-preview URL) without a code change; the two
+  // production hosts are always allowed even if that env var is unset.
+  const defaultOrigins = ['https://castilla-ebpco.online', 'https://www.castilla-ebpco.online'];
+  const extraOrigins = (process.env['ALLOWED_ORIGINS'] ?? '')
+    .split(',')
+    .map((o) => o.trim())
+    .filter((o) => o.length > 0);
+  app.enableCors({ origin: [...defaultOrigins, ...extraOrigins] });
+
   app.enableShutdownHooks();
 
   const port = Number(process.env['PORT'] ?? 3000);
