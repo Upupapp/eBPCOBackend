@@ -273,6 +273,17 @@ const schema = z
      * an officer to the API.
      */
     PORTAL_BASE_URL: z.string().optional().transform((v) => v ?? 'http://localhost:4200'),
+
+    /**
+     * Where the CITIZEN portal is reachable — the applicant-facing site, a
+     * different application, a different origin, and (since this connection
+     * work) a different repository from the admin portal above. Did not
+     * exist until an applicant's password-reset email was found still
+     * pointing at `PORTAL_BASE_URL` — the admin portal's own link — meaning
+     * every citizen who ever reset a password landed on the staff sign-in
+     * page. See `AccountRecoveryMailer`, which is the only reader.
+     */
+    USER_PORTAL_BASE_URL: z.string().optional().transform((v) => v ?? 'http://localhost:4201'),
   })
   .superRefine((config, ctx) => {
     // An invariant, not a preference. Serving the contract as live documentation

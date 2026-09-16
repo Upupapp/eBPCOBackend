@@ -117,7 +117,7 @@ import { AccountRecoveryMailer } from './application/account-recovery-mailer';
       provide: AccountRecoveryMailer,
       inject: [MAILER, CONFIG],
       useFactory: (mailer: Mailer, config: AppConfig) =>
-        new AccountRecoveryMailer(mailer, config.PORTAL_BASE_URL),
+        new AccountRecoveryMailer(mailer, config.PORTAL_BASE_URL, config.USER_PORTAL_BASE_URL),
     },
 
     // Bound here and nowhere else. The in-memory implementations still exist,

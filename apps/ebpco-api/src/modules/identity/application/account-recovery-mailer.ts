@@ -10,6 +10,14 @@ import { PasswordResetTicket } from './identity.service';
  * `access-request.service.ts`). Both redeem the same `/auth/password/reset`
  * link, so one email and one wording covers both — a new account does not
  * need to be told it is "resetting" anything it never had.
+ *
+ * A THIRD distinction cuts across those two: which portal the account signs
+ * into. Every email here used to say "E-BPCO Admin Portal" and link to
+ * `PORTAL_BASE_URL` regardless of `ticket.kind` — an applicant who reset a
+ * password landed on the staff sign-in page, told the email was for an
+ * account they do not have. `ticket.kind` (added alongside this fix, see
+ * `identity.service.ts`) is what makes the branch below possible; before it,
+ * there was nothing here to branch on.
  */
 
 /** `<`, `&`, etc. in a name or link must not become markup in an HTML email client. */
@@ -21,14 +29,24 @@ function escapeHtml(value: string): string {
     .replace(/"/g, '&quot;');
 }
 
+interface Branding {
+  readonly portalName: string;
+  readonly baseUrl: string;
+}
+
 export class AccountRecoveryMailer {
   constructor(
     private readonly mailer: Mailer,
-    private readonly portalBaseUrl: string,
+    private readonly adminPortalBaseUrl: string,
+    private readonly userPortalBaseUrl: string,
   ) {}
 
   async sendPasswordSetupLink(to: string, ticket: PasswordResetTicket): Promise<void> {
-    const link = `${this.portalBaseUrl}/reset-password?token=${encodeURIComponent(ticket.token)}`;
+    const branding: Branding = ticket.kind === 'staff'
+      ? { portalName: 'E-BPCO Admin Portal', baseUrl: this.adminPortalBaseUrl }
+      : { portalName: 'E-BPCO Citizen Portal', baseUrl: this.userPortalBaseUrl };
+
+    const link = `${branding.baseUrl}/reset-password?token=${encodeURIComponent(ticket.token)}`;
     const expiresInMinutes = Math.max(
       1, Math.round((ticket.expiresAt.getTime() - Date.now()) / 60_000),
     );
@@ -39,13 +57,14 @@ export class AccountRecoveryMailer {
     const firstName = ticket.fullName?.trim().split(/\s+/)[0] ?? to;
     const greeting = escapeHtml(firstName);
     const safeLink = escapeHtml(link);
+    const safePortalName = escapeHtml(branding.portalName);
 
     await this.mailer.send({
       to,
-      subject: 'Set your E-BPCO Admin Portal password',
+      subject: `Set your ${branding.portalName} password`,
       text:
         `Hi ${firstName},\n\n`
-        + `Use the link below to set your password for the E-BPCO Admin Portal.\n\n`
+        + `Use the link below to set your password for the ${branding.portalName}.\n\n`
         + `${link}\n\n`
         + `This link works once and expires in about ${expiresInMinutes} minutes. `
         + `If you did not request this, you can ignore this email — nothing changes `
@@ -56,7 +75,7 @@ export class AccountRecoveryMailer {
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:520px;margin:0 auto;background:#ffffff;border-radius:10px;overflow:hidden;border:1px solid #e5e5ea;">
       <tr>
         <td style="background:linear-gradient(180deg,#e21414,#d50000 55%,#b30000);padding:32px 24px;text-align:center;">
-          <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.02em;">E-BPCO</div>
+          <div style="color:#ffffff;font-size:22px;font-weight:700;letter-spacing:0.02em;">${safePortalName}</div>
           <div style="color:rgba(255,255,255,0.85);font-size:12px;font-weight:600;letter-spacing:0.12em;text-transform:uppercase;margin-top:6px;">
             Password Reset Request
           </div>
@@ -66,7 +85,7 @@ export class AccountRecoveryMailer {
         <td style="padding:32px 28px;">
           <p style="margin:0 0 16px;color:#26262b;font-size:15px;line-height:1.6;">Hi ${greeting},</p>
           <p style="margin:0 0 24px;color:#4a4a52;font-size:14px;line-height:1.6;">
-            We received a request to set the password for your E-BPCO Admin Portal account.
+            We received a request to set the password for your ${safePortalName} account.
             Click the button below to choose one. This link expires in about
             <strong>${expiresInMinutes} minutes</strong>.
           </p>

@@ -54,6 +54,17 @@ export interface PasswordResetTicket {
   readonly expiresAt: Date;
   /** For addressing the email by name. Null means genuinely not on record, not blank. */
   readonly fullName: string | null;
+  /**
+   * Which portal this account signs into — the fact `AccountRecoveryMailer`
+   * needs to pick the right branding and the right link. Added because
+   * nothing here distinguished an applicant from staff at the point the
+   * email was composed: every reset email was built as if for the admin
+   * portal, regardless of who asked. Not `Account['kind']` re-exported —
+   * a deliberate copy at the boundary, the same reasoning `fullName` above
+   * already follows: this ticket carries exactly what one email needs, not
+   * a reference back into the account it was minted from.
+   */
+  readonly kind: 'applicant' | 'staff';
 }
 
 export class IdentityService {
@@ -295,7 +306,7 @@ export class IdentityService {
     // Only the digest is stored. The token goes to the applicant by email, and
     // a leak of this store should not hand over working reset links.
     await this.resetTickets.issue(resetTokenDigest(token), account.id, now, expiresAt);
-    return { token, expiresAt, fullName: account.fullName };
+    return { token, expiresAt, fullName: account.fullName, kind: account.kind };
   }
 
   /**
