@@ -203,7 +203,7 @@ describe('a returning walk-in', () => {
       ...WALK_IN,
       applicant: { ...WALK_IN.applicant, email: 'owner@example.ph' },
       business: {
-        name: 'Owner Hardware', category: 'Wholesale', street: '5 Mabini',
+        name: 'Owner Hardware', category: 'Construction', street: '5 Mabini',
         barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
         registrationNumber: 'BN-2026-0008', dateRegistered: '2026-02-01',
       },

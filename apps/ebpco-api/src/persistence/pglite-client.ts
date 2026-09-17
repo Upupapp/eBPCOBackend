@@ -19,9 +19,17 @@ import { SqlClient } from './sql-client';
 export class PgliteClient implements SqlClient {
   private constructor(private readonly db: PGlite) {}
 
-  static async create(): Promise<PgliteClient> {
+  /**
+   * @param dataDir Where to persist the database files on disk. Omitted (the
+   * default, and what every caller before this one used) means pure
+   * in-memory — the database dies with the process, which is exactly right
+   * for a test run or a quick check. Passed, it is a real directory PGlite
+   * writes real Postgres data files into, so the database survives a
+   * restart — see `dev-server-persistent.ts`, the one caller that needs that.
+   */
+  static async create(dataDir?: string): Promise<PgliteClient> {
     return new PgliteClient(
-      await PGlite.create({
+      await PGlite.create(dataDir, {
         // The same parsers the `pg` driver is given in postgres-client.ts.
         //
         // Without them the two adapters disagree: PGlite returns NUMERIC and

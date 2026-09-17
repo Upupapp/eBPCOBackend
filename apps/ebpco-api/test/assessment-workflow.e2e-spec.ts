@@ -169,6 +169,53 @@ describe('opening a draft', () => {
   });
 });
 
+describe('finding the open assessment by application, not by its own id', () => {
+  // The whole point of the second signature is that the officer approving
+  // never opened the draft themselves — so they cannot already hold its id.
+  const openRoute = () =>
+    send('GET', `/staff/applications/${applicationId}/assessments/open`, reviewer.token);
+
+  it('answers null before anything has been drafted', async () => {
+    const response = await openRoute();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toBeNull();
+  });
+
+  it('finds a Draft for an officer who never opened it', async () => {
+    await draft();
+
+    const response = await openRoute();
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string; applicationId: string }>()).toMatchObject({
+      status: 'Draft', applicationId,
+    });
+  });
+
+  it('still finds it once Submitted', async () => {
+    const opened = await draft();
+    const id = opened.json<{ id: string }>().id;
+    await send('POST', `/staff/assessments/${id}/submit`, preparer.token);
+
+    const response = await openRoute();
+
+    expect(response.json<{ status: string }>().status).toBe('Submitted');
+  });
+
+  it('answers null again once Issued, the same as before anything was drafted', async () => {
+    const opened = await draft();
+    const id = opened.json<{ id: string }>().id;
+    await send('POST', `/staff/assessments/${id}/submit`, preparer.token);
+    await send('POST', `/staff/assessments/${id}/approve`, reviewer.token);
+    await send('POST', `/staff/applications/${applicationId}/order-of-payment`, preparer.token, {});
+
+    const response = await openRoute();
+
+    expect(response.json()).toBeNull();
+  });
+});
+
 describe('adjusting the lines', () => {
   const open = async (): Promise<string> => (await draft()).json<{ id: string }>().id;
 

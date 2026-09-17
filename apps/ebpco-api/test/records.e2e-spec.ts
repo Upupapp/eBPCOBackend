@@ -842,9 +842,14 @@ describe('the lifecycle, as the server enforces it', () => {
     // READ scope granted the move to every role holding one, the auditor
     // included -- and the roles list below is exactly how that becomes visible
     // to anyone reading the workflow instead of the scope table.
+    // `super-admin` is in this list too, since the owner's 2026-09-13
+    // reversal (account.ts's own doc comment on SUPER_ADMIN_SCOPES) gave that
+    // role every acting scope any other staff role holds, `staff:receive`
+    // included — a real, intended consequence of that change, not a drift
+    // between this table and the scope grants it's read from.
     const received = body.transitions.find((t) => t.from === 'Submitted' && t.to === 'Received');
     expect(received?.requiresScope).toBe('staff:receive');
-    expect(received?.roles).toEqual(['receiving-officer', 'records-officer']);
+    expect(received?.roles).toEqual(['receiving-officer', 'records-officer', 'super-admin']);
     expect(received?.roles).not.toContain('auditor');
   });
 

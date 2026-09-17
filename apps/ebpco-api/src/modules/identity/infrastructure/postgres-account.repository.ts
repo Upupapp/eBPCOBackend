@@ -92,19 +92,25 @@ export class PostgresAccountRepository implements AccountRepository {
           // Nulls here mean "not supplied by this caller", never "clear it";
           // clearing is PATCH /me's job, which writes the column directly.
           `insert into applicants (id, account_id, first_name, middle_name, last_name,
-                                   street, barangay, city, province, postal_code)
-           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                   street, barangay, city, province, postal_code,
+                                   date_of_birth, sex, civil_status, nationality)
+           values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
            on conflict (account_id) do update set
-             first_name  = excluded.first_name,
-             middle_name = coalesce(excluded.middle_name, applicants.middle_name),
-             last_name   = excluded.last_name,
-             street      = coalesce(excluded.street,      applicants.street),
-             barangay    = coalesce(excluded.barangay,    applicants.barangay),
-             city        = coalesce(excluded.city,        applicants.city),
-             province    = coalesce(excluded.province,    applicants.province),
-             postal_code = coalesce(excluded.postal_code, applicants.postal_code)`,
+             first_name    = excluded.first_name,
+             middle_name   = coalesce(excluded.middle_name,   applicants.middle_name),
+             last_name     = excluded.last_name,
+             street        = coalesce(excluded.street,        applicants.street),
+             barangay      = coalesce(excluded.barangay,      applicants.barangay),
+             city          = coalesce(excluded.city,          applicants.city),
+             province      = coalesce(excluded.province,      applicants.province),
+             postal_code   = coalesce(excluded.postal_code,   applicants.postal_code),
+             date_of_birth = coalesce(excluded.date_of_birth, applicants.date_of_birth),
+             sex           = coalesce(excluded.sex,           applicants.sex),
+             civil_status  = coalesce(excluded.civil_status,  applicants.civil_status),
+             nationality   = coalesce(excluded.nationality,   applicants.nationality)`,
           [randomUUID(), account.id, profile.firstName, profile.middleName, profile.lastName,
-           profile.street, profile.barangay, profile.city, profile.province, profile.postalCode],
+           profile.street, profile.barangay, profile.city, profile.province, profile.postalCode,
+           profile.dateOfBirth, profile.sex, profile.civilStatus, profile.nationality],
         );
       }
 
@@ -149,9 +155,12 @@ export class PostgresAccountRepository implements AccountRepository {
       first_name: string; middle_name: string | null; last_name: string;
       mobile_number: string | null; street: string | null; barangay: string | null;
       city: string | null; province: string | null; postal_code: string | null;
+      date_of_birth: string | null; sex: string | null; civil_status: string | null;
+      nationality: string | null;
     }>(
       `select ap.first_name, ap.middle_name, ap.last_name, acc.mobile_number,
-              ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
+              ap.street, ap.barangay, ap.city, ap.province, ap.postal_code,
+              ap.date_of_birth, ap.sex, ap.civil_status, ap.nationality
          from applicants ap
          join accounts acc on acc.id = ap.account_id
         where ap.account_id = $1`,
@@ -169,6 +178,11 @@ export class PostgresAccountRepository implements AccountRepository {
       province: row.province,
       postalCode: row.postal_code,
       mobileNumber: row.mobile_number,
+      dateOfBirth: row.date_of_birth,
+      // The check constraint is the real guarantee; this cast just states it.
+      sex: row.sex as ApplicantProfile['sex'],
+      civilStatus: row.civil_status as ApplicantProfile['civilStatus'],
+      nationality: row.nationality,
     };
   }
 

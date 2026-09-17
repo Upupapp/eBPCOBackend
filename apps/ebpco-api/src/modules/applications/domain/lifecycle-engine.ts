@@ -58,6 +58,7 @@ const SATISFIES: Readonly<Record<Precondition, (snapshot: ApplicationSnapshot) =
   'payment-verified': (s) => s.paymentVerified,
   'evaluations-complete': (s) => s.evaluationsComplete,
   'permit-generated': (s) => s.permitGenerated,
+  'permit-released': (s) => s.permitReleased,
 };
 
 export interface DecideOptions {

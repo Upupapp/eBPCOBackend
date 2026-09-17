@@ -31,9 +31,18 @@ import { RequireScopes } from '../identity/transport/guards/public.decorator';
  * The gap is recorded in the Master Command rather than filled with a guess.
  */
 
+// The real, current `businesses.category` vocabulary — see migration 041's
+// own comment: businesses.controller.ts's self-service registration route
+// widened this list first, and this filter (and onBehalfShape in
+// staff-applications.controller.ts) had drifted to the older six-value one,
+// so a real "Construction"/"Transport"/"Agriculture" business (which a
+// citizen can genuinely register today) could never be filtered for here.
 const filtersShape = z.object({
   q: z.string().min(1).max(120).optional(),
-  category: z.enum(['Retail', 'Food Service', 'Services', 'Manufacturing', 'Wholesale', 'Other']).optional(),
+  category: z.enum([
+    'Retail', 'Food Service', 'Services', 'Manufacturing',
+    'Construction', 'Transport', 'Agriculture', 'Other',
+  ]).optional(),
   status: z.enum(['Active', 'Inactive']).optional(),
 }).strict();
 

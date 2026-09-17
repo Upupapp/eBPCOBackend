@@ -124,6 +124,27 @@ export class ApplicantApplicationsController {
   }
 
   /**
+   * Every payment the applicant has submitted against this application.
+   *
+   * A bare array, as `documents`/`timeline` on this controller are. Answers
+   * the citizen's own "did my payment go through" question directly, instead
+   * of leaving it to be inferred from the application's aggregate
+   * `payment.status` — which has no per-attempt detail (OR number, who
+   * verified it, why one was rejected) and never had a way to show a
+   * rejection separately from "never submitted".
+   */
+  @Get(':applicationId/payments')
+  @RequireScopes('payments:read')
+  async payments(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<ReadonlyArray<Record<string, unknown>>> {
+    const payments = await this.applications.payments(callerAccount(request), applicationId);
+    if (payments === null) throw ProblemException.notFound('No such application.');
+    return payments;
+  }
+
+  /**
    * The permit, once it exists.
    *
    * Separate from the application detail rather than folded into it: the detail

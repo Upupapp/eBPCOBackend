@@ -36,6 +36,7 @@ const satisfied = (status: LifecycleStatus, overrides: Partial<ApplicationSnapsh
   paymentProofSubmitted: true,
   paymentVerified: true,
   permitGenerated: true,
+  permitReleased: true,
   ...overrides,
 });
 
@@ -202,6 +203,22 @@ describe('preconditions', () => {
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
     expect(decision.refusal.kind).toBe('precondition-unmet');
+  });
+
+  it('refuses Released with no real release recorded, even with a permit generated', () => {
+    const decision = decide({
+      rules: TRANSITIONS,
+      snapshot: satisfied('Ready for Release', { permitReleased: false }),
+      caller: superOfficer(),
+      to: 'Released',
+      now: NOW,
+    });
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.refusal.kind).toBe('precondition-unmet');
+    if (decision.refusal.kind !== 'precondition-unmet') return;
+    expect(decision.refusal.unmet).toContain('permit-released');
   });
 
   it('refuses resubmission while instructions are still open', () => {

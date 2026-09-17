@@ -144,18 +144,96 @@ export class DocumentService {
   }
 
   /**
-   * What this account has uploaded and never filed.
+   * A staff officer's verdict on whether one document satisfies its
+   * requirement — writes the columns migration 027 already added
+   * (`review_status`, `review_reason_code`, `review_remark`, `reviewed_by`,
+   * `reviewed_at`). Separate from the malware scanner's `status`: a
+   * document can be scan-cleared ('Approved') and still be the wrong
+   * document, or the right one with an illegible signature — migration
+   * 027's own comment explains at length why this is not a widening of
+   * that column. `review_status` shares its 8-value vocabulary with the
+   * portal's own `DocumentStatus`; this method only accepts the four an
+   * officer can actually choose from the Documents tab.
    *
-   * Keyed on `uploaded_by`, which is the only ownership this document has: it
-   * belongs to no application, so there is no applicant to reach it through.
-   * That is exactly why `ownedBy` reads both -- see the note on it.
+   * Refuses a document that is not scan-cleared — an officer cannot have
+   * actually looked at bytes nobody may retrieve yet — and refuses an
+   * adverse verdict with neither a reason code nor a remark, the same rule
+   * `adverse_review_has_reason` enforces; checked here too so the caller
+   * gets a clear refusal instead of a raw constraint-violation error.
    */
-  async unattachedFor(accountId: string): Promise<ReadonlyArray<Record<string, unknown>>> {
+  async review(options: {
+    applicationId: string;
+    documentId: string;
+    status: 'Under Review' | 'Accepted' | 'Rejected' | 'Revision Required';
+    reasonCode?: string | null;
+    remark?: string | null;
+    caller: Caller;
+  }): Promise<
+    | { readonly ok: true }
+    | { readonly ok: false; readonly reason: 'not-found' | 'not-scan-cleared' | 'reason-required' }
+  > {
+    const { applicationId, documentId, status, caller } = options;
+    const reasonCode = options.reasonCode?.trim() || null;
+    const remark = options.remark?.trim() || null;
+    const isAdverse = status === 'Rejected' || status === 'Revision Required';
+    if (isAdverse && !reasonCode && !remark) {
+      return { ok: false, reason: 'reason-required' };
+    }
+    if (reasonCode === 'other' && !remark) {
+      return { ok: false, reason: 'reason-required' };
+    }
+
+    const found = await this.db.query<{ scan_cleared: boolean }>(
+      `select scan_cleared from documents
+        where id = $1 and application_id = $2 and deleted_at is null`,
+      [documentId, applicationId],
+    );
+    const row = found.rows[0];
+    if (row === undefined) return { ok: false, reason: 'not-found' };
+    if (!row.scan_cleared) return { ok: false, reason: 'not-scan-cleared' };
+
+    const now = this.clock();
+    await this.db.query(
+      `update documents
+          set review_status = $1, review_reason_code = $2, review_remark = $3,
+              reviewed_by = $4, reviewed_at = $5
+        where id = $6`,
+      [status, reasonCode, remark, caller.accountId, now, documentId],
+    );
+    await this.audit.append({
+      action: 'document.reviewed',
+      subjectType: 'document',
+      subjectId: documentId,
+      outcome: 'allowed',
+      actorAccountId: caller.accountId,
+      actorRole: caller.kind,
+      afterState: { status, reasonCode, remark },
+    });
+    return { ok: true };
+  }
+
+  /**
+   * Every document this account has ever uploaded, attached or not.
+   *
+   * Keyed on `uploaded_by`, the only ownership a document has independent of
+   * an application. Originally this returned only UNATTACHED documents
+   * (`application_id is null`) — the narrowest possible reading of "mine" —
+   * but that made a document reusable exactly once: the moment it was
+   * attached to an application, it fell out of this list and out of reach for
+   * a second one, even though the citizen plainly still owns it and a second
+   * permit may legitimately need the same tax clearance or valid ID. Every
+   * document is now returned, each carrying which application (if any) it is
+   * currently attached to — a citizen's full history, and the reuse source
+   * for a new filing, in one list.
+   */
+  async historyFor(accountId: string): Promise<ReadonlyArray<Record<string, unknown>>> {
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; uploaded_at: Date; requirement_code: string | null;
       expires_on: string | null; certified_on: string | null;
       scan_cleared: boolean; quarantined: boolean;
+      application_id: string | null; application_reference: string | null;
+      review_status: string | null;
     }>(
       `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
               d.uploaded_at, d.requirement_code, d.scan_cleared,
@@ -168,9 +246,13 @@ export class DocumentService {
               -- "expired".
               to_char(d.expires_on, 'YYYY-MM-DD') as expires_on,
               to_char(d.certified_on, 'YYYY-MM-DD') as certified_on,
-              (d.status = 'Rejected' and not d.scan_cleared) as quarantined
+              (d.status = 'Rejected' and not d.scan_cleared) as quarantined,
+              d.application_id,
+              a.reference_number as application_reference,
+              d.review_status
          from documents d
-        where d.uploaded_by = $1 and d.application_id is null and d.deleted_at is null
+         left join applications a on a.id = d.application_id
+        where d.uploaded_by = $1 and d.deleted_at is null
         order by d.uploaded_at desc, d.id`,
       [accountId],
     );
@@ -194,10 +276,16 @@ export class DocumentService {
       certifiedOn: row.certified_on,
       scanCleared: row.scan_cleared,
       quarantined: row.quarantined,
-      // No review fields: nothing here has been reviewed, because review
-      // happens on an application and these are attached to none. Returning
-      // them as null would invite a client to render "not yet reviewed", which
-      // suggests somebody will.
+      // Null means unattached — genuinely reusable on any application. Set
+      // means it is doing duty on a real filing right now; still reusable
+      // (nothing about attaching a document consumes it), just no longer the
+      // narrow "not yet filed" thing this list used to mean.
+      applicationId: row.application_id,
+      applicationReference: row.application_reference,
+      // Null for an unattached document — nothing has reviewed it because
+      // there is no application to review it against. Set once attached,
+      // same vocabulary `GET /applications/:id/documents` already reports.
+      reviewStatus: row.review_status,
     }));
   }
 
@@ -354,11 +442,19 @@ export class DocumentService {
       return 'Pending';
     }
 
+    // A clean verdict is the scanner's own approval, not a placeholder
+    // waiting on a later approver -- nothing else in this codebase ever
+    // writes 'Approved' (confirmed by grep: applyVerdict is the only writer
+    // of this column after insert), so leaving it 'Pending' here meant no
+    // document could ever reach 'Approved' through any real path. That in
+    // turn left `identity_document_verified` unsatisfiable a second way,
+    // even after the label-matching fix: it also requires `d.status =
+    // 'Approved'`, which nothing had ever set.
     await this.db.query(
-      `update documents set scan_cleared = true, scanned_at = $1 where id = $2`,
+      `update documents set status = 'Approved', scan_cleared = true, scanned_at = $1 where id = $2`,
       [result.scannedAt, documentId],
     );
-    return 'Pending';
+    return 'Approved';
   }
 
   /**

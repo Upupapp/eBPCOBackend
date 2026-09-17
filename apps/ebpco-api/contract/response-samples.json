@@ -152,7 +152,11 @@
         "barangay": null,
         "city": null,
         "province": null,
-        "postalCode": null
+        "postalCode": null,
+        "dateOfBirth": null,
+        "sex": null,
+        "civilStatus": null,
+        "nationality": null
       }
     },
     "me.rectify": {
@@ -177,6 +181,10 @@
         "city": "Castilla",
         "province": "Sorsogon",
         "postalCode": "4718",
+        "dateOfBirth": null,
+        "sex": null,
+        "civilStatus": null,
+        "nationality": null,
         "mobileVerifiedAt": null,
         "mobileVerificationCleared": false
       }
@@ -213,8 +221,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-24",
-              "workingDaysElapsed": 39,
-              "workingDaysRemaining": -32,
+              "workingDaysElapsed": 43,
+              "workingDaysRemaining": -36,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -242,8 +250,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-24",
-              "workingDaysElapsed": 19,
-              "workingDaysRemaining": -12,
+              "workingDaysElapsed": 23,
+              "workingDaysRemaining": -16,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -271,8 +279,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-07-13",
-              "workingDaysElapsed": 48,
-              "workingDaysRemaining": -41,
+              "workingDaysElapsed": 52,
+              "workingDaysRemaining": -45,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -314,8 +322,8 @@
               "classification": "Simple",
               "pledgedWorkingDays": 7,
               "dueDate": "2026-08-28",
-              "workingDaysElapsed": 15,
-              "workingDaysRemaining": -8,
+              "workingDaysElapsed": 19,
+              "workingDaysRemaining": -12,
               "approximate": true,
               "suspended": false,
               "overdue": false
@@ -346,12 +354,12 @@
         "pledgeIndeterminate": 5,
         "trend": {
           "total": {
-            "recent": 2,
+            "recent": 1,
             "previous": 2
           },
           "pendingUnderReview": {
-            "recent": 2,
-            "previous": 1
+            "recent": 1,
+            "previous": 2
           },
           "paymentsAwaitingVerification": {
             "recent": 0,
@@ -359,7 +367,7 @@
           },
           "approved": {
             "recent": 0,
-            "previous": 1
+            "previous": 0
           },
           "readyForRelease": {
             "recent": 0,
@@ -399,14 +407,15 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-08-19",
-            "workingDaysElapsed": 21,
-            "workingDaysRemaining": -14,
+            "workingDaysElapsed": 25,
+            "workingDaysRemaining": -18,
             "approximate": true,
             "suspended": false,
             "overdue": false
           }
         },
         "applicantEmail": "maria.santos@example.ph",
+        "applicantMobile": null,
         "form": {},
         "formValidatedAgainst": null,
         "business": {
@@ -430,9 +439,13 @@
             "byteSize": 182344,
             "status": "Approved",
             "scanCleared": true,
+            "requirementCode": null,
+            "reviewStatus": null,
+            "reviewRemark": null,
             "expiresOn": null,
             "certifiedOn": null,
-            "uploadedAt": "2026-01-01T00:00:00.000Z"
+            "uploadedAt": "2026-01-01T00:00:00.000Z",
+            "reviewedAt": null
           },
           {
             "id": "00000000-0000-4000-8000-000000000000",
@@ -442,9 +455,13 @@
             "byteSize": 941233,
             "status": "Pending",
             "scanCleared": true,
+            "requirementCode": "lot-plan",
+            "reviewStatus": "Rejected",
+            "reviewRemark": "Page 3 is cut off at the right margin -- the setback dimension cannot be read.",
             "expiresOn": null,
             "certifiedOn": null,
-            "uploadedAt": "2026-01-01T00:00:00.000Z"
+            "uploadedAt": "2026-01-01T00:00:00.000Z",
+            "reviewedAt": "2026-01-01T00:00:00.000Z"
           }
         ],
         "evaluations": [
@@ -538,14 +555,15 @@
             "classification": "Simple",
             "pledgedWorkingDays": 7,
             "dueDate": "2026-07-13",
-            "workingDaysElapsed": 48,
-            "workingDaysRemaining": -41,
+            "workingDaysElapsed": 52,
+            "workingDaysRemaining": -45,
             "approximate": true,
             "suspended": false,
             "overdue": false
           }
         },
         "applicantEmail": "maria.santos@example.ph",
+        "applicantMobile": null,
         "form": {},
         "formValidatedAgainst": null,
         "business": {
@@ -1321,7 +1339,7 @@
       "body": {
         "documentId": "00000000-0000-4000-8000-000000000000",
         "supersedesDocumentId": "00000000-0000-4000-8000-000000000000",
-        "status": "Pending",
+        "status": "Approved",
         "removedMetadata": []
       }
     },
@@ -1377,6 +1395,22 @@
       "body": [
         {
           "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Lot plan",
+          "fileName": "lot-plan-corrected.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "69",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "requirementCode": "lot-plan",
+          "expiresOn": null,
+          "certifiedOn": null,
+          "scanCleared": true,
+          "quarantined": false,
+          "applicationId": "00000000-0000-4000-8000-000000000000",
+          "applicationReference": "BP-2026-000041",
+          "reviewStatus": null
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
           "label": "Site photographs",
           "fileName": "site-photos.jpg",
           "contentType": "image/jpeg",
@@ -1386,7 +1420,42 @@
           "expiresOn": null,
           "certifiedOn": null,
           "scanCleared": true,
-          "quarantined": false
+          "quarantined": false,
+          "applicationId": null,
+          "applicationReference": null,
+          "reviewStatus": null
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Lot plan",
+          "fileName": "lot-plan.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "941233",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "requirementCode": "lot-plan",
+          "expiresOn": null,
+          "certifiedOn": null,
+          "scanCleared": true,
+          "quarantined": false,
+          "applicationId": "00000000-0000-4000-8000-000000000000",
+          "applicationReference": "BP-2026-000041",
+          "reviewStatus": "Rejected"
+        },
+        {
+          "id": "00000000-0000-4000-8000-000000000000",
+          "label": "Valid identity document",
+          "fileName": "psa-birth-certificate.pdf",
+          "contentType": "application/pdf",
+          "byteSize": "182344",
+          "uploadedAt": "2026-01-01T00:00:00.000Z",
+          "requirementCode": null,
+          "expiresOn": null,
+          "certifiedOn": null,
+          "scanCleared": true,
+          "quarantined": false,
+          "applicationId": "00000000-0000-4000-8000-000000000000",
+          "applicationReference": "BP-2026-000041",
+          "reviewStatus": null
         }
       ]
     },
@@ -1516,7 +1585,7 @@
         "classification": "Simple",
         "pledge": {
           "pledgedWorkingDays": 7,
-          "dueDate": "2026-09-21",
+          "dueDate": "2026-09-25",
           "approximate": true,
           "suspended": false,
           "suspendedSince": null
@@ -1772,7 +1841,8 @@
             "requiresScope": "staff:receive",
             "roles": [
               "receiving-officer",
-              "records-officer"
+              "records-officer",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "received-by-obo"
@@ -1801,7 +1871,8 @@
             "requiresScope": "staff:receive",
             "roles": [
               "receiving-officer",
-              "records-officer"
+              "records-officer",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "document-verification-started"
@@ -1829,7 +1900,8 @@
             ],
             "requiresScope": "staff:evaluate",
             "roles": [
-              "evaluator"
+              "evaluator",
+              "super-admin"
             ],
             "preconditions": [
               "identity-document-verified",
@@ -1845,7 +1917,8 @@
             ],
             "requiresScope": "staff:evaluate",
             "roles": [
-              "evaluator"
+              "evaluator",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "revision-required"
@@ -1858,7 +1931,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "rejected"
@@ -1871,7 +1945,8 @@
             ],
             "requiresScope": "staff:assess",
             "roles": [
-              "assessor"
+              "assessor",
+              "super-admin"
             ],
             "preconditions": [
               "evaluations-complete",
@@ -1887,7 +1962,8 @@
             ],
             "requiresScope": "staff:evaluate",
             "roles": [
-              "evaluator"
+              "evaluator",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "revision-required"
@@ -1900,7 +1976,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "rejected"
@@ -1972,7 +2049,8 @@
             ],
             "requiresScope": "staff:assess",
             "roles": [
-              "assessor"
+              "assessor",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": null
@@ -1985,7 +2063,8 @@
             ],
             "requiresScope": "staff:assess",
             "roles": [
-              "assessor"
+              "assessor",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": null
@@ -1998,7 +2077,8 @@
             ],
             "requiresScope": "staff:verify-payment",
             "roles": [
-              "cashier"
+              "cashier",
+              "super-admin"
             ],
             "preconditions": [
               "payment-proof-submitted"
@@ -2013,7 +2093,8 @@
             ],
             "requiresScope": "staff:verify-payment",
             "roles": [
-              "cashier"
+              "cashier",
+              "super-admin"
             ],
             "preconditions": [
               "payment-verified"
@@ -2028,7 +2109,8 @@
             ],
             "requiresScope": "staff:verify-payment",
             "roles": [
-              "cashier"
+              "cashier",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": null
@@ -2041,7 +2123,8 @@
             ],
             "requiresScope": "staff:verify-payment",
             "roles": [
-              "cashier"
+              "cashier",
+              "super-admin"
             ],
             "preconditions": [
               "payment-verified"
@@ -2056,7 +2139,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [
               "payment-verified",
@@ -2072,7 +2156,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "revision-required"
@@ -2085,7 +2170,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": "rejected"
@@ -2098,7 +2184,8 @@
             ],
             "requiresScope": "staff:approve",
             "roles": [
-              "building-official"
+              "building-official",
+              "super-admin"
             ],
             "preconditions": [
               "permit-generated"
@@ -2113,7 +2200,8 @@
             ],
             "requiresScope": "staff:release",
             "roles": [
-              "releasing-officer"
+              "releasing-officer",
+              "super-admin"
             ],
             "preconditions": [
               "permit-generated"
@@ -2128,10 +2216,12 @@
             ],
             "requiresScope": "staff:release",
             "roles": [
-              "releasing-officer"
+              "releasing-officer",
+              "super-admin"
             ],
             "preconditions": [
-              "permit-generated"
+              "permit-generated",
+              "permit-released"
             ],
             "notifies": "released"
           },
@@ -2143,7 +2233,8 @@
             ],
             "requiresScope": "staff:release",
             "roles": [
-              "releasing-officer"
+              "releasing-officer",
+              "super-admin"
             ],
             "preconditions": [],
             "notifies": null

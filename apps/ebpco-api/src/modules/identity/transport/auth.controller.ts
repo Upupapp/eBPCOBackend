@@ -43,12 +43,20 @@ const registration = z.object({
   email: z.string().email().max(320),
   mobileNumber: z.string().regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX'),
   password: z.string().min(1).max(512),
+  // Migration 038. Optional, not required: the mobile client's live request
+  // still sends exactly the five fields above, and `.strict()` below rejects
+  // an UNKNOWN field, never an omitted optional one, so that keeps working
+  // unchanged. The web portal's registration form sends all four.
+  dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').optional(),
+  sex: z.enum(['Male', 'Female', 'Prefer not to say']).optional(),
+  civilStatus: z.enum(['Single', 'Married', 'Widowed', 'Separated', 'Divorced']).optional(),
+  nationality: z.string().min(1).max(100).optional(),
 // `.strict()`, because Zod's default SILENTLY STRIPS what it does not know.
 // A client adding `address` here would get 202 and the field would vanish --
 // success reported over data thrown away, which is the failure this service
-// has already found in three other places. Verified against the live mobile
-// client first: it sends exactly these five, so nothing breaks today. The
-// address is corrected through PATCH /me, not collected at registration.
+// has already found in three other places. The address is still corrected
+// through PATCH /me, not collected at registration — migration 038 gave this
+// table a place for date of birth/sex/civil status/nationality, not address.
 }).strict();
 
 /**
@@ -213,6 +221,10 @@ export class AuthController {
       firstName: input.firstName,
       lastName: input.lastName,
       mobileNumber: input.mobileNumber,
+      dateOfBirth: input.dateOfBirth,
+      sex: input.sex,
+      civilStatus: input.civilStatus,
+      nationality: input.nationality,
     });
 
     // A weak password IS reported: that is the caller's own input, not a fact
@@ -401,6 +413,10 @@ export class MeController {
       city: profile?.city ?? null,
       province: profile?.province ?? null,
       postalCode: profile?.postalCode ?? null,
+      dateOfBirth: profile?.dateOfBirth ?? null,
+      sex: profile?.sex ?? null,
+      civilStatus: profile?.civilStatus ?? null,
+      nationality: profile?.nationality ?? null,
       mobileVerifiedAt: account?.mobileVerifiedAt?.toISOString() ?? null,
       // Stated, not implied. Changing the number cleared the verification that
       // belonged to the old one, and a client that does not re-prompt would
@@ -500,6 +516,12 @@ export class MeController {
       city: profile?.city ?? null,
       province: profile?.province ?? null,
       postalCode: profile?.postalCode ?? null,
+      // Migration 038. Same "null means not recorded" contract as the address
+      // fields above, not "the citizen left it blank".
+      dateOfBirth: profile?.dateOfBirth ?? null,
+      sex: profile?.sex ?? null,
+      civilStatus: profile?.civilStatus ?? null,
+      nationality: profile?.nationality ?? null,
     };
   }
 

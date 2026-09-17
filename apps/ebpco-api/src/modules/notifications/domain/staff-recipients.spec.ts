@@ -35,10 +35,12 @@ const EXPECTED: Readonly<Record<string, { reason: string; roles: string[] }>> = 
   'Payment Submitted': { reason: 'expected-move', roles: ['cashier'] },
   'Payment Under Verification': { reason: 'expected-move', roles: ['cashier'] },
   'Payment Verified': { reason: 'expected-move', roles: ['cashier'] },
-  // Oversight-only: the building official is the sole holder of staff:approve
-  // and sees every status, so the "not a queue" exclusion would leave nobody.
-  'For Approval': { reason: 'oversight-only', roles: ['building-official'] },
-  'Approved': { reason: 'oversight-only', roles: ['building-official'] },
+  // Oversight-only: every holder of staff:approve (building-official, and
+  // since the owner's 2026-09-13 reversal super-admin too — see
+  // SUPER_ADMIN_SCOPES's own doc comment) sees every status by design, so
+  // the "not a queue" exclusion would otherwise leave nobody.
+  'For Approval': { reason: 'oversight-only', roles: ['building-official', 'super-admin'] },
+  'Approved': { reason: 'oversight-only', roles: ['building-official', 'super-admin'] },
   'Permit Generated': { reason: 'expected-move', roles: ['releasing-officer'] },
   'Ready for Release': { reason: 'expected-move', roles: ['releasing-officer'] },
   'Released': { reason: 'expected-move', roles: ['releasing-officer'] },
@@ -88,29 +90,41 @@ describe('the routing follows the rules it is given, not the compiled ones', () 
 
   it('sends the notice wherever the edited rule points', () => {
     expect(recipientsFor('Submitted', TRANSITIONS).roles).toEqual(['receiving-officer']);
-    // Same status, same code, different rule: the cashier's scope now owns the
-    // move, and the cashier is told.
-    expect(recipientsFor('Submitted', rewire('staff:verify-payment')).reason)
-      .toBe('nobody-holds-it');
+    // Same status, same code, different rule: the cashier holds
+    // staff:verify-payment but cannot SEE 'Submitted' (its visibility starts
+    // later, at payment stages), so it is filtered by `canSee` same as
+    // before. What changed since the owner's 2026-09-13 reversal is that
+    // super-admin now holds every acting scope, including this one, AND sees
+    // every status by design — so where this used to reach nobody, it now
+    // falls back to the oversight role rather than staying silent.
+    const viaCashierScope = recipientsFor('Submitted', rewire('staff:verify-payment'));
+    expect(viaCashierScope.reason).toBe('oversight-only');
+    expect(viaCashierScope.roles).toEqual(['super-admin']);
     expect([...recipientsFor('Submitted', rewire('applications:write')).roles].sort())
       .toEqual(['records-officer', 'super-admin']);
   });
 
-  it('tells NOBODY when the scope is held only by roles that cannot see the status', () => {
-    // A hazard D-5 created and this rule inherits. An administrator may point a
-    // move at any scope the system has; if the roles holding it cannot READ that
-    // status, the move is legal, the notice is correct, and no officer is told
-    // -- an application waiting in a queue nobody can see.
+  it('tells NOBODY when the scope is not one any staff role holds at all', () => {
+    // A hazard D-5 created and this rule inherits. An administrator may point
+    // a move at any scope the system has; if no staff role holds it, the
+    // move is legal and no officer is ever told — an application waiting in
+    // a queue nobody can even reach.
     //
-    // `staff:release` grants visibility only from Approved onward, so a
-    // Submitted application routed there reaches nobody.
-    const decision = recipientsFor('Submitted', rewire('staff:release'));
+    // Not `staff:release` any more: since the owner's 2026-09-13 reversal,
+    // super-admin holds every ACTING scope (including that one) and sees
+    // every status, so an acting scope routed anywhere now always reaches at
+    // least super-admin — this genuinely-nobody case only survives for a
+    // scope no staff role, super-admin included, has ever needed:
+    // `payments:write` exists for APPLICANT tokens only (see
+    // SUPER_ADMIN_SCOPES's own doc comment on why it was deliberately left
+    // out of the union).
+    const decision = recipientsFor('Submitted', rewire('payments:write'));
 
     expect(decision.roles).toEqual([]);
     // The reason is the whole value: an empty list alone cannot tell "nobody
     // needs to act" from "nobody CAN act", and those are opposite problems.
     expect(decision.reason).toBe('nobody-holds-it');
-    expect(decision.awaiting).toEqual({ to: 'Received', requires: 'staff:release' });
+    expect(decision.awaiting).toEqual({ to: 'Received', requires: 'payments:write' });
   });
 });
 

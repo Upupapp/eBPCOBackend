@@ -49,6 +49,7 @@ interface SnapshotRow {
   payment_proof_submitted: boolean;
   payment_verified: boolean;
   permit_generated: boolean;
+  permit_released: boolean;
 }
 
 /**
@@ -66,8 +67,18 @@ const SNAPSHOT_SQL = `
     a.permit_type,
     a.version,
     exists (
+      -- Not '%identity%' — no permit type's real checklist has ever used
+      -- that word (checked against both portals' full requirements-catalog.ts,
+      -- 19 permit types plus the generic fallback): "Valid Government-Issued
+      -- ID of Applicant/Owner", "Valid ID of Applicant and Owner of Lot",
+      -- "Valid Government ID". This precondition could never once have been
+      -- satisfied — every application has been stuck at Document
+      -- Verification since the day this rule shipped, first caught live
+      -- while walking a real citizen's Fencing Permit application through
+      -- the real transition. 'valid%id' is the substring every real variant
+      -- actually shares.
       select 1 from documents d
-       where d.application_id = a.id and d.label ilike '%identity%'
+       where d.application_id = a.id and d.label ilike '%valid%id%'
          and d.status = 'Approved' and d.scan_cleared
     ) as identity_document_verified,
     not exists (
@@ -91,7 +102,11 @@ const SNAPSHOT_SQL = `
     exists (
       select 1 from payments p where p.application_id = a.id and p.verified_at is not null
     ) as payment_verified,
-    exists (select 1 from generated_permits g where g.application_id = a.id) as permit_generated
+    exists (select 1 from generated_permits g where g.application_id = a.id) as permit_generated,
+    exists (
+      select 1 from permit_releases r
+       where r.application_id = a.id and r.released_at is not null
+    ) as permit_released
   from applications a
   join applicants ap on ap.id = a.applicant_id
   join accounts acc on acc.id = ap.account_id
@@ -134,6 +149,7 @@ export class LifecycleService {
       paymentProofSubmitted: row.payment_proof_submitted,
       paymentVerified: row.payment_verified,
       permitGenerated: row.permit_generated,
+      permitReleased: row.permit_released,
     };
   }
 

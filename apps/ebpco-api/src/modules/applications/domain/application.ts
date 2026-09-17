@@ -28,6 +28,7 @@ export interface ApplicationSnapshot {
   readonly paymentProofSubmitted: boolean;
   readonly paymentVerified: boolean;
   readonly permitGenerated: boolean;
+  readonly permitReleased: boolean;
 }
 
 /** Who is attempting the move. */

@@ -1,29 +1,38 @@
 /**
- * The real API, listening, backed by PGlite.
+ * The same dev roster as `dev-server.ts`, backed by PGlite persisted to a
+ * real directory on disk instead of pure in-memory.
  *
  * ── Why this exists ─────────────────────────────────────────────────────
  *
- * The closing verdict says the second thing that would change it is "one client
- * calling it", and that has been impossible on a machine with no PostgreSQL and
- * no Docker. This boots the ACTUAL application — the same `createApp` main.ts
- * uses, the same guards, the same routes — against PGlite, which is real
- * PostgreSQL compiled to WebAssembly and the same engine every test here runs
- * on. Migrations run against it; constraints and triggers are the real ones.
+ * `dev-server.ts`'s whole point is "the database lives in this process and
+ * dies with it" — exactly right for a quick check, exactly wrong for a
+ * multi-day walkthrough (citizen files something, staff act on it over
+ * several sessions) where a restart for an unrelated reason must not erase
+ * everything filed so far.
  *
- * So a portal pointed at this is genuinely calling the API. What it is NOT is a
- * deployment: the database lives in this process and dies with it, and every
- * account below has a known password.
+ * The fix is not a separate PostgreSQL server: this machine has neither
+ * PostgreSQL nor Docker installed, and installing PostgreSQL needs
+ * administrator rights this account does not have (its installer's silent
+ * mode still elevates, and a headless elevation prompt just hangs forever).
+ * PGlite itself already solves this — it is real PostgreSQL compiled to
+ * WebAssembly, and its Node filesystem backend (`NodeFS`) can write its data
+ * files to a real directory instead of memory. Passing a `dataDir` to
+ * `PgliteClient.create()` is the entire difference from `dev-server.ts`.
  *
- * ── The safety that matters ─────────────────────────────────────────────
+ * Same seed roster, same accounts, same TOTP enrolment, made idempotent: it
+ * seeds ONCE, the first time it finds an empty database, and every run after
+ * that just starts the app against whatever is already on disk. `migrate()`
+ * is safe to call every boot (it only applies migrations not yet recorded in
+ * `schema_migrations`), so schema upgrades still happen automatically; the
+ * seed data itself does not get re-inserted or reset.
  *
- * It refuses to start unless `EBPCO_ENVIRONMENT` is `development`. Seed accounts
- * with published passwords are exactly the thing that must never be reachable
- * from anywhere real, and a guard that depends on somebody remembering is not a
- * guard.
+ * Still development-only, same as `dev-server.ts`, and refuses to start
+ * otherwise for the same reason: these are published, known passwords.
  */
 
 import { randomBytes, randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { writeFileSync } from 'node:fs';
 
 import { createApp } from '../src/bootstrap';
 import { loadConfig } from '../src/config/app-config';
@@ -44,13 +53,11 @@ const QA_EMAIL = 'QA@lguids.com.ph';
 const say = (line = ''): void => void process.stdout.write(`${line}\n`);
 
 /**
- * Generated per run, printed once, and never written down.
- *
- * It was a constant in this file until the secret scanner saw it — correctly:
- * a password literal in tracked source is a password in every clone and every
- * fork of a public repository, whatever the comment beside it says. Random per
- * run is strictly better and costs a line: nothing can hardcode it, and a
- * screenshot of a terminal is the worst it can leak into.
+ * Generated once, the first time this database is seeded, and then WRITTEN
+ * to `.dev-persistent-credentials.json` (gitignored) — unlike
+ * `dev-server.ts`'s password, this one has to survive being read back after
+ * the process exits, because the whole point of this script is that the
+ * database — and therefore this password's hash — outlives the process.
  */
 const PASSWORD = randomBytes(9).toString('base64url');
 
@@ -78,50 +85,23 @@ async function seed(
     const id = randomUUID();
     if (email === QA_EMAIL) qaAccountId = id;
     staffAccountIds.set(email, id);
-    // email_normalised must actually be normalised — authenticate() looks accounts
-    // up by normaliseEmail(input), which lowercases. Every entry above happened to
-    // already be lowercase; QA_EMAIL is the first one that isn't, and reusing the
-    // raw literal here would silently make this account unable to sign in.
     await db.query(
       `insert into accounts (id, kind, email, email_normalised, password_hash)
        values ($1,'staff',$2,$3,$4)`,
       [id, email, normaliseEmail(email), hash],
     );
     await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
-    // Every MFA_REQUIRED_ROLES account is enrolled+activated in main() below,
-    // right after this function returns — verifyTotp fails closed with no
-    // secret enrolled, so a seeded account in one of those roles and nothing
-    // else could never sign in (see D-10 / seed-super-admin.ts).
-    //
-    // Visibility is ALSO gated on a `staff_access` row (formsFor() in
-    // staff-queue.service.ts: no row at all means null access, which means
-    // EVERY permit type is filtered out regardless of staff_permit_access —
-    // "no assignment row means no access, never all access"). Migration 032
-    // added this gate after this seed already existed; nothing here ever
-    // gave any staff account (QA included) that row, so every staff account
-    // saw an empty queue no matter its role or scopes. Every seeded staff
-    // account gets 'view-edit' here so a real (non-QA) role can be tested at
-    // all — matching seed-super-admin.ts's own grant to the real super admin.
     await db.query(
       'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
       [id, 'view-edit'],
     );
     if (email === QA_EMAIL) {
-      // Visibility is gated on granted permit types (an officer assigned none
-      // sees nothing), and nothing here grants any by default — the seeded
-      // applications below would otherwise be invisible through /staff/applications
-      // even though they exist. Same grant seed-super-admin.ts gives the real
-      // account, scoped to QA_EMAIL only.
       await db.query(
         `insert into staff_permit_access (account_id, permit_type, granted_by)
          select $1, permit_type, $1 from permit_types where retired_at is null`,
         [id],
       );
     } else {
-      // Every other seeded staff account gets the one permit type the seed
-      // below actually files applications under — enough to test its own
-      // role's real actions against real data, without the blanket grant
-      // QA gets (QA's own account is the only one meant to see everything).
       await db.query(
         `insert into staff_permit_access (account_id, permit_type, granted_by)
          values ($1,'Fencing Permit',$1)`,
@@ -130,10 +110,6 @@ async function seed(
     }
   }
 
-  // One applicant with a business and a few applications spread across the
-  // lifecycle, so a queue has something in it and the statuses differ. Walked
-  // through legal transitions rather than inserted at a status: the database
-  // refuses an application born anywhere but Draft or Submitted.
   const account = randomUUID();
   const applicant = randomUUID();
   const business = randomUUID();
@@ -160,11 +136,6 @@ async function seed(
     'Document Verification': ['Received', 'Document Verification'],
     'Under Evaluation': ['Received', 'Document Verification', 'Under Evaluation'],
     'Revision Required': ['Received', 'Document Verification', 'Revision Required'],
-    // Walked all the way to Approved (bypassing the real per-step service
-    // validation the same way every row above does) so Stage 4's
-    // generate/prepare-release/release chain has a real Approved+Paid
-    // application to exercise without a lengthy multi-role manual walk
-    // through evaluation and assessment first.
     'Approved': [
       'Received', 'Document Verification', 'Under Evaluation', 'Assessed',
       'Payment Submitted', 'Payment Under Verification', 'Payment Verified',
@@ -189,11 +160,6 @@ async function seed(
     }
   }
 
-  // The Approved row above needs a real, verified Order of Payment too — the
-  // frontend's own same-tick "Generate Permit" hint checks paymentStatus ===
-  // 'Paid' alongside lifecycleStatus === 'Approved', and the queue derives
-  // paymentStatus from a genuinely verified `payments` row, not the
-  // lifecycle status alone.
   {
     const approvedId = idByStatus.get('Approved')!;
     const assessorId = staffAccountIds.get('assessor@lgu.gov.ph')!;
@@ -213,12 +179,6 @@ async function seed(
        values ($1,$2,$3,'PAY-2026-000001',170000,'Onsite','Paid',$4,now(),$5,'OR-2026-000001')`,
       [randomUUID(), orderId, approvedId, account, cashierId],
     );
-
-    // Same hazard as the `APP` series below, for the same reason: this row's
-    // hand-picked 'OP-2026-000001' is invisible to `document_number_sequences`
-    // ('OP', <year>) (assessment.service.ts's insertOrder()), so the first
-    // REAL order of payment issued after this seed runs collides with this
-    // one on that exact number — every dev-server run, not just occasionally.
     await db.query(
       `insert into document_number_sequences (series, year, last_issued)
        values ('OP', 2026, 1)
@@ -226,12 +186,6 @@ async function seed(
     );
   }
 
-  // The rows above use hand-picked reference numbers instead of the real
-  // `nextReference()` sequence (submission.service.ts), which reads/writes
-  // `document_number_sequences('APP', <year>)`. Without this, that sequence
-  // never learns those numbers were taken, so the first REAL filing after
-  // this seed runs collides with a seeded row on the exact same
-  // "E-BPCO-2026-000001" — every dev-server run, not just occasionally.
   await db.query(
     `insert into document_number_sequences (series, year, last_issued)
      values ('APP', 2026, $1)
@@ -257,7 +211,10 @@ async function seed(
 async function main(): Promise<void> {
   const config = loadConfig({
     EBPCO_ENVIRONMENT: 'development',
-    DATABASE_URL: 'postgres://unused@in-process/pglite',
+    // Unused — createApp() below is given the PGlite client directly, the
+    // same way dev-server.ts does it. Kept only because the config schema
+    // requires SOME value for a backing service it does not actually reach.
+    DATABASE_URL: 'postgres://unused@in-process/pglite-persistent',
     OBJECT_STORE_ENDPOINT: 'https://objects.invalid',
     OBJECT_STORE_BUCKET: 'ebpco-documents',
     OBJECT_STORE_LOCAL_PATH: resolve(__dirname, '../.dev-objects'),
@@ -268,10 +225,6 @@ async function main(): Promise<void> {
     PUSH_TOKEN_ENCRYPTION_KEY: 'a-test-push-key-of-at-least-32-characters',
     RATE_LIMIT_MAX: '10000',
     PORT: process.env.PORT ?? '3000',
-    // The real environment wins, and the guard below REFUSES anything that is
-    // not development. Forcing it instead would be worse: run on a machine
-    // where EBPCO_ENVIRONMENT says production, a silent override would seed
-    // accounts with a published password there and report success.
     ...process.env,
   });
 
@@ -282,57 +235,84 @@ async function main(): Promise<void> {
     );
   }
 
+  const dataDir = process.env.PGLITE_DATA_DIR ?? resolve(__dirname, '../.dev-pgdata');
   const logger = new StructuredLogger('info', (line) => say(line));
-  const db = await PgliteClient.create();
+  const db = await PgliteClient.create(dataDir);
   await migrate(db, loadMigrations(resolve(__dirname, '../db/migrations')));
-  const { staffAccountIds } = await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
 
-  // Every MFA_REQUIRED_ROLES account is enrolled+activated the same way
-  // seed-super-admin.ts does for the real deployment, so sign-in actually
-  // succeeds instead of failing closed on a missing factor. Previously only
-  // QA_EMAIL was enrolled — assessor/cashier/building-official/releasing-
-  // officer/administrator/super-admin (super@lgu.gov.ph) could never sign in
-  // at all, which blocks testing anything gated on `staff:assess`/
-  // `staff:verify-payment`/etc. with a real (non-QA) account.
-  const totp = new TotpService(
-    db,
-    new SecretBox(config.TOTP_ENCRYPTION_KEY),
-    `eBPCO ${config.EBPCO_ENVIRONMENT}`,
+  const existing = await db.query<{ id: string }>(
+    'select id from accounts where email_normalised = $1', [normaliseEmail('super@lgu.gov.ph')],
   );
-  const mfaEnrolled: { email: string; uri: string }[] = [];
-  for (const { email, role } of STAFF) {
-    if (!MFA_REQUIRED_ROLES.includes(role)) continue;
-    const accountId = staffAccountIds.get(email)!;
-    const offer = await totp.begin({ accountId });
-    if (!offer.ok) throw new Error(`could not begin MFA enrolment for ${email}: ${offer.detail}`);
-    const activated = await totp.activate({
-      accountId,
-      code: codeFor(offer.value.secret, stepAt(new Date())),
-    });
-    if (!activated.ok) throw new Error(`could not activate MFA for ${email}: ${activated.detail}`);
-    mfaEnrolled.push({ email, uri: offer.value.uri });
+  const alreadySeeded = existing.rows.length > 0;
+
+  const credentialsPath = resolve(__dirname, '../.dev-persistent-credentials.json');
+
+  let mfaEnrolled: { email: string; uri: string }[] = [];
+  let password = PASSWORD;
+
+  if (!alreadySeeded) {
+    const { staffAccountIds } = await seed(db, new PasswordHasher(undefined, config.PASSWORD_PEPPER));
+
+    const totp = new TotpService(
+      db,
+      new SecretBox(config.TOTP_ENCRYPTION_KEY),
+      `eBPCO ${config.EBPCO_ENVIRONMENT}`,
+    );
+    const secrets: Record<string, string> = {};
+    for (const { email, role } of STAFF) {
+      if (!MFA_REQUIRED_ROLES.includes(role)) continue;
+      const accountId = staffAccountIds.get(email)!;
+      const offer = await totp.begin({ accountId });
+      if (!offer.ok) throw new Error(`could not begin MFA enrolment for ${email}: ${offer.detail}`);
+      const activated = await totp.activate({
+        accountId,
+        code: codeFor(offer.value.secret, stepAt(new Date())),
+      });
+      if (!activated.ok) throw new Error(`could not activate MFA for ${email}: ${activated.detail}`);
+      mfaEnrolled.push({ email, uri: offer.value.uri });
+      secrets[email] = offer.value.secret;
+    }
+
+    // Written once, at first seed, so a later Claude/operator session can
+    // read the password and TOTP secrets back without needing to decrypt
+    // anything or restart (and therefore wipe) the database to find out.
+    writeFileSync(credentialsPath, JSON.stringify({
+      note: 'Generated once at first seed of the persistent dev database. Not the real deployment '
+        + 'bootstrap — see seed-super-admin.ts for that.',
+      seededAt: new Date().toISOString(),
+      password: PASSWORD,
+      totpSecrets: secrets,
+    }, null, 2));
+  } else {
+    password = '(unchanged — see .dev-persistent-credentials.json from when this database was first seeded)';
   }
 
   const app = await createApp(config, logger, db);
   await app.listen({ port: config.PORT, host: '127.0.0.1' });
 
   say('');
-  say(`  eBPCO API (development) — http://127.0.0.1:${config.PORT}`);
-  say('  PGlite, in this process. The database dies when this does.');
+  say(`  eBPCO API (development, PERSISTENT) — http://127.0.0.1:${config.PORT}`);
+  say(`  PGlite data on disk at ${dataDir} — survives a restart.`);
   say('');
-  say(`  password for every account below: ${PASSWORD}`);
-  for (const { email, role } of STAFF) say(`    ${email.padEnd(26)} ${role}`);
-  say(`    ${'maria@example.ph'.padEnd(26)} applicant`);
-  say('');
-  say('  These accounts require MFA. Scan each into an authenticator app now —');
-  say('  every secret below is generated fresh this run and shown once:');
-  say('');
-  for (const { email, uri } of mfaEnrolled) {
-    say(`    ${email}`);
-    say(`      ${uri}`);
+  if (alreadySeeded) {
+    say('  Database already seeded from a previous run — nothing re-inserted.');
+    say(`  Credentials: ${password}`);
+  } else {
+    say(`  password for every account below: ${PASSWORD}`);
+    for (const { email, role } of STAFF) say(`    ${email.padEnd(26)} ${role}`);
+    say(`    ${'maria@example.ph'.padEnd(26)} applicant`);
+    say('');
+    say('  These accounts require MFA. Scan each into an authenticator app now —');
+    say('  every secret below is generated fresh this run and shown once:');
+    say('');
+    for (const { email, uri } of mfaEnrolled) {
+      say(`    ${email}`);
+      say(`      ${uri}`);
+    }
+    say('');
+    say('  Use the code AFTER the one your app shows right now for each — activation just spent the current step.');
+    say(`  All of this was also written to ${credentialsPath}`);
   }
-  say('');
-  say('  Use the code AFTER the one your app shows right now for each — activation just spent the current step.');
   say('');
 }
 

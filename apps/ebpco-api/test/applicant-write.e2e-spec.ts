@@ -431,6 +431,71 @@ describe('paying', () => {
 
     expect(await count('select count(*) as n from payments')).toBe(1);
   });
+
+  it('moves the application to Payment Submitted — the move nothing used to make', async () => {
+    // Before this, PaymentService only ever wrote the `payments` row.
+    // `Assessed -> Payment Submitted` is declared actors: ['applicant'] in
+    // the lifecycle table (lifecycle.ts), so no staff route could ever make
+    // this move either — a real payment sat recorded and the application
+    // stuck at Assessed forever. See ApplicantWriteController.pay()'s own
+    // comment.
+    const applicationId = await filed();
+    for (const status of ['Received', 'Document Verification', 'Under Evaluation', 'Assessed']) {
+      await db.query('update applications set lifecycle_status = $1 where id = $2', [status, applicationId]);
+    }
+    const orderId = randomUUID();
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                      architectural_centavos, structural_centavos, electrical_centavos,
+                                      others_centavos, total_centavos, fee_schedule_version, assessed_by)
+       values ($1,$2,'OP-1',50000,120000,0,512000,0,0,682000,'2026.1',$3)`,
+      [orderId, applicationId, MARIA],
+    );
+
+    const response = await post(`/applications/${applicationId}/payments`, maria, {
+      referenceNumber: 'BT-9931882', method: 'Bank Transfer',
+      paidOn: '2026-08-20', amountCentavos: 682_000,
+    });
+
+    expect(response.statusCode).toBe(201);
+    const row = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    expect(row.rows[0]!.lifecycle_status).toBe('Payment Submitted');
+  });
+
+  it('still records the payment even when the application is not yet Assessed', async () => {
+    // submitProof only requires an in-force Order of Payment, never a
+    // particular lifecycle_status — so a payment can be genuinely recorded
+    // while an officer has not yet made the separate move to Assessed. The
+    // follow-on transition is best-effort and must never turn an already-
+    // recorded payment into an error response.
+    const applicationId = await filed();
+    for (const status of ['Received', 'Document Verification', 'Under Evaluation']) {
+      await db.query('update applications set lifecycle_status = $1 where id = $2', [status, applicationId]);
+    }
+    const orderId = randomUUID();
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                      architectural_centavos, structural_centavos, electrical_centavos,
+                                      others_centavos, total_centavos, fee_schedule_version, assessed_by)
+       values ($1,$2,'OP-1',50000,120000,0,512000,0,0,682000,'2026.1',$3)`,
+      [orderId, applicationId, MARIA],
+    );
+
+    const response = await post(`/applications/${applicationId}/payments`, maria, {
+      referenceNumber: 'BT-9931882', method: 'Bank Transfer',
+      paidOn: '2026-08-20', amountCentavos: 682_000,
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(await count('select count(*) as n from payments where application_id = $1', [applicationId])).toBe(1);
+    const row = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    // Unmoved — the illegal-transition refusal was swallowed, not surfaced.
+    expect(row.rows[0]!.lifecycle_status).toBe('Under Evaluation');
+  });
 });
 
 describe('withdrawing', () => {
@@ -505,6 +570,21 @@ describe('registering a business', () => {
 
     expect(filed.statusCode).toBe(422);
   });
+
+  it.each(['Construction', 'Transport', 'Agriculture'])(
+    'registers a real %s business — the exact category that used to crash at the database',
+    async (category) => {
+      // Migration 041: `businessShape.category`'s zod enum accepted these
+      // three, but the database's own `businesses_category_check` (migration
+      // 003) still only knew the original six — so validation passed and the
+      // insert then raised a raw "violates check constraint" 500. First
+      // caught live, registering a real business through the Citizen Portal.
+      const response = await post('/businesses', maria, { ...business, category, name: `${category} Co.` });
+
+      expect(response.statusCode).toBe(201);
+      expect(response.json<{ category: string }>().category).toBe(category);
+    },
+  );
 });
 
 describe('answering a Letter of Instruction', () => {
@@ -1041,17 +1121,25 @@ describe('uploads that were never filed (C-7)', () => {
     });
   });
 
-  it('stops listing one once it is filed, because it is answered elsewhere', async () => {
-    // Documents on an application are served in context by
-    // GET /applications/:id/documents. Returning them here too would be a
-    // second answer to a question already answered.
+  it('keeps listing one once it is filed, now naming what it is attached to', async () => {
+    // Used to stop listing a filed document, reasoning that
+    // GET /applications/:id/documents already answers the question in
+    // context. True, but it meant a document was reusable exactly once:
+    // filing it removed it from this list, so a second permit could not
+    // reuse the same valid ID or tax clearance without a fresh upload, even
+    // though the citizen still owns it.
     const upload = await post('/documents', maria, {
       fileName: 'filed.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
     });
     const documentId = upload.json<{ documentId: string }>().documentId;
-    await post('/applications', maria, submission({ documentIds: [documentId] }));
+    const filed = await post('/applications', maria, submission({ documentIds: [documentId] }));
+    const applicationId = filed.json<{ id: string }>().id;
 
-    expect((await get('/documents/me', maria)).json()).toEqual([]);
+    const [document] = (await get('/documents/me', maria))
+      .json<{ id: string; applicationId: string | null }[]>();
+
+    expect(document!.id).toBe(documentId);
+    expect(document!.applicationId).toBe(applicationId);
   });
 
   it('never lists another citizen’s unfiled uploads', async () => {
@@ -1064,17 +1152,18 @@ describe('uploads that were never filed (C-7)', () => {
     expect((await get('/documents/me', maria)).json()).toEqual([]);
   });
 
-  it('offers no review fields, because nothing here has been reviewed', async () => {
-    // Review happens on an application and these are attached to none.
-    // Returning nulls would invite a client to render "not yet reviewed",
-    // which suggests somebody will.
+  it('says reviewStatus is null for an unattached document, not merely absent', async () => {
+    // Review happens on an application. An unattached document has none to
+    // be reviewed against, so this is null rather than a status — never a
+    // property left off, which would read as "not yet reviewed" and imply
+    // somebody will.
     await post('/documents', maria, {
       fileName: 'abandoned.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
     });
 
     const [document] = (await get('/documents/me', maria)).json<Record<string, unknown>[]>();
 
-    expect(document).not.toHaveProperty('reviewStatus');
+    expect(document).toHaveProperty('reviewStatus', null);
     expect(document).not.toHaveProperty('reviewReason');
   });
 });

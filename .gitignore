@@ -34,6 +34,15 @@ https:/
 # Uploaded bytes from the development server. Never a deliverable.
 .dev-objects/
 
+# dev-server-persistent.ts's on-disk PGlite data directory. A real database,
+# just not one that belongs in source control.
+.dev-pgdata/
+
+# Password + TOTP secrets dev-server-persistent.ts writes at first seed, so a
+# later session can read them back without restarting (and wiping) the
+# database. Same category as .env — a real, working credential, never tracked.
+.dev-persistent-credentials.json
+
 # Service-account keys. Firebase, Google Cloud, anything shaped like them.
 #
 # `scan-secrets.py` already refuses a PEM private-key header, so a committed one

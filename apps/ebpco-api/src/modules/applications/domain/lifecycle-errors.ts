@@ -71,4 +71,6 @@ export const PRECONDITION_MESSAGE: Readonly<Record<Precondition, string>> = {
     'Not every evaluation stage has been completed.',
   'permit-generated':
     'No permit has been generated for this application yet.',
+  'permit-released':
+    'This permit has not actually been released yet — use Release, not a direct status change.',
 };

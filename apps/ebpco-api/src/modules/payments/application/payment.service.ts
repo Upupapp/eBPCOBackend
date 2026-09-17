@@ -533,8 +533,9 @@ export class PaymentService {
     }
 
     const updated = await this.db.query(
-      `update payments set status = 'Not Yet Available' where id = $1 and verified_at is null`,
-      [paymentId],
+      `update payments set status = 'Not Yet Available', rejection_reason = $2, rejected_at = $3
+        where id = $1 and verified_at is null`,
+      [paymentId, reason, this.clock()],
     );
     if (updated.rowCount === 0) return { ok: false, reason: 'not-found', detail: 'no unverified payment with that id' };
 

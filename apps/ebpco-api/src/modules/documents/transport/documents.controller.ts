@@ -66,7 +66,7 @@ export class DocumentsController {
   constructor(private readonly documents: DocumentService) {}
 
   /**
-   * The caller's own uploads that are not attached to any application (C-7).
+   * Every document the caller has ever uploaded (C-7), attached or not.
    *
    * `POST /documents` takes a nullable application id because both clients
    * upload before they file -- so an abandoned wizard session leaves real
@@ -75,15 +75,21 @@ export class DocumentsController {
    * practice: a citizen could not see what they had left behind, still less
    * decide to finish or abandon it.
    *
-   * Only the unattached ones. Documents on an application are already served,
-   * in context, by `GET /applications/:id/documents` -- and returning them here
-   * too would be a second answer to a question already answered, drifting from
-   * the first the moment either changed.
+   * Originally this served only the unattached ones, reasoning that an
+   * attached document is already served, in context, by
+   * `GET /applications/:id/documents`. True, but it made a document reusable
+   * exactly once: attaching it to one application removed it from this list,
+   * so a second permit could not reuse the same valid ID or tax clearance
+   * without a fresh upload -- even though the citizen still owns it. This is
+   * now the citizen's full document history, each row carrying which
+   * application (if any) it is currently attached to, so a client can build
+   * both "everything I've ever submitted" and "what can I reuse right now"
+   * from the one list.
    */
   @Get('me')
   @RequireScopes('documents:read')
   async mine(@Req() request: AuthenticatedRequest): Promise<ReadonlyArray<Record<string, unknown>>> {
-    return this.documents.unattachedFor(callerOf(request).accountId);
+    return this.documents.historyFor(callerOf(request).accountId);
   }
 
   @Post()

@@ -10,6 +10,8 @@ import { EVALUATION_RESULTS, EVALUATION_STAGES, EvaluationService } from '../app
 import { AssessmentService } from '../../payments/application/assessment.service';
 import { PermitService } from '../../permits/application/permit.service';
 import { PaymentService } from '../../payments/application/payment.service';
+import { DocumentService } from '../../documents/application/document.service';
+import { requestDigest } from '../../../persistence/idempotency';
 
 /**
  * The things an officer DOES to an application, as opposed to reading it.
@@ -68,6 +70,28 @@ const releaseShape = z.object({
   claimantName: z.string().min(1).max(200),
   method: z.enum(['Physical Claim', 'Authorized Representative']),
 });
+
+const documentReviewShape = z.object({
+  status: z.enum(['Under Review', 'Accepted', 'Rejected', 'Revision Required']),
+  reasonCode: z.string().max(100).optional(),
+  remark: z.string().max(4000).optional(),
+});
+
+/**
+ * Same shape `POST /applications/:applicationId/documents/:documentId/resubmit`
+ * (the applicant-only route) accepts — this is the same act, the walk-in
+ * citizen just is not the one at the keyboard.
+ */
+const documentResubmitShape = z.object({
+  fileName: z.string().min(1).max(255),
+  label: z.string().min(1).max(200),
+  contentBase64: z.string().min(1).max(40_000_000),
+}).strict();
+
+/** Required because `DocumentService.resubmit()` requires one — see the applicant route's own comment on why a UUID. */
+function idempotencyKey(value: string | undefined): string {
+  return parse(z.string().uuid('an Idempotency-Key must be a UUID'), value ?? null);
+}
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -138,6 +162,7 @@ export class StaffActionsController {
     private readonly assessment: AssessmentService,
     private readonly permits: PermitService,
     private readonly payments: PaymentService,
+    private readonly documents: DocumentService,
   ) {}
 
   /** Readable and actionable are different questions; this answers the first. */
@@ -171,6 +196,126 @@ export class StaffActionsController {
     // `complete` is returned so the portal knows whether the application can now
     // be assessed, without a second request that would race the first.
     return { evaluationId: result.evaluationId, evaluationsComplete: result.complete };
+  }
+
+  /**
+   * A staff verdict on one document — writes the columns migration 027
+   * added. `documents:write` rather than a new `staff:*` scope: this is a
+   * mutation of the document itself, the same authority `resubmitDocument`
+   * acts under, not a lifecycle transition (nothing here moves
+   * `lifecycle_status`).
+   */
+  @Post('documents/:documentId/review')
+  @RequireScopes('documents:write')
+  async reviewDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Param('documentId') documentId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = callerOf(request);
+    const input = parse(documentReviewShape, body);
+    await this.visible(caller, applicationId);
+
+    const result = await this.documents.review({
+      applicationId,
+      documentId,
+      status: input.status,
+      reasonCode: input.reasonCode ?? null,
+      remark: input.remark ?? null,
+      caller,
+    });
+
+    if (!result.ok) {
+      const detail =
+        result.reason === 'not-found'
+          ? 'No such document on this application.'
+          : result.reason === 'not-scan-cleared'
+            ? 'This document has not cleared the malware scan yet and cannot be reviewed.'
+            : 'A reason is required when rejecting a document or requesting revision.';
+      throw refusal(result.reason, detail);
+    }
+    return { ok: true };
+  }
+
+  /**
+   * Resubmitting a rejected document for a citizen with no portal access.
+   *
+   * The applicant-only route (`POST /applications/:id/documents/:id/resubmit`)
+   * is kind-gated, not merely scope-gated — a real, deliberate gap for a walk-in
+   * who cannot resubmit themselves. This calls the exact same
+   * `DocumentService.resubmit()` the applicant route does, with a staff
+   * `Caller` instead: `uploaded_by` attributes the file to the officer who
+   * actually handled it, which is the honest fact (they are the one who
+   * scanned/typed the replacement in), not a fiction that the citizen
+   * uploaded it themselves from a machine they were never at.
+   */
+  @Post('documents/:documentId/resubmit')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('documents:write')
+  async resubmitDocument(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Param('documentId') documentId: string,
+    @Body() body: unknown,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<Record<string, unknown>> {
+    const caller = callerOf(request);
+    const input = parse(documentResubmitShape, body ?? {});
+    const idempotency = idempotencyKey(key);
+    await this.visible(caller, applicationId);
+
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.contentBase64, 'base64');
+      if (bytes.length === 0) throw new Error('empty');
+    } catch {
+      throw ProblemException.validation([
+        { pointer: '/contentBase64', message: 'could not be decoded as base64' },
+      ]);
+    }
+
+    const outcome = await this.documents.resubmit({
+      applicationId, supersededDocumentId: documentId, bytes,
+      fileName: input.fileName, label: input.label, caller,
+      idempotencyKey: idempotency,
+      digest: requestDigest(input),
+    });
+
+    switch (outcome.kind) {
+      case 'created':
+        return {
+          documentId: outcome.documentId,
+          supersedesDocumentId: documentId,
+          status: outcome.status,
+          removedMetadata: outcome.removedMetadata,
+        };
+      case 'replay':
+        return outcome.body as Record<string, unknown>;
+      case 'mismatch':
+        throw new ProblemException(
+          ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+          'This Idempotency-Key was already used for a different request. Use a new key.',
+        );
+      case 'refused':
+        if (outcome.refusal.reason === 'not-found') {
+          throw ProblemException.notFound('No such document on this application.');
+        }
+        throw new ProblemException(
+          ProblemType.conflict, 'The resource is not in a state that permits this',
+          HttpStatus.CONFLICT, outcome.refusal.detail,
+        );
+      default:
+        if (outcome.infected) {
+          throw new ProblemException(
+            ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+            outcome.detail,
+          );
+        }
+        throw ProblemException.validation([
+          { pointer: '/contentBase64', message: outcome.detail },
+        ]);
+    }
   }
 
   @Post('order-of-payment')

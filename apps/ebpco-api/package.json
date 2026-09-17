@@ -24,6 +24,7 @@
     "audit:reachability": "ts-node --transpile-only scripts/reachability.ts",
     "audit:samples": "ts-node --transpile-only scripts/sample-coverage.ts",
     "dev:server": "ts-node --transpile-only scripts/dev-server.ts",
+    "dev:server:persistent": "ts-node --transpile-only scripts/dev-server-persistent.ts",
     "seed:super-admin": "ts-node --transpile-only scripts/seed-super-admin.ts"
   },
   "dependencies": {

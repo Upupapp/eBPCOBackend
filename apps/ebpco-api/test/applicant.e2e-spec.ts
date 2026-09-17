@@ -484,6 +484,88 @@ describe('an applicant can obtain the permit they were issued (C-1)', () => {
   });
 });
 
+describe('an applicant can see their own payment history', () => {
+  // Before this route, submitting a real payment (POST .../payments, exercised
+  // elsewhere) had nowhere for the applicant to check it landed: the Citizen
+  // Portal's payments list and receipt screens read only a local mock. This is
+  // the real per-attempt history that fixed it.
+  const order = async (applicationId: string): Promise<string> => {
+    const id = randomUUID();
+    await db.query(
+      `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
+                                      architectural_centavos, structural_centavos, electrical_centavos,
+                                      others_centavos, total_centavos, fee_schedule_version, assessed_by)
+       values ($1,$2,'OP-1',50000,120000,0,0,0,0,170000,'2026.1',$3)`,
+      [id, applicationId, MARIA],
+    );
+    return id;
+  };
+
+  it('reports what was submitted, oldest first', async () => {
+    const orderId = await order(mariaApplication);
+    await db.query(
+      `insert into payments (order_of_payment_id, application_id, reference_number, amount_centavos,
+                             method, status, submitted_at, submitted_by)
+       values ($1,$2,'BT-1',170000,'Bank Transfer','Pending Verification','2026-08-20T01:00:00Z',$3)`,
+      [orderId, mariaApplication, MARIA],
+    );
+
+    const body = (await get(`/applications/${mariaApplication}/payments`, await applicantToken(MARIA)))
+      .json<{ referenceNumber: string; amountCentavos: number; status: string; verifiedAt: string | null }[]>();
+
+    expect(body).toHaveLength(1);
+    expect(body[0]).toMatchObject({
+      referenceNumber: 'BT-1', amountCentavos: 170_000, status: 'Pending Verification', verifiedAt: null,
+    });
+  });
+
+  it('shows a rejected attempt with its reason, still sitting alongside what was submitted after', async () => {
+    // Each submission is its own row (PaymentService.submitProof always
+    // inserts, never updates) — a rejection just marks THIS row, and a later
+    // resubmission is a second, separate row. Both should be visible: the
+    // history, not just the current state.
+    const orderId = await order(mariaApplication);
+    await db.query(
+      `insert into payments (id, order_of_payment_id, application_id, reference_number, amount_centavos,
+                             method, status, submitted_at, submitted_by, rejection_reason, rejected_at)
+       values (gen_random_uuid(),$1,$2,'BT-1',170000,'Bank Transfer','Not Yet Available',
+               '2026-08-19T01:00:00Z',$3,'The reference number does not match the bank statement on file.',
+               '2026-08-19T05:00:00Z')`,
+      [orderId, mariaApplication, MARIA],
+    );
+    await db.query(
+      `insert into payments (order_of_payment_id, application_id, reference_number, amount_centavos,
+                             method, status, submitted_at, submitted_by)
+       values ($1,$2,'BT-2',170000,'Bank Transfer','Pending Verification','2026-08-20T01:00:00Z',$3)`,
+      [orderId, mariaApplication, MARIA],
+    );
+
+    const body = (await get(`/applications/${mariaApplication}/payments`, await applicantToken(MARIA)))
+      .json<{ referenceNumber: string; status: string; rejectionReason: string | null }[]>();
+
+    expect(body).toHaveLength(2);
+    expect(body[0]).toMatchObject({
+      referenceNumber: 'BT-1', status: 'Not Yet Available',
+      rejectionReason: 'The reference number does not match the bank statement on file.',
+    });
+    expect(body[1]).toMatchObject({ referenceNumber: 'BT-2', status: 'Pending Verification', rejectionReason: null });
+  });
+
+  it('never serves another applicant’s payment history', async () => {
+    const orderId = await order(joseApplication);
+    await db.query(
+      `insert into payments (order_of_payment_id, application_id, reference_number, amount_centavos,
+                             method, status, submitted_at, submitted_by)
+       values ($1,$2,'BT-9',170000,'Bank Transfer','Pending Verification',now(),$3)`,
+      [orderId, joseApplication, JOSE],
+    );
+
+    const response = await get(`/applications/${joseApplication}/payments`, await applicantToken(MARIA));
+
+    expect(response.statusCode).toBe(404);
+  });
+});
+
 describe('an applicant can see the office’s verdict on their documents (C-2)', () => {
   const OFFICER = randomUUID();
 

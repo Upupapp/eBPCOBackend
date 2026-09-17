@@ -259,6 +259,19 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     city: direct('statutory', CORRESPONDENCE),
     province: direct('statutory', CORRESPONDENCE),
     postal_code: direct('statutory', CORRESPONDENCE),
+    // ── The rest of the registration form (migration 038) ──────────────────
+    //
+    // Same PD 1096 basis as the name above, not CORRESPONDENCE — these say
+    // who the applicant IS (and, for date_of_birth, that they were old
+    // enough to register at all), not where to reach them. `civil_status`
+    // and `nationality` are content the applicant typed against a form
+    // field, but a closed/free-text personal fact about them either way,
+    // never a place a third party's data could end up — classified `direct`
+    // like the name beside them, not `content`.
+    date_of_birth: direct('statutory', PERMIT_RECORD),
+    sex: direct('statutory', PERMIT_RECORD),
+    civil_status: direct('statutory', PERMIT_RECORD),
+    nationality: direct('statutory', PERMIT_RECORD),
     created_at: none('statutory'),
     updated_at: none('statutory'),
   },
@@ -569,6 +582,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     exception_reason: none('statutory'),
     exception_at: none('statutory'),
     exception_by: linkable('audit', ACCOUNTABILITY),
+    // Why a payment was rejected (migration 040) — the same shape as
+    // exception_reason/exception_at just above, and classified the same
+    // way: an officer's own note about the transaction, not information
+    // about the applicant. There is no separate rejected_by column (the
+    // cashier who rejects a payment is already the one whose token the
+    // request carried), so no linkable actor entry is needed here.
+    rejection_reason: none('statutory'),
+    rejected_at: none('statutory'),
   },
 
   generated_permits: {

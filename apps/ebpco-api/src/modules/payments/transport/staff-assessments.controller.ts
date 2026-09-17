@@ -111,6 +111,20 @@ export class StaffAssessmentsController {
   }
 
   /**
+   * The application's own in-progress assessment, for the officer who did
+   * not draft it — see `AssessmentWorkflowService.openFor`'s doc comment.
+   * Answers `null` rather than 404 when none is open: "no open assessment"
+   * is a normal, expected state (before drafting, or after issue/withdraw),
+   * not an error.
+   */
+  @Get('applications/:applicationId/assessments/open')
+  @RequireScopes('payments:read')
+  async open(@Param('applicationId') applicationId: string): Promise<Record<string, unknown> | null> {
+    const assessment = await this.workflow.openFor(applicationId);
+    return assessment === null ? null : { ...assessment };
+  }
+
+  /**
    * PUT, not PATCH: the six lines are a fixed set, so this replaces one of them
    * rather than creating anything. A client that repeats the same request twice
    * leaves the line in the same state, which is what an officer at a keyboard

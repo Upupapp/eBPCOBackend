@@ -361,14 +361,19 @@ describe('the role table and the route table agree', () => {
     expect(reached).toEqual([]);
   });
 
-  it('refuses the super-admin the four acting scopes, deliberately', () => {
-    // Seeing every screen is not being able to perform every act. Asserted on
-    // the table rather than over HTTP because it is a statement about what the
-    // role IS, and it must hold before any route exists to test it against.
+  it('grants the super-admin the four acting scopes, by the owner\'s own 2026-09-13 reversal', () => {
+    // Was "refuses ... deliberately" — the separation-of-duty argument that
+    // used to keep these off Super Admin (the officer who assesses a fee must
+    // not be the one who confirms it was paid) was a real control the owner
+    // explicitly chose to trade away for one account that can act everywhere,
+    // knowingly (see account.ts's own doc comment on SUPER_ADMIN_SCOPES).
+    // Asserted on the table rather than over HTTP because it is a statement
+    // about what the role IS, and it must hold before any route exists to
+    // test it against.
     const granted = new Set(scopesFor({ kind: 'staff', roles: ['super-admin'] }));
 
     for (const scope of ['staff:assess', 'staff:verify-payment', 'staff:approve', 'staff:release']) {
-      expect(granted.has(scope as never)).toBe(false);
+      expect(granted.has(scope as never)).toBe(true);
     }
     expect(granted.has('staff:administer')).toBe(true);
     expect(granted.has('audit:read')).toBe(true);

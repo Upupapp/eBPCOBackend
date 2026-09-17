@@ -501,6 +501,10 @@ components:
         city: { type: [string, 'null'] }
         province: { type: [string, 'null'] }
         postalCode: { type: [string, 'null'] }
+        dateOfBirth: { type: [string, 'null'] }
+        sex: { type: [string, 'null'], enum: [Male, Female, 'Prefer not to say', null] }
+        civilStatus: { type: [string, 'null'], enum: [Single, Married, Widowed, Separated, Divorced, null] }
+        nationality: { type: [string, 'null'] }
         mobileVerifiedAt:
           type: [string, 'null']
           format: date-time
@@ -530,6 +534,7 @@ components:
       required:
         [id, kind, email, emailVerifiedAt, firstName, middleName, lastName,
          mobileNumber, street, barangay, city, province, postalCode,
+         dateOfBirth, sex, civilStatus, nationality,
          mobileVerifiedAt, mobileVerificationCleared]
       properties:
         id: { type: string, format: uuid }
@@ -545,6 +550,12 @@ components:
         city: { type: [string, 'null'] }
         province: { type: [string, 'null'] }
         postalCode: { type: [string, 'null'] }
+        dateOfBirth:
+          type: [string, 'null']
+          description: 'YYYY-MM-DD, or null when not recorded (migration 038 — nullable for every applicant that registered before this field existed).'
+        sex: { type: [string, 'null'], enum: [Male, Female, 'Prefer not to say', null] }
+        civilStatus: { type: [string, 'null'], enum: [Single, Married, Widowed, Separated, Divorced, null] }
+        nationality: { type: [string, 'null'] }
         mobileVerifiedAt: { type: [string, 'null'], format: date-time }
         mobileVerificationCleared:
           type: boolean

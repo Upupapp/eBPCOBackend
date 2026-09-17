@@ -382,8 +382,9 @@ export class StaffQueueService {
           // RECORDED, and the admin surface renders it as that rather than as
           // an absence of certification.
           `select id, label, file_name, content_type, byte_size, status, scan_cleared,
+                  requirement_code, review_status, review_remark,
                   to_char(expires_on, 'YYYY-MM-DD') as expires_on,
-                  to_char(certified_on, 'YYYY-MM-DD') as certified_on, uploaded_at
+                  to_char(certified_on, 'YYYY-MM-DD') as certified_on, uploaded_at, reviewed_at
              from documents where application_id = $1 and deleted_at is null
             order by uploaded_at`, [applicationId]),
         // Not a query of its own. Reading evaluations belongs to the
@@ -419,9 +420,20 @@ export class StaffQueueService {
         // this is the record's own history, not the security log -- which also
         // records refused attempts, a different question and in some hands a
         // disclosure.
+        //
+        // `actorName` names the specific person, not just their office —
+        // Archive's own "Archived By" column used to read this timeline and
+        // find no such field, so it always showed blank on real data.
+        // `accounts.full_name` (migration 034) is set for staff; an applicant
+        // acting on their own application (a self-cancel, say) has none there,
+        // so this falls through to their name on `applicants`, and only to
+        // their email if even that is missing.
         this.db.query(
-          `select t.from_status, t.to_status, t.occurred_at, t.office, t.remarks
+          `select t.from_status, t.to_status, t.occurred_at, t.office, t.remarks,
+                  coalesce(acc.full_name, ap2.first_name || ' ' || ap2.last_name, acc.email) as actor_name
              from application_transitions t
+             left join accounts acc on acc.id = t.actor_account_id
+             left join applicants ap2 on ap2.account_id = acc.id
             where t.application_id = $1 order by t.occurred_at`, [applicationId]),
       ]);
 

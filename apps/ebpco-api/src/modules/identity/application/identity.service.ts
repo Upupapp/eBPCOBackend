@@ -200,6 +200,14 @@ export class IdentityService {
     firstName: string;
     lastName: string;
     mobileNumber?: string | null;
+    // `| undefined` explicitly, not just optional: `exactOptionalPropertyTypes`
+    // is on, and the controller passes these straight through from a parsed
+    // Zod body whose absent fields are present-and-undefined (same reasoning
+    // as `RectificationService.rectify`'s options).
+    dateOfBirth?: string | null | undefined;
+    sex?: 'Male' | 'Female' | 'Prefer not to say' | null | undefined;
+    civilStatus?: 'Single' | 'Married' | 'Widowed' | 'Separated' | 'Divorced' | null | undefined;
+    nationality?: string | null | undefined;
   }): Promise<{ accepted: boolean; rejections: readonly PasswordRejection[] }> {
     // The password is checked before the address is looked up, because a weak
     // password must be reported to the person choosing it -- that is not an
@@ -244,6 +252,14 @@ export class IdentityService {
         province: null,
         postalCode: null,
         mobileNumber: input.mobileNumber ?? null,
+        // Registration DOES collect these (migration 038) — unlike the address
+        // above, the web portal's own registration form is where these come
+        // from, not PATCH /me. Optional on the input so a caller that does not
+        // collect them (the mobile client, today) still registers cleanly.
+        dateOfBirth: input.dateOfBirth ?? null,
+        sex: input.sex ?? null,
+        civilStatus: input.civilStatus ?? null,
+        nationality: input.nationality ?? null,
       });
     }
 

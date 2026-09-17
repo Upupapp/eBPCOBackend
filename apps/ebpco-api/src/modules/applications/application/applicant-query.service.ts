@@ -1,6 +1,7 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { CalendarRepository } from '../../compliance/application/calendar.repository';
 import { Classification, computePledge } from '../../compliance/domain/pledge-clock';
+import { parseCentavos } from '../../payments/domain/money';
 import { ApplicationRecord, toApplicantView } from './applicant-view';
 
 /**
@@ -315,6 +316,62 @@ export class ApplicantQueryService {
    * has not been issued; the controller distinguishes the two, because an
    * applicant already knows their own application exists.
    */
+  /**
+   * Every payment the applicant has ever submitted against this application,
+   * oldest first.
+   *
+   * A bare array, same shape as `documents`/`timeline` on this same
+   * controller: one idea, one shape. Each submission is its own row
+   * (`PaymentService.submitProof` always inserts, never updates), so a
+   * rejected attempt stays visible here alongside whatever was submitted
+   * after it — the applicant sees the full history, not just the current
+   * state.
+   *
+   * `officialReceiptNumber`/`verifiedAt` are null until an officer verifies;
+   * `rejectionReason`/`rejectedAt` are null unless this specific row was
+   * rejected (migration 040) — both are real, per-row facts, never inferred.
+   */
+  async payments(accountId: string, applicationId: string):
+  Promise<ReadonlyArray<Record<string, unknown>> | null> {
+    if (await this.byId(accountId, applicationId) === null) return null;
+
+    const result = await this.db.query<{
+      id: string; reference_number: string; method: string; amount_centavos: string;
+      status: string; submitted_at: Date; verified_at: Date | null;
+      official_receipt_number: string | null;
+      rejection_reason: string | null; rejected_at: Date | null;
+      exception_reason: string | null; exception_at: Date | null;
+    }>(
+      `select id, reference_number, method, amount_centavos::text as amount_centavos, status,
+              submitted_at, verified_at, official_receipt_number,
+              rejection_reason, rejected_at, exception_reason, exception_at
+         from payments
+        where application_id = $1
+        order by submitted_at`,
+      [applicationId],
+    );
+
+    return result.rows.map((row) => ({
+      id: row.id,
+      referenceNumber: row.reference_number,
+      method: row.method,
+      amountCentavos: parseCentavos(row.amount_centavos),
+      status: row.status,
+      submittedAt: row.submitted_at.toISOString(),
+      verifiedAt: row.verified_at === null ? null : row.verified_at.toISOString(),
+      officialReceiptNumber: row.official_receipt_number,
+      rejectionReason: row.rejection_reason,
+      rejectedAt: row.rejected_at === null ? null : row.rejected_at.toISOString(),
+      // Voided/Reversed/Refunded (migration 020) — a different, later kind of
+      // undo than a rejection, told apart the same way the status itself
+      // tells them apart. See migration 040's own comment for why this is a
+      // separate pair of columns from rejectionReason/rejectedAt rather than
+      // one shared with it.
+      exceptionReason: row.exception_reason,
+      exceptionAt: row.exception_at === null ? null : row.exception_at.toISOString(),
+    }));
+  }
+
   async permit(accountId: string, applicationId: string): Promise<{
     permitNumber: string; issuedDate: string; scope: string | null;
     conditions: readonly string[];

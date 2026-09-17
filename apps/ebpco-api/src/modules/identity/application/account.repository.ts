@@ -72,6 +72,19 @@ export interface ApplicantProfile {
   readonly city: string | null;
   readonly province: string | null;
   readonly postalCode: string | null;
+  /**
+   * The rest of what registration collects (migration 038), same nullability
+   * story as the address above: not collected before 038, so every existing
+   * applicant has none of it, and null means NOT RECORDED rather than blank.
+   *
+   * `dateOfBirth` is the wire format the web portal's date input already
+   * produces — 'YYYY-MM-DD' — carried through as a plain string rather than
+   * a `Date`, the same choice migration 038 makes for the column itself.
+   */
+  readonly dateOfBirth: string | null;
+  readonly sex: 'Male' | 'Female' | 'Prefer not to say' | null;
+  readonly civilStatus: 'Single' | 'Married' | 'Widowed' | 'Separated' | 'Divorced' | null;
+  readonly nationality: string | null;
 }
 
 /**

@@ -392,6 +392,25 @@ export class AssessmentWorkflowService {
     return id === undefined ? null : this.load(tx, id);
   }
 
+  /**
+   * The in-progress (Draft/Submitted/Approved) assessment for an application,
+   * if one is open — the lookup `draft()` already does internally (to refuse
+   * `already-open`) but never surfaced. Without this, a second officer who
+   * did not personally open the draft — the normal case, since approval
+   * requires someone OTHER than who drafted or submitted it — had no way to
+   * find it at all: `GET assessments/:id` needs the assessment's own id, and
+   * nothing handed that id to anyone outside the browser session that
+   * drafted it.
+   */
+  async openFor(applicationId: string, tx: SqlClient = this.db): Promise<Assessment | null> {
+    const found = await tx.query<{ id: string }>(
+      'select id from assessments where application_id = $1 and status = any($2) order by created_at desc limit 1',
+      [applicationId, [...OPEN]],
+    );
+    const id = found.rows[0]?.id;
+    return id === undefined ? null : this.load(tx, id);
+  }
+
   async markIssued(assessmentId: string, orderId: string, tx: SqlClient): Promise<void> {
     await tx.query(
       "update assessments set status = 'Issued', order_of_payment_id = $1, updated_at = $2 where id = $3",

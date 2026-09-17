@@ -46,7 +46,8 @@ export type Precondition =
   | 'payment-proof-submitted'
   | 'payment-verified'
   | 'evaluations-complete'
-  | 'permit-generated';
+  | 'permit-generated'
+  | 'permit-released';
 
 export interface TransitionRule {
   readonly from: LifecycleStatus;
@@ -164,8 +165,15 @@ export const TRANSITIONS: readonly TransitionRule[] = [
   { from: 'Permit Generated', to: 'Ready for Release', actors: ['staff'], requires: 'staff:release',
     preconditions: ['permit-generated'], notifies: 'ready-for-release' },
 
+  // Same reasoning as the precondition above this one: without it, a direct
+  // status change here could announce a permit was released when
+  // `PermitService.release()` — the call that actually records who claimed
+  // it, how, and which officer released it — was never made. The DB trigger
+  // on `permit_releases` guards that table alone; it has no say over
+  // `applications.lifecycle_status`, so this precondition is the only thing
+  // that ties the two together.
   { from: 'Ready for Release', to: 'Released', actors: ['staff'], requires: 'staff:release',
-    preconditions: ['permit-generated'], notifies: 'released' },
+    preconditions: ['permit-generated', 'permit-released'], notifies: 'released' },
 
   { from: 'Released', to: 'Completed', actors: ['staff'], requires: 'staff:release',
     preconditions: [] },

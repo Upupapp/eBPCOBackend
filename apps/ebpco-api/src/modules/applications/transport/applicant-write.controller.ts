@@ -235,6 +235,37 @@ export class ApplicantWriteController {
     });
 
     if (result.ok) {
+      // The move this whole route exists to cause. `Assessed -> Payment
+      // Submitted` is declared `actors: ['applicant']` in the lifecycle
+      // table (lifecycle.ts) — the applicant submitting proof IS the real
+      // event that moves the application, not a staff action, and no staff
+      // route can ever make this specific move (a staff caller is refused
+      // as the wrong actor). Before this call existed here, nothing in the
+      // system ever made it: PaymentService only ever wrote the `payments`
+      // row, so a real payment sat recorded and invisible to the cashier
+      // queue's normal flow, the application stuck at Assessed forever —
+      // the exact gap in the citizen-to-citizen loop this pass was built to
+      // close. Skipped on a replay: the transition already happened on the
+      // original call, and a second attempt with no idempotency key of its
+      // own would be refused as illegal (Payment Submitted -> Payment
+      // Submitted is not a real move).
+      if (!result.replayed) {
+        // Best-effort, and deliberately never thrown on refusal. The payment
+        // row above is already committed — a real proof of payment, durably
+        // recorded — so a refused status move must not turn into an error
+        // response the citizen reads as "your payment failed". The most
+        // likely refusal is `illegal-transition`, reachable whenever
+        // `submitProof` succeeds (it only requires an in-force Order of
+        // Payment) while an officer has not yet made the separate manual
+        // move to Assessed — a real, easy-to-forget staff step this route
+        // has no control over. Even then nothing is lost: `staff:verify-payment`
+        // visibility (visibility.ts) already includes `Assessed` in the
+        // cashier's queue, specifically so an application with a real
+        // payment recorded is never invisible while its status catches up.
+        // No idempotencyKey is passed — this is an internal follow-on to the
+        // write above, not a second client request.
+        await this.lifecycle.transition({ applicationId, caller, to: 'Payment Submitted' });
+      }
       return { paymentId: result.paymentId, replayed: result.replayed, settles: result.settlement.settles };
     }
 

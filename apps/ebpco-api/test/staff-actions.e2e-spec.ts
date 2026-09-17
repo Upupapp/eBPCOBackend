@@ -298,6 +298,102 @@ describe('the permit precondition that was missing', () => {
   });
 });
 
+describe('the release precondition that was missing', () => {
+  it('refuses a direct status change to Released with no real release recorded', async () => {
+    // Before this, Ready for Release -> Released checked only the same
+    // permit-generated fact the PREVIOUS hop already checked. An officer
+    // holding staff:release could call this endpoint directly, skip
+    // POST .../release entirely, and the application would read as Released
+    // with no claimant, method, or releasing officer ever recorded.
+    const id = await file('BP-1', 'Ready for Release');
+
+    const response = await post(`/staff/applications/${id}/transitions`,
+      await staffToken('releasing-officer'), { to: 'Released' });
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/not actually been released/i);
+  });
+
+  it('allows it once the permit really has been released', async () => {
+    // `file()` only raw-SQL-jumps `lifecycle_status` — it never inserts into
+    // `generated_permits`/`permit_releases`, so getting to a real release
+    // needs the real calls, same sequence as "the whole path" test below.
+    const id = await file('BP-1', 'Approved');
+    const official = await staffToken('building-official');
+    const releasing = await staffToken('releasing-officer');
+    await post(`/staff/applications/${id}/permit`, official, { scope: SCOPE });
+    await post(`/staff/applications/${id}/transitions`, official, { to: 'Permit Generated' });
+    await post(`/staff/applications/${id}/release-preparation`, releasing, {
+      claimLocation: 'OBO, 2/F Cabuyao City Hall', officeHours: 'Mon-Fri 8:00-17:00',
+      bringWithYou: ['One valid government ID'],
+    });
+    await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Ready for Release' });
+    await post(`/staff/applications/${id}/release`, releasing,
+      { claimantName: 'Maria Santos', method: 'Physical Claim' });
+
+    const response = await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Released' });
+
+    expect(response.statusCode).toBe(200);
+  });
+});
+
+describe('staff resubmitting a document for a walk-in citizen', () => {
+  // The applicant-only route (POST /applications/:id/documents/:id/resubmit)
+  // is kind-gated, not merely scope-gated — a citizen with no portal access
+  // could never have it fixed on their behalf until this staff equivalent.
+  async function rejectedDocument(applicationId: string): Promise<string> {
+    const id = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared, review_status,
+                              review_remark, reviewed_at)
+       values ($1,$2,$3,'Valid Government-Issued ID','id.pdf','application/pdf',1024,
+               repeat('a',64),$4,'Rejected',true,'Rejected','The scan is illegible.',now())`,
+      [id, applicationId, APPLICANT_ACCOUNT, `key-${id}`],
+    );
+    return id;
+  }
+
+  const PDF = Buffer.from('%PDF-1.4 minimal test file');
+
+  it('records the replacement, attributed to the officer who handled it', async () => {
+    const id = await file('BP-1', 'Received');
+    const documentId = await rejectedDocument(id);
+    const token = await staffToken('records-officer');
+
+    const response = await post(`/staff/applications/${id}/documents/${documentId}/resubmit`, token, {
+      fileName: 'id-v2.pdf', label: 'Valid Government-Issued ID', contentBase64: PDF.toString('base64'),
+    });
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json<{ documentId: string; supersedesDocumentId: string }>();
+    expect(body.supersedesDocumentId).toBe(documentId);
+
+    const row = await db.query<{ uploaded_by: string; supersedes_document_id: string }>(
+      'select uploaded_by, supersedes_document_id from documents where id = $1', [body.documentId],
+    );
+    // The officer, not the citizen — they are the one who actually handled
+    // the replacement, and recording the citizen as uploader would claim they
+    // were at a machine they were never at.
+    const officer = await db.query<{ id: string }>(
+      'select id from accounts where email like $1', ['records-officer-%'],
+    );
+    expect(row.rows[0]!.uploaded_by).toBe(officer.rows[0]!.id);
+    expect(row.rows[0]!.supersedes_document_id).toBe(documentId);
+  });
+
+  it('refuses an evaluator, who holds no documents:write', async () => {
+    const id = await file('BP-1', 'Received');
+    const documentId = await rejectedDocument(id);
+
+    const response = await post(`/staff/applications/${id}/documents/${documentId}/resubmit`,
+      await staffToken('evaluator'),
+      { fileName: 'id-v2.pdf', label: 'Valid Government-Issued ID', contentBase64: PDF.toString('base64') });
+
+    expect(response.statusCode).toBe(403);
+  });
+});
+
 describe('the cashier’s queue', () => {
   async function paymentAwaitingVerification(): Promise<{ paymentId: string; applicationId: string }> {
     const applicationId = await file('BP-1', 'Assessed');
@@ -608,10 +704,20 @@ describe('the whole path, five officers, one application', () => {
     // document and no missing or rejected ones. Without this the move is
     // refused and the application never leaves the receiving desk — which is
     // the precondition doing its job, and was how this test first failed.
+    //
+    // The label here is real, not a fixture invented to satisfy the check:
+    // "Valid Government-Issued ID of Applicant/Owner" is what every real
+    // permit type's requirements-catalog.ts (both portals) actually calls
+    // this document. The original fixture used the literal string 'Valid
+    // identity document' — which matched the query's old `label ilike
+    // '%identity%'` by construction, not by resemblance to anything a real
+    // applicant ever uploads. That masked the predicate being unsatisfiable
+    // by any real checklist item; caught live walking an actual citizen's
+    // application through this exact transition.
     await db.query(
       `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
                               byte_size, sha256, storage_key, status, scan_cleared, scanned_at)
-       values ($1,$2,$3,'Valid identity document','psa.pdf','application/pdf',182344,
+       values ($1,$2,$3,'Valid Government-Issued ID of Applicant/Owner','psa.pdf','application/pdf',182344,
                '${'b'.repeat(64)}','documents/psa.pdf','Approved',true,now())`,
       [randomUUID(), id, APPLICANT_ACCOUNT],
     );
@@ -676,13 +782,19 @@ describe('the whole path, five officers, one application', () => {
       permit: { permitNumber: string };
       release: { claimantName: string };
       evaluations: unknown[];
-      timeline: unknown[];
+      timeline: Array<{ toStatus: string; actorName: string | null }>;
     }>();
     expect(detail.summary.lifecycleStatus).toBe('Released');
     expect(detail.permit.permitNumber).toMatch(/^FP-2026-\d{6}$/);
     expect(detail.release.claimantName).toBe('Maria Santos');
     expect(detail.evaluations).toHaveLength(5);
     expect(detail.timeline.length).toBeGreaterThanOrEqual(11);
+
+    // The specific officer, not just the office — Archive's own "Archived By"
+    // column used to read this same timeline and find no such field, so it
+    // always showed blank on real data (there was nothing to show).
+    const releasedEntry = detail.timeline.find((entry) => entry.toStatus === 'Released');
+    expect(releasedEntry?.actorName).toMatch(/^releasing-officer-[0-9a-f]{8}@lgu\.gov\.ph$/);
 
     // The SHAPE, not just the count. Nothing pinned this, which is how the
     // detail view and EvaluationService.of could hold two near-identical

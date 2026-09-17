@@ -97,7 +97,14 @@ const onBehalfShape = z.object({
   // names an existing one already owned by this applicant.
   business: z.object({
     name: z.string().min(1).max(200),
-    category: z.enum(['Retail', 'Food Service', 'Services', 'Manufacturing', 'Wholesale', 'Other']),
+    // The real, current `businesses.category` vocabulary (migration 041) —
+    // this had drifted to an older six-value list missing
+    // Construction/Transport/Agriculture, so an officer assisting a walk-in
+    // citizen who wanted exactly one of those three could never file it.
+    category: z.enum([
+      'Retail', 'Food Service', 'Services', 'Manufacturing',
+      'Construction', 'Transport', 'Agriculture', 'Other',
+    ]),
     street: z.string().min(1).max(200),
     barangay: z.string().min(1).max(120),
     city: z.string().min(1).max(120),
