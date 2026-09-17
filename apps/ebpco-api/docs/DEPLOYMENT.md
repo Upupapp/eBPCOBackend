@@ -44,6 +44,31 @@ Ordered, because the order is what makes a bad deploy survivable.
 1. **Migrate first, and only additively.** Expand → migrate → contract. A migration that
    drops or renames a column in the same release as the code that stops using it cannot
    be rolled back. TAB 04 owns this.
+
+   The `runtime` image built above deliberately cannot do this itself — it has no
+   `ts-node`, no `scripts/`, and is not meant to (see §2 of `docs/OPERATIONS.md`: migrations
+   run once, from the pipeline, never from a replica's own boot). Build and run the
+   `migrate` target instead, from the same source and the same `Dockerfile`, against the
+   **production** `DATABASE_URL`:
+
+   ```sh
+   docker build --target migrate -f Dockerfile -t ebpco-api-migrate:"$(git rev-parse --short HEAD)" .
+   docker run --rm --env-file .env.production \
+     -e DATABASE_URL="$PRODUCTION_DATABASE_URL" \
+     ebpco-api-migrate:"$(git rev-parse --short HEAD)"
+   ```
+
+   `migrate.ts` loads the FULL config through the same `loadConfig` the service itself
+   uses — deliberately (see its own doc comment: "it does no checking of its own", so
+   there is one place, not two, that can disagree about what a valid environment is).
+   That means every other required setting (JWT, TOTP, S3, the scanner...) still has to
+   be present and pass validation even though this step only ever touches
+   `DATABASE_URL` — reuse the real production `--env-file` for this, not a hand-built
+   subset, or the two will drift.
+
+   Exits `0` once applied or already current, `1` on anything else — see `scripts/migrate.ts`'s
+   own doc comment for exactly what it will and will not do (no rollback, no database
+   creation).
 2. **Roll out to one replica.** Watch `/ready` and the error rate.
 3. **Continue only if `/ready` reports `ready`.** A `degraded` reading means a
    non-critical dependency is down and the rollout should stop for a human decision.

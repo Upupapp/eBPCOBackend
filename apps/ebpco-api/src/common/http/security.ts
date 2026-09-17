@@ -1,3 +1,4 @@
+import cors from '@fastify/cors';
 import helmet from '@fastify/helmet';
 import rateLimit from '@fastify/rate-limit';
 import type { FastifyInstance, FastifyReply, FastifyRequest } from 'fastify';
@@ -49,6 +50,35 @@ export async function applySecurity(
     },
     crossOriginResourcePolicy: { policy: 'same-site' },
     referrerPolicy: { policy: 'no-referrer' },
+  });
+
+  // The two real browser clients this API serves, and nothing else. Neither
+  // is inferred or wildcarded: `PORTAL_BASE_URL`/`USER_PORTAL_BASE_URL`
+  // already exist for building the links a password-reset email sends, so
+  // they are also already the operator's own statement of exactly which two
+  // origins are the real Admin Portal and the real Citizen Portal — reusing
+  // them here means a deployment that gets its portal URLs right gets CORS
+  // right for free, with no second setting to keep in sync.
+  //
+  // A same-origin deployment (portal and API behind one gateway) never sends
+  // an Origin header that needs this at all; this is what makes the OTHER
+  // real topology — portal and API on separate hosts, e.g. two independent
+  // Netlify sites calling a separately hosted API — work instead of failing
+  // silently in a way only a browser's console ever shows. `credentials:
+  // false` because auth here is a bearer token in an Authorization header,
+  // never a cookie — there is nothing for the browser to attach automatically
+  // that CORS credentials mode exists to gate.
+  //
+  // Deduped with a Set: a deployment could legitimately serve both portals
+  // from the same origin (one app, two routes) and set both variables to
+  // match — registering the same origin twice is harmless to
+  // `@fastify/cors` but says the config was not thought through. (Local
+  // development's own defaults are two different ports, 4200 and 4201, so
+  // this is a real possibility to guard, not a hypothetical one.)
+  await app.register(cors, {
+    origin: [...new Set([config.PORTAL_BASE_URL, config.USER_PORTAL_BASE_URL])],
+    credentials: false,
+    exposedHeaders: [CORRELATION_HEADER],
   });
 
   await app.register(rateLimit, {

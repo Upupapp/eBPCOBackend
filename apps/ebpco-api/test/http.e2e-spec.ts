@@ -296,6 +296,93 @@ describe('security headers', () => {
   });
 });
 
+describe('CORS', () => {
+  // PORTAL_BASE_URL/USER_PORTAL_BASE_URL default to localhost:4200/4201 (see
+  // baseEnv) — the two real browser clients this API serves, reused as the
+  // CORS allowlist itself (see security.ts's own doc comment on why there is
+  // no separate ALLOWED_ORIGINS setting to fall out of sync with these two).
+  it('allows the configured Admin Portal origin', async () => {
+    const { app } = await build();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { origin: 'http://localhost:4200' },
+      });
+
+      expect(response.headers['access-control-allow-origin']).toBe('http://localhost:4200');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('allows the configured Citizen Portal origin', async () => {
+    const { app } = await build();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { origin: 'http://localhost:4201' },
+      });
+
+      expect(response.headers['access-control-allow-origin']).toBe('http://localhost:4201');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('does not allow an origin nobody configured', async () => {
+    const { app } = await build();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { origin: 'https://an-attacker.example' },
+      });
+
+      expect(response.headers['access-control-allow-origin']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('answers a real preflight for a real write route, with the bearer header allowed through', async () => {
+    const { app } = await build();
+    try {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/auth/token',
+        headers: {
+          origin: 'http://localhost:4200',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'authorization,content-type',
+        },
+      });
+
+      expect(response.statusCode).toBeLessThan(300);
+      expect(response.headers['access-control-allow-origin']).toBe('http://localhost:4200');
+      expect(String(response.headers['access-control-allow-methods'])).toContain('POST');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it('never sends Allow-Credentials — auth here is a bearer header, not a cookie', async () => {
+    const { app } = await build();
+    try {
+      const response = await app.inject({
+        method: 'GET',
+        url: '/health',
+        headers: { origin: 'http://localhost:4200' },
+      });
+
+      expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+    } finally {
+      await app.close();
+    }
+  });
+});
+
 describe('rate limiting', () => {
   it('rejects beyond the configured budget, in the contract error shape', async () => {
     const { app } = await build(baseEnv({ RATE_LIMIT_MAX: '3', RATE_LIMIT_WINDOW_MS: '60000' }));

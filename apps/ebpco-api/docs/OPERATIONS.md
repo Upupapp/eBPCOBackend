@@ -46,6 +46,30 @@ find out what is missing.
 | `SCHEDULER_TICK_SECONDS` | `15` | Must stay well below the shortest job interval, or a job due every minute waits for the next tick. |
 | `DOCUMENT_RETENTION_DAYS` | *(unset)* | The LGU's number (M-15). Unset means retention runs and deletes nothing. |
 | `TRUST_PROXY` | `false` | **Set it only behind a proxy you control.** Trusting `X-Forwarded-For` from the open internet lets any caller spoof their address, which defeats rate limiting and poisons the audit trail. |
+| `PORTAL_BASE_URL` | `http://localhost:4200` | The Admin Portal's origin — **also the CORS allowlist** (§1a). Get this wrong in production and a browser refuses the portal's own requests with a CORS error that never reaches this service's logs at all. |
+| `USER_PORTAL_BASE_URL` | `http://localhost:4201` | The Citizen Portal's origin. Same CORS role as `PORTAL_BASE_URL` above. |
+
+---
+
+## 1a. Cross-origin requests (CORS)
+
+The two portals are separate applications and, in most real deployments, separate
+origins from this API — so a browser will not send their requests at all unless
+this service explicitly says it trusts them. It does, for exactly two origins:
+whatever `PORTAL_BASE_URL` and `USER_PORTAL_BASE_URL` are set to (§1), and nothing
+else. There is no third `ALLOWED_ORIGINS` setting to keep in sync with those two —
+see `security.ts`'s own doc comment for why reusing them was the point.
+
+`Access-Control-Allow-Credentials` is never sent. Both portals authenticate with a
+bearer token in an `Authorization` header, never a cookie, so there is nothing for
+a browser to attach automatically that CORS credentials mode exists to gate.
+
+**If a portal and this API end up on the same origin instead** (one gateway in
+front of both, `API_BASE_URL` left empty in the portal's own `public/config.js`),
+the browser never treats the request as cross-origin in the first place, so this
+allowlist is simply never consulted regardless of what it contains. The two
+topologies are not mutually exclusive to support at once — CORS being configured
+costs a same-origin deployment nothing.
 
 ---
 
@@ -265,3 +289,14 @@ This is the section to read before a pilot.
 - **Hosting is undecided** (E-1/E-2, M-27). Everything above assumes a
   container, a reverse proxy and a managed PostgreSQL, and none of that is
   chosen.
+- **CORS (§1a) is tested only in-process**, via Fastify's `.inject()` against a
+  real `Origin` header — real request/response objects, a real header check, but
+  not a real browser. Preflight caching, credential-mode edge cases and anything
+  specific to one browser's own CORS implementation are unexercised until a real
+  deployed portal, on its real origin, is actually clicked through by hand.
+- **The `migrate` Docker target (see `docs/DEPLOYMENT.md`) has never been built.**
+  The Dockerfile's stage graph is correct by inspection and the deployment-contract
+  test asserts what it can from the outside, but no `docker build --target migrate`
+  has actually been run — there is no Docker daemon on the machine this was written
+  on. Run it once against a real disposable database before trusting it in a real
+  deploy.

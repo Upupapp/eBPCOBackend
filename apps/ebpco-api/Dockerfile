@@ -31,7 +31,30 @@ COPY tsconfig.json tsconfig.build.json ./
 COPY src ./src
 RUN npm run build
 
-# Drop dev dependencies from what will be copied forward.
+# ─────────────────────────────────────────────────────────────── migrate ──
+# `docker build --target migrate -f Dockerfile .`, run as
+# `docker run --rm --env-file <prod env> <image> ` (CMD already applies
+# migrations and exits — see scripts/migrate.ts's own doc comment on why this
+# is deliberately a separate step, run once from the deployment pipeline
+# BEFORE the new `runtime` image below rolls out, and not something any
+# replica does on its own boot).
+#
+# Forked from `build` BEFORE the prune two stages down, on purpose: `migrate`
+# runs under `ts-node`, a dev dependency, and this is the one image allowed to
+# still have it. The `runtime` image below must not — carrying the whole
+# TypeScript toolchain into the thing that serves citizen traffic is exactly
+# the enlarged attack surface the prune step exists to avoid, so pruning
+# happens on a separate branch (`pruned`, next) that `runtime` copies
+# `node_modules` from instead.
+FROM build AS migrate
+COPY scripts ./scripts
+COPY db/migrations ./db/migrations
+CMD ["npm", "run", "migrate"]
+
+# ──────────────────────────────────────────────────────────────  pruned ──
+# Drop dev dependencies from what `runtime` copies forward. Split out of
+# `build` itself so `migrate` above can fork from the pre-prune state.
+FROM build AS pruned
 RUN npm prune --omit=dev --ignore-scripts
 
 # ─────────────────────────────────────────────────────────────── runtime ──
@@ -47,7 +70,7 @@ ENV NODE_ENV=production
 # Node's own defaults assume a machine, not a container's memory limit.
 ENV NODE_OPTIONS="--max-old-space-size=384"
 
-COPY --from=build --chown=node:node /app/node_modules ./node_modules
+COPY --from=pruned --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json
 
