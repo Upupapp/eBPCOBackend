@@ -13,6 +13,7 @@ import { ApplicantQueryService } from '../application/applicant-query.service';
 import { PaymentService } from '../../payments/application/payment.service';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
+import { StructuredLogger } from '../../../common/logging/logger';
 
 /**
  * What an applicant WRITES.
@@ -135,6 +136,7 @@ export class ApplicantWriteController {
     private readonly applications: ApplicantQueryService,
     private readonly instructions: InstructionResponseService,
     private readonly documents: DocumentService,
+    private readonly logger: StructuredLogger,
   ) {}
 
   @Post('applications')
@@ -264,7 +266,16 @@ export class ApplicantWriteController {
         // payment recorded is never invisible while its status catches up.
         // No idempotencyKey is passed — this is an internal follow-on to the
         // write above, not a second client request.
-        await this.lifecycle.transition({ applicationId, caller, to: 'Payment Submitted' });
+        const submitted = await this.lifecycle.transition({ applicationId, caller, to: 'Payment Submitted' });
+        if (!submitted.ok) {
+          // Logged, not thrown — see the comment above. Refused and silent
+          // is exactly the shape this route existed to fix in the first
+          // place; the log line is what makes a recurrence findable in
+          // minutes instead of by reading the database back by hand.
+          this.logger.warn('payment proof submitted but the application did not advance to Payment Submitted', {
+            applicationId, paymentId: result.paymentId,
+          });
+        }
       }
       return { paymentId: result.paymentId, replayed: result.replayed, settles: result.settlement.settles };
     }

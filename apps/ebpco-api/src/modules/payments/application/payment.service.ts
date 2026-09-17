@@ -53,6 +53,17 @@ export type VerifyResult =
   | { readonly ok: true; readonly paymentId: string }
   | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified' | 'invalid' | 'not-permitted'; readonly detail: string };
 
+/**
+ * Same shape as `VerifyResult`, plus the one field the lifecycle follow-on
+ * needs. A separate type rather than widening `VerifyResult` itself: `undo`,
+ * `reject` and `correctReceipt` share that type and have no application to
+ * move — only `verify` does, since it is the one call that can advance
+ * `Payment Submitted -> Payment Under Verification -> Payment Verified`.
+ */
+export type VerifyOutcome =
+  | { readonly ok: true; readonly paymentId: string; readonly applicationId: string }
+  | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified' | 'invalid' | 'not-permitted'; readonly detail: string };
+
 export class PaymentService {
   private readonly audit: AuditService;
 
@@ -310,11 +321,11 @@ export class PaymentService {
     paymentId: string;
     officer: Caller;
     officialReceiptNumber: string;
-  }): Promise<VerifyResult> {
+  }): Promise<VerifyOutcome> {
     const { paymentId, officer, officialReceiptNumber } = options;
 
-    const payment = await this.db.query<{ submitted_by: string; verified_at: Date | null }>(
-      'select submitted_by, verified_at from payments where id = $1',
+    const payment = await this.db.query<{ submitted_by: string; verified_at: Date | null; application_id: string }>(
+      'select submitted_by, verified_at, application_id from payments where id = $1',
       [paymentId],
     );
     const row = payment.rows[0];
@@ -338,7 +349,7 @@ export class PaymentService {
       [this.clock(), officer.accountId, officialReceiptNumber, paymentId],
     );
 
-    return { ok: true, paymentId };
+    return { ok: true, paymentId, applicationId: row.application_id };
   }
 
   /**

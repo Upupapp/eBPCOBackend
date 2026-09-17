@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -7,6 +7,8 @@ import { Public, RequireScopes } from '../../identity/transport/guards/public.de
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../../applications/domain/application';
 import { DocumentService } from '../application/document.service';
+import { SQL_CLIENT } from '../../../persistence/persistence.module';
+import { SqlClient } from '../../../persistence/sql-client';
 
 /**
  * Uploading, and reading back, an applicant's documents.
@@ -63,7 +65,29 @@ function callerOf(request: AuthenticatedRequest): Caller {
 
 @Controller('documents')
 export class DocumentsController {
-  constructor(private readonly documents: DocumentService) {}
+  constructor(
+    private readonly documents: DocumentService,
+    // Injected by token rather than via ApplicationsModule: that module
+    // already imports THIS one (DocumentsModule), so importing it back here
+    // for one ownership check would be a circular module dependency for the
+    // sake of reusing ApplicantQueryService. SqlClient is global (like
+    // DocumentService's own dependency on it), so this stays a one-way
+    // dependency the same shape the rest of this module already has.
+    @Inject(SQL_CLIENT) private readonly db: SqlClient,
+  ) {}
+
+  /** Whether this application exists and belongs to this account. Mirrors `ApplicantQueryService.byId`'s own ownership shape (applications -> applicants -> accounts), kept here rather than imported to avoid the circular module dependency noted above. */
+  private async isOwnApplication(accountId: string, applicationId: string): Promise<boolean> {
+    const result = await this.db.query(
+      `select 1
+         from applications a
+         join applicants ap on ap.id = a.applicant_id
+         join accounts acc on acc.id = ap.account_id
+        where a.id = $1 and acc.id = $2`,
+      [applicationId, accountId],
+    );
+    return result.rows.length > 0;
+  }
 
   /**
    * Every document the caller has ever uploaded (C-7), attached or not.
@@ -100,6 +124,24 @@ export class DocumentsController {
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(uploadShape, body);
+    const caller = callerOf(request);
+
+    // Ownership, when an application is named. `applicationId` was always
+    // accepted here with no check behind it — harmless while no applicant
+    // client ever sent a real one for an EXISTING application (the original
+    // wizard uploads before this attached nothing until `submitReal()`
+    // created the application and linked the id itself). The moment an
+    // applicant client attaches to an application that already exists, by
+    // id, an unchecked id is a way to attach an arbitrary file to any other
+    // citizen's application. Same 404 the detail route gives, mirroring
+    // `ApplicantWriteController.resubmitDocument`: a request that behaves
+    // differently on someone else's application is a way to learn that the
+    // application exists. Staff are unaffected — `documents:write` covers
+    // both, and this only narrows the applicant half.
+    if (caller.kind === 'applicant' && input.applicationId
+      && !(await this.isOwnApplication(caller.accountId, input.applicationId))) {
+      throw ProblemException.notFound('No such application.');
+    }
 
     let bytes: Buffer;
     try {
@@ -117,7 +159,7 @@ export class DocumentsController {
       label: input.label,
       applicationId: input.applicationId ?? null,
       requirementCode: input.requirementCode ?? null,
-      caller: callerOf(request),
+      caller,
     });
 
     if (outcome.ok) {

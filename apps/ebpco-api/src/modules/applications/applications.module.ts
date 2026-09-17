@@ -8,7 +8,7 @@ import { PaymentsModule } from '../payments/payments.module';
 import { PermitsModule } from '../permits/permits.module';
 import { DocumentsModule } from '../documents/documents.module';
 import { EvaluationService } from './application/evaluation.service';
-import { LifecycleService } from './application/lifecycle.service';
+import { LifecycleModule } from './lifecycle.module';
 import { ApplicantQueryService } from './application/applicant-query.service';
 import { InstructionResponseService } from './application/instruction-response.service';
 import { SubmissionService } from './application/submission.service';
@@ -44,7 +44,7 @@ export { CALENDAR_REPOSITORY };
  * met a statutory deadline.
  */
 @Module({
-  imports: [PaymentsModule, PermitsModule, NotificationsModule, DocumentsModule],
+  imports: [PaymentsModule, PermitsModule, NotificationsModule, DocumentsModule, LifecycleModule],
   providers: [
     {
       provide: CALENDAR_REPOSITORY,
@@ -91,16 +91,6 @@ export { CALENDAR_REPOSITORY };
         new StaffQueueService(db, calendars, evaluations),
     },
     {
-      provide: LifecycleService,
-      // The module's StaffNotificationService, not one built here. Its
-      // "nobody holds this role" warning is configured where it is provided,
-      // and a locally constructed one silently uses the no-op default -- which
-      // is exactly what happened, and what made the warning look absent.
-      inject: [SQL_CLIENT, StaffNotificationService],
-      useFactory: (db: SqlClient, staffNotices: StaffNotificationService) =>
-        new LifecycleService(db, () => new Date(), undefined, staffNotices),
-    },
-    {
       provide: EvaluationService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new EvaluationService(db),
@@ -117,6 +107,6 @@ export { CALENDAR_REPOSITORY };
     // imported by identity — a cycle for the sake of tidier filing.
     ReportsController,
   ],
-  exports: [StaffQueueService, LifecycleService, EvaluationService, CALENDAR_REPOSITORY],
+  exports: [StaffQueueService, EvaluationService, CALENDAR_REPOSITORY],
 })
 export class ApplicationsModule {}

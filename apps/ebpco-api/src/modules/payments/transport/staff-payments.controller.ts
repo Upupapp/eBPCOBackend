@@ -9,6 +9,8 @@ import { RequireScopes } from '../../identity/transport/guards/public.decorator'
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../../applications/domain/application';
 import { PaymentService } from '../application/payment.service';
+import { LifecycleService } from '../../applications/application/lifecycle.service';
+import { StructuredLogger } from '../../../common/logging/logger';
 
 /**
  * The cashier's queue, and the two decisions made from it.
@@ -69,6 +71,11 @@ export class StaffPaymentsController {
     // Injected by token: SqlClient is an interface, and an interface cannot be
     // a runtime DI key. Used for the queue read only — see the module comment.
     @Inject(SQL_CLIENT) private readonly db: SqlClient,
+    // From LifecycleModule (@Global()), not an import of ApplicationsModule —
+    // that module already imports this one (PaymentsModule), so the reverse
+    // import would be circular. See lifecycle.module.ts's own doc comment.
+    private readonly lifecycle: LifecycleService,
+    private readonly logger: StructuredLogger,
   ) {}
 
   /**
@@ -130,11 +137,47 @@ export class StaffPaymentsController {
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(verifyShape, body);
+    const officer = callerOf(request);
     const result = await this.payments.verify({
-      paymentId, officer: callerOf(request), officialReceiptNumber: input.officialReceiptNumber,
+      paymentId, officer, officialReceiptNumber: input.officialReceiptNumber,
     });
 
-    if (result.ok) return { paymentId: result.paymentId, verified: true };
+    if (result.ok) {
+      // The move this route exists to cause, same gap and same reasoning as
+      // `StaffActionsController.recordOnsite`'s own follow-on: confirming a
+      // payment only ever wrote the `payments` row, so a verified payment
+      // left the application sitting at `Payment Submitted` (or earlier)
+      // forever — no queue, board or timeline ever showed it moving, even
+      // though the money was confirmed. Both remaining hops are staff-actor
+      // moves, so `officer` (not a synthetic caller) drives both.
+      //
+      // Best-effort and logged, not thrown: the payment above is already
+      // committed, so a refused status move must not turn a real
+      // verification into an error response the cashier reads as "that
+      // failed." Logged specifically because the silent version of this
+      // exact pattern (recordOnsite/pay's own follow-ons) took real
+      // diagnostic effort to notice was ever failing at all — nothing about
+      // a swallowed refusal was visible anywhere until the data was read back
+      // by hand.
+      const underVerification = await this.lifecycle.transition({
+        applicationId: result.applicationId, caller: officer, to: 'Payment Under Verification',
+      });
+      if (underVerification.ok) {
+        const verified = await this.lifecycle.transition({
+          applicationId: result.applicationId, caller: officer, to: 'Payment Verified',
+        });
+        if (!verified.ok) {
+          this.logger.warn('payment verified but the application did not advance to Payment Verified', {
+            applicationId: result.applicationId, paymentId: result.paymentId,
+          });
+        }
+      } else {
+        this.logger.warn('payment verified but the application did not advance to Payment Under Verification', {
+          applicationId: result.applicationId, paymentId: result.paymentId,
+        });
+      }
+      return { paymentId: result.paymentId, verified: true };
+    }
 
     // Self-verification is 403 and not 409: the caller is not permitted, and
     // telling them the payment is in the wrong state would send them to fix

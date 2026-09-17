@@ -13,6 +13,7 @@ import { PermitService } from '../../permits/application/permit.service';
 import { PaymentService } from '../../payments/application/payment.service';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
+import { StructuredLogger } from '../../../common/logging/logger';
 
 /**
  * The things an officer DOES to an application, as opposed to reading it.
@@ -165,6 +166,7 @@ export class StaffActionsController {
     private readonly payments: PaymentService,
     private readonly documents: DocumentService,
     private readonly lifecycle: LifecycleService,
+    private readonly logger: StructuredLogger,
   ) {}
 
   /** Readable and actionable are different questions; this answers the first. */
@@ -403,8 +405,24 @@ export class StaffActionsController {
             applicationId, caller: cashier, to: 'Payment Under Verification',
           });
           if (underVerification.ok) {
-            await this.lifecycle.transition({ applicationId, caller: cashier, to: 'Payment Verified' });
+            const verified = await this.lifecycle.transition({
+              applicationId, caller: cashier, to: 'Payment Verified',
+            });
+            if (!verified.ok) {
+              this.logger.warn('onsite payment recorded but the application did not advance to Payment Verified', {
+                applicationId, paymentId: result.paymentId,
+              });
+            }
+          } else {
+            this.logger.warn(
+              'onsite payment recorded but the application did not advance to Payment Under Verification',
+              { applicationId, paymentId: result.paymentId },
+            );
           }
+        } else {
+          this.logger.warn('onsite payment recorded but the application did not advance to Payment Submitted', {
+            applicationId, paymentId: result.paymentId,
+          });
         }
       }
       return { paymentId: result.paymentId, replayed: result.replayed };
