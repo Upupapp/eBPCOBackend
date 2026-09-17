@@ -32,7 +32,16 @@ export type SubmitResult =
   | { readonly ok: false; readonly reason: 'no-order-of-payment' | 'already-verified' | 'conflict' | 'method-closed'; readonly detail: string };
 
 export type RecordOnsiteResult =
-  | { readonly ok: true; readonly paymentId: string; readonly replayed: boolean }
+  | {
+      readonly ok: true;
+      readonly paymentId: string;
+      readonly replayed: boolean;
+      // Empty on a replay: the caller only needs this to drive the lifecycle
+      // transition that happens on the ORIGINAL call, and a replay does not
+      // repeat it (see the controller). Fetching it again for a replay would
+      // be a second query for a value nothing reads.
+      readonly applicantAccountId: string;
+    }
   | {
       readonly ok: false;
       readonly reason: 'no-order-of-payment' | 'already-paid' | 'does-not-settle'
@@ -203,7 +212,7 @@ export class PaymentService {
         };
       }
       if (replay.kind === 'replay') {
-        return { ok: true, paymentId: replay.previous.body.paymentId, replayed: true };
+        return { ok: true, paymentId: replay.previous.body.paymentId, replayed: true, applicantAccountId: '' };
       }
 
       const context = await tx.query<{
@@ -286,7 +295,7 @@ export class PaymentService {
         operation: 'payment.record-onsite', digest, status: 201, body: { paymentId },
       });
 
-      return { ok: true, paymentId, replayed: false };
+      return { ok: true, paymentId, replayed: false, applicantAccountId: row.applicant_account_id };
     });
   }
 

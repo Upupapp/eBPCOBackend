@@ -72,18 +72,20 @@ export class StaffPaymentsController {
   ) {}
 
   /**
-   * What is waiting to be checked.
+   * The payments queue, optionally narrowed to one status.
    *
-   * Defaults to Pending Verification, because that is the queue: a cashier
-   * opening this screen wants the work, not the archive. The reference number
-   * and the amount come with it so a row can be matched against a bank
-   * statement without opening each one.
+   * Returns every status by default. A payment recorded Onsite is inserted
+   * already 'Paid' (the cashier witnessed the cash in person, so there is
+   * nothing left to verify) and never passes through 'Pending Verification'
+   * at all — a default that silently filtered to that one status made such a
+   * payment look missing rather than merely elsewhere. Pass `status` to get
+   * the cashier's narrower worklist or an archive view.
    */
   @Get()
   @RequireScopes('staff:verify-payment')
   async queue(@Query() query: unknown): Promise<Record<string, unknown>> {
     const input = parse(queueShape, query ?? {});
-    const status = input.status ?? 'Pending Verification';
+    const status = input.status ?? null;
     const limit = input.limit ?? 50;
 
     const result = await this.db.query<{
@@ -97,7 +99,7 @@ export class StaffPaymentsController {
          from payments p
          join applications a on a.id = p.application_id
          join applicants ap on ap.id = a.applicant_id
-        where p.status = $1
+        where $1::text is null or p.status = $1
         order by p.submitted_at
         limit $2`,
       [status, limit],

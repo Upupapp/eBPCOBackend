@@ -5,6 +5,7 @@ import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../domain/application';
+import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { EVALUATION_RESULTS, EVALUATION_STAGES, EvaluationService } from '../application/evaluation.service';
 import { AssessmentService } from '../../payments/application/assessment.service';
@@ -163,6 +164,7 @@ export class StaffActionsController {
     private readonly permits: PermitService,
     private readonly payments: PaymentService,
     private readonly documents: DocumentService,
+    private readonly lifecycle: LifecycleService,
   ) {}
 
   /** Readable and actionable are different questions; this answers the first. */
@@ -359,15 +361,54 @@ export class StaffActionsController {
     const input = parse(onsiteShape, body);
     const idempotencyKey = parse(z.string().uuid('an Idempotency-Key must be a UUID'), key ?? null);
 
+    const cashier = callerOf(request);
     const result = await this.payments.recordOnsite({
       applicationId,
-      cashier: callerOf(request),
+      cashier,
       officialReceiptNumber: input.officialReceiptNumber,
       amountCentavos: input.amountCentavos,
       idempotencyKey,
     });
 
-    if (result.ok) return { paymentId: result.paymentId, replayed: result.replayed };
+    if (result.ok) {
+      // The move this whole route exists to cause, mirroring
+      // `ApplicantWriteController.pay()`'s own follow-on call. Recording the
+      // payment above only ever wrote the `payments` row (same gap as
+      // `submitProof()`) — without this, an application whose fee was
+      // collected in person, receipted and already fully verified sat stuck
+      // at Assessed forever, because `Assessed -> Payment Submitted` is
+      // declared `actors: ['applicant']` in the lifecycle table and no staff
+      // route could ever make that move. The citizen did not click anything,
+      // but the citizen's money is the fact being recorded, so the first hop
+      // is made AS the applicant — exactly as `payments` already records the
+      // applicant, not the cashier, as this row's submitter. The next two
+      // hops are the cashier's own act of verifying money they just counted.
+      //
+      // Skipped on a replay, same reasoning as the citizen controller: the
+      // moves already happened on the original call.
+      if (!result.replayed) {
+        const asApplicant: Caller = {
+          accountId: result.applicantAccountId, kind: 'applicant', scopes: ['payments:write'],
+        };
+        // Best-effort and never thrown on refusal, in that order: the payment
+        // row above is already committed, so a refused status move must not
+        // turn a receipted payment into an error response the cashier reads
+        // as "that failed." Each hop only proceeds if the one before it
+        // actually landed.
+        const submitted = await this.lifecycle.transition({
+          applicationId, caller: asApplicant, to: 'Payment Submitted',
+        });
+        if (submitted.ok) {
+          const underVerification = await this.lifecycle.transition({
+            applicationId, caller: cashier, to: 'Payment Under Verification',
+          });
+          if (underVerification.ok) {
+            await this.lifecycle.transition({ applicationId, caller: cashier, to: 'Payment Verified' });
+          }
+        }
+      }
+      return { paymentId: result.paymentId, replayed: result.replayed };
+    }
 
     if (result.reason === 'self-receipt') {
       throw new ProblemException(

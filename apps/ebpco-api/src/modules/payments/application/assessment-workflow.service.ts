@@ -345,6 +345,12 @@ export class AssessmentWorkflowService {
    * the same person and are checked separately because they need not be. The
    * database refuses it too — a bug that has to defeat a constraint is a much
    * harder bug to write than one that has to defeat an `if`.
+   *
+   * Super Admin is exempt (owner request, 042_super_admin_self_approval.sql):
+   * it already holds every acting scope in this workflow, so the four-eyes
+   * rule buys nothing against it that its other scopes don't already bypass.
+   * Every other role still cannot self-approve — the database trigger enforces
+   * that even if this check is ever bypassed or removed here.
    */
   async approve(options: { assessmentId: string; officer: Caller }): Promise<WorkflowResult> {
     return this.db.transaction(async (tx) => {
@@ -356,12 +362,20 @@ export class AssessmentWorkflowService {
           detail: `This assessment is ${before.status}. Only a Submitted assessment can be approved.`,
         };
       }
-      if (options.officer.accountId === before.createdBy || options.officer.accountId === before.submittedBy) {
-        return {
-          ok: false, reason: 'self-approval',
-          detail: 'An officer may not approve an assessment they prepared or submitted. '
-            + 'Ask another officer to review it.',
-        };
+      const isSelfApproval =
+        options.officer.accountId === before.createdBy || options.officer.accountId === before.submittedBy;
+      if (isSelfApproval) {
+        const superAdmin = await tx.query(
+          `select 1 from account_roles where account_id = $1 and role = 'super-admin'`,
+          [options.officer.accountId],
+        );
+        if (superAdmin.rows.length === 0) {
+          return {
+            ok: false, reason: 'self-approval',
+            detail: 'An officer may not approve an assessment they prepared or submitted. '
+              + 'Ask another officer to review it.',
+          };
+        }
       }
 
       await tx.query(
