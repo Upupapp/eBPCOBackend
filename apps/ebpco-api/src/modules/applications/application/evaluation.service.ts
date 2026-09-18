@@ -368,16 +368,24 @@ export class EvaluationService {
       if (result === 'Passed') {
         const entry = entryFor('evaluation-stage-passed');
         if (entry !== undefined) {
-          // Catalog copy verbatim, not a message naming the stage. The catalog
-          // is the closed list of what the LGU says, so that it can account for
-          // exactly what it told someone; the deep link carries them to the
-          // application where the stage is shown.
+          // The catalog's own body, verbatim, was the ONLY thing ever
+          // written here on the theory that the deep link would let an
+          // applicant tell five of these apart. It doesn't: `deepLinkFor`
+          // resolves to the same `/applications/:applicationId` for every
+          // stage of the same application, so all five notices for one
+          // application end up with identical type, title, body AND deep
+          // link — reported live as five indistinguishable "Evaluation
+          // stage passed" rows. The `notifications` table has no
+          // stage/metadata column to carry this separately (migration
+          // 006), so the stage is appended to the catalog's own sentence
+          // rather than replacing it — the canonical copy still opens the
+          // message, this only adds the one fact it was missing.
           await tx.query(
             `insert into notifications (account_id, type, application_id, title, body, deep_link)
              values ($1, $2, $3, $4, $5, $6)`,
             [
               row.applicant_account_id, entry.type, applicationId,
-              entry.title, entry.body, deepLinkFor(entry, applicationId),
+              entry.title, `${entry.body} Stage: ${stage}.`, deepLinkFor(entry, applicationId),
             ],
           );
         }
