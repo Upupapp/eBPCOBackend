@@ -8,7 +8,7 @@ import { Account, StaffRole } from '../domain/account';
 import { IdentityService } from './identity.service';
 import { TokenService } from './token.service';
 
-const GOOD_PASSWORD = 'the quiet barangay hall on tuesday';
+const GOOD_PASSWORD = 'The quiet Barangay hall, on Tuesday at 3pm!';
 
 function build() {
   const accounts = new InMemoryAccountRepository();
@@ -84,7 +84,7 @@ describe('registration', () => {
     await identity.register({ email: 'a@b.ph', password: GOOD_PASSWORD, firstName: 'A', lastName: 'B' });
     const original = await accounts.findByEmail('a@b.ph');
 
-    await identity.register({ email: 'a@b.ph', password: 'a completely different phrase', firstName: 'X', lastName: 'Y' });
+    await identity.register({ email: 'a@b.ph', password: 'A Completely Different Phrase, 2!', firstName: 'X', lastName: 'Y' });
 
     expect((await accounts.findByEmail('a@b.ph'))?.passwordHash).toBe(original?.passwordHash);
   });
@@ -317,10 +317,10 @@ describe('password reset', () => {
     await identity.register({ email: 'a@b.ph', password: GOOD_PASSWORD, firstName: 'A', lastName: 'B' });
     const ticket = await identity.beginPasswordReset('a@b.ph');
 
-    const result = await identity.completePasswordReset(ticket!.token, 'a different quiet phrase entirely');
+    const result = await identity.completePasswordReset(ticket!.token, 'A Different Quiet Phrase, entirely! 7');
 
     expect(result.ok).toBe(true);
-    expect((await identity.authenticate('a@b.ph', 'a different quiet phrase entirely')).ok).toBe(true);
+    expect((await identity.authenticate('a@b.ph', 'A Different Quiet Phrase, entirely! 7')).ok).toBe(true);
     expect((await identity.authenticate('a@b.ph', GOOD_PASSWORD)).ok).toBe(false);
   });
 
@@ -334,7 +334,7 @@ describe('password reset', () => {
     if (!phone.ok || !browser.ok) throw new Error('expected success');
 
     const ticket = await identity.beginPasswordReset('a@b.ph');
-    await identity.completePasswordReset(ticket!.token, 'a different quiet phrase entirely');
+    await identity.completePasswordReset(ticket!.token, 'A Different Quiet Phrase, entirely! 7');
 
     await expect(identity.refresh(phone.tokens.refreshToken)).rejects.toBeDefined();
     await expect(identity.refresh(browser.tokens.refreshToken)).rejects.toBeDefined();
@@ -345,8 +345,8 @@ describe('password reset', () => {
     await identity.register({ email: 'a@b.ph', password: GOOD_PASSWORD, firstName: 'A', lastName: 'B' });
     const ticket = await identity.beginPasswordReset('a@b.ph');
 
-    await identity.completePasswordReset(ticket!.token, 'a different quiet phrase entirely');
-    const second = await identity.completePasswordReset(ticket!.token, 'yet another quiet phrase');
+    await identity.completePasswordReset(ticket!.token, 'A Different Quiet Phrase, entirely! 7');
+    const second = await identity.completePasswordReset(ticket!.token, 'Yet Another Quiet Phrase, 8!');
 
     expect(second.ok).toBe(false);
   });

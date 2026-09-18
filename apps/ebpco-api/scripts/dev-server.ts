@@ -239,14 +239,19 @@ async function seed(
     [sequence],
   );
 
+  // Migration 044 already seeds this same '2026.1' schedule (including
+  // Fencing Permit's filing/processing/structural entries) on every fresh
+  // database, so these inserts collide with it unless made idempotent.
   await db.query(
     `insert into fee_schedules (version, effective_from, published_by)
-     values ('2026.1','2026-01-01','City Ordinance 2026-004')`,
+     values ('2026.1','2026-01-01','City Ordinance 2026-004')
+     on conflict (version) do nothing`,
   );
   for (const [line, amount] of [['filing', 50_000], ['processing', 120_000], ['structural', 512_000]] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')
+       on conflict (version, permit_type, line) do nothing`,
       [line, amount],
     );
   }

@@ -104,6 +104,16 @@ async function loadSchedule(): Promise<void> {
 beforeEach(async () => {
   db = await PgliteClient.create();
   await migrate(db, loadMigrations(MIGRATIONS_DIR));
+  // Migration 044 seeds a real '2026.1' schedule (covering Fencing Permit,
+  // among others) on every fresh database — exactly right for a real
+  // deployment, exactly wrong here: every test below builds its OWN
+  // deliberately scoped fee-schedule fixture (or deliberately builds none,
+  // to test the no-schedule case), and the migration's row would either
+  // collide with those inserts or silently satisfy a "no schedule exists"
+  // assertion that is supposed to hold. Clearing it restores the blank
+  // slate this file was written against.
+  await db.query('delete from fee_schedule_entries');
+  await db.query('delete from fee_schedules');
   assessment = new AssessmentService(db, () => NOW);
   workflow = new AssessmentWorkflowService(db, () => NOW, () => assessment.schedules());
   payments = new PaymentService(db, () => NOW);

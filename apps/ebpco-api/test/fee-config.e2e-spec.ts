@@ -85,13 +85,18 @@ beforeEach(async () => {
   admin = await token('administrator');
   assessor = await token('assessor');
 
+  // Migration 044 already seeds this same '2026.1' schedule (including this
+  // exact Fencing Permit filing entry) on every fresh database, so these
+  // inserts are made idempotent rather than colliding with it.
   await db.query(
     `insert into fee_schedules (version, effective_from, published_by)
-     values ('2026.1','2026-01-01','City Ordinance 2026-004')`,
+     values ('2026.1','2026-01-01','City Ordinance 2026-004')
+     on conflict (version) do nothing`,
   );
   await db.query(
     `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-     values ('2026.1','Fencing Permit','filing',50000,'City Ordinance 2026-004 s.3')`,
+     values ('2026.1','Fencing Permit','filing',50000,'City Ordinance 2026-004 s.3')
+     on conflict (version, permit_type, line) do nothing`,
   );
 });
 

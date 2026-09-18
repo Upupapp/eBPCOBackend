@@ -23,7 +23,7 @@ const env = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
   ...overrides,
 });
 
-const GOOD_PASSWORD = 'the quiet barangay hall on tuesday';
+const GOOD_PASSWORD = 'The quiet Barangay hall, on Tuesday at 3pm!';
 
 const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
 

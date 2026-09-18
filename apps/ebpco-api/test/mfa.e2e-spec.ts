@@ -38,7 +38,7 @@ const ENV: NodeJS.ProcessEnv = {
   RATE_LIMIT_MAX: '10000',
 };
 
-const PASSWORD = 'a-correct-horse-battery-staple';
+const PASSWORD = 'A-correct-horse-battery-staple-9';
 
 let app: NestFastifyApplication;
 let db: SqlClient;

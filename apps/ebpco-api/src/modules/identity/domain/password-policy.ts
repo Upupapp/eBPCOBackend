@@ -1,14 +1,13 @@
 /**
- * Password policy, per NIST SP 800-63B.
+ * Password policy.
  *
- * Most of this specification is about what NOT to require. Composition rules
- * ("one uppercase, one digit, one symbol") and forced periodic rotation both
- * measurably reduce security: they push people toward predictable
- * transformations of one password, and toward writing it down. They are absent
- * here deliberately, and that absence is the policy rather than an omission.
- *
- * What replaces them is length, and screening against passwords that are
- * already known to attackers.
+ * NIST SP 800-63B's own position is that composition rules ("one uppercase,
+ * one digit, one symbol") and forced periodic rotation both measurably
+ * reduce security -- they push people toward predictable transformations of
+ * one password, and toward writing it down. This service required composition
+ * rules anyway, a deliberate product decision to require them explicitly
+ * alongside the length and breach/pattern/context screening below, not an
+ * oversight of the NIST guidance.
  */
 
 export interface PasswordRejection {
@@ -19,6 +18,10 @@ export interface PasswordRejection {
 export type PasswordRejectionCode =
   | 'too-short'
   | 'too-long'
+  | 'missing-uppercase'
+  | 'missing-lowercase'
+  | 'missing-digit'
+  | 'missing-punctuation'
   | 'breached'
   | 'context-specific'
   | 'repetitive'
@@ -48,6 +51,19 @@ export const MAX_PASSWORD_LENGTH = 256;
 /** Words that are guessable from the service itself rather than from the user. */
 const SERVICE_WORDS = ['ebpco', 'permit', 'building', 'occupancy', 'quezon', 'philippines'];
 
+// Unicode property classes, not [A-Z]/[a-z]/[0-9] — the length check above
+// already accepts all Unicode, and an ASCII-only composition check would
+// reject a perfectly good uppercase/lowercase letter from an accented or
+// non-Latin script while still counting it toward length.
+const UPPERCASE = /\p{Lu}/u;
+const LOWERCASE = /\p{Ll}/u;
+const DIGIT = /\p{Nd}/u;
+// "Punctuation" as this policy means it: any character that is not a letter,
+// number, or whitespace -- broader than \p{P} alone, so it also covers
+// symbols like $ + = ~ that Unicode classifies as "Symbol" rather than
+// "Punctuation" but a user would call punctuation just the same.
+const PUNCTUATION = /[^\p{L}\p{N}\s]/u;
+
 export class PasswordPolicy {
   constructor(private readonly breachScreen: BreachedPasswordScreen) {}
 
@@ -71,6 +87,19 @@ export class PasswordPolicy {
 
     // Everything below is pointless on a password that is already too short.
     if (length < MIN_PASSWORD_LENGTH) return rejections;
+
+    if (!UPPERCASE.test(password)) {
+      rejections.push({ code: 'missing-uppercase', message: 'Include at least one uppercase letter.' });
+    }
+    if (!LOWERCASE.test(password)) {
+      rejections.push({ code: 'missing-lowercase', message: 'Include at least one lowercase letter.' });
+    }
+    if (!DIGIT.test(password)) {
+      rejections.push({ code: 'missing-digit', message: 'Include at least one number.' });
+    }
+    if (!PUNCTUATION.test(password)) {
+      rejections.push({ code: 'missing-punctuation', message: 'Include at least one punctuation character (e.g. ! ? . , -).' });
+    }
 
     if (isRepetitive(password)) {
       rejections.push({

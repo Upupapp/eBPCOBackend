@@ -6,8 +6,8 @@ const codes = async (password: string, context = {}) =>
   (await policy.evaluate(password, context)).map((rejection) => rejection.code);
 
 describe('what the policy requires', () => {
-  it('accepts a long passphrase', async () => {
-    await expect(codes('the quiet barangay hall on tuesday')).resolves.toEqual([]);
+  it('accepts a long, fully compliant passphrase', async () => {
+    await expect(codes('The quiet Barangay hall, open Tuesday at 3pm!')).resolves.toEqual([]);
   });
 
   it('rejects anything shorter than the floor', async () => {
@@ -20,29 +20,44 @@ describe('what the policy requires', () => {
   });
 
   it('accepts at least 64 characters, as NIST requires', async () => {
-    await expect(codes('correct horse battery staple and then some more words for length')).resolves.toEqual([]);
+    await expect(
+      codes('Correct horse battery staple, and then some more words for length! 42'),
+    ).resolves.toEqual([]);
   });
 });
 
-describe('what the policy deliberately does NOT require', () => {
-  // These absences are the policy. Composition rules push people toward
-  // predictable transformations of one password and toward writing it down;
-  // NIST SP 800-63B removed them for that reason.
+describe('what the policy requires: composition', () => {
+  // A deliberate product decision, made alongside (not despite) NIST SP
+  // 800-63B's own preference against composition rules — see this file's
+  // top-of-file comment. Each class is its own rejection code so the client
+  // can show its own checklist item for it, independent of the others.
+  const base = 'aaaaaaaaaaaa'; // 12 chars, deliberately fails everything below
 
-  it('does not require an uppercase letter', async () => {
-    await expect(codes('kalesa umaga bakuran')).resolves.toEqual([]);
+  it('rejects a password with no uppercase letter', async () => {
+    await expect(codes(`${base}1!`)).resolves.toContain('missing-uppercase');
   });
 
-  it('does not require a digit', async () => {
-    await expect(codes('malamig na tubig sa umaga')).resolves.toEqual([]);
+  it('rejects a password with no lowercase letter', async () => {
+    await expect(codes('AAAAAAAAAAAA1!')).resolves.toContain('missing-lowercase');
   });
 
-  it('does not require a symbol', async () => {
-    await expect(codes('walang sikreto sa taguan')).resolves.toEqual([]);
+  it('rejects a password with no digit', async () => {
+    await expect(codes('Aaaaaaaaaaaa!')).resolves.toContain('missing-digit');
   });
 
-  it('accepts spaces and Unicode without complaint', async () => {
-    await expect(codes('mahál kitá kapatid 🇵🇭')).resolves.toEqual([]);
+  it('rejects a password with no punctuation', async () => {
+    await expect(codes('Aaaaaaaaaaaa1')).resolves.toContain('missing-punctuation');
+  });
+
+  it('accepts a Unicode letter as satisfying uppercase/lowercase', async () => {
+    // NIST requires accepting all Unicode; a composition rule that only
+    // recognised A-Z/a-z would silently reject a perfectly good accented
+    // letter while still counting it toward length.
+    await expect(codes('Ñañaña naman 123!')).resolves.toEqual([]);
+  });
+
+  it('treats a symbol as punctuation even outside \\p{P} (e.g. $, +, ~)', async () => {
+    await expect(codes('Aaaaaaaaaaaa1$')).resolves.toEqual([]);
   });
 });
 
@@ -97,7 +112,7 @@ describe('screening against context', () => {
   it('ignores a context value too short to be distinctive', async () => {
     // Rejecting every password containing a two-letter surname would reject
     // most passphrases.
-    await expect(codes('the quiet barangay hall', { lastName: 'Ly' })).resolves.toEqual([]);
+    await expect(codes('The Quiet Barangay Hall, 2026!', { lastName: 'Ly' })).resolves.toEqual([]);
   });
 });
 

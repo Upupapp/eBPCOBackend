@@ -1031,7 +1031,7 @@ describe('the address the office writes to (both citizen lanes)', () => {
       method: 'POST', url: '/auth/register',
       payload: {
         firstName: 'Juan', lastName: 'Dela Cruz', email: 'juan.address@example.ph',
-        mobileNumber: '09171234567', password: 'a-long-enough-passphrase-here',
+        mobileNumber: '09171234567', password: 'A-long-enough-passphrase-9!',
       },
     });
     expect(registered.statusCode).toBe(202);

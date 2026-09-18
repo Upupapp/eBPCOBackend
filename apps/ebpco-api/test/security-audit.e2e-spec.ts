@@ -33,7 +33,7 @@ const ENV: NodeJS.ProcessEnv = {
   RATE_LIMIT_MAX: '10000',
 };
 
-const PASSWORD = 'a-long-enough-passphrase-42';
+const PASSWORD = 'A-long-enough-passphrase-42';
 const EMAIL = 'maria.santos@example.ph';
 
 interface Entry {

@@ -254,6 +254,14 @@ describe('what a filed application was judged against', () => {
   it('records an empty list when nothing has been published, rather than null', async () => {
     // A filed application always says what it was judged against, even when the
     // answer is "nothing was required yet" — which is a fact an officer needs.
+    //
+    // Migration 043 now seeds a real Fencing Permit checklist on every fresh
+    // database (fixing a production bug where this table was always empty —
+    // see that migration's own comment), so this test's own "nothing has
+    // been published yet" premise no longer holds by default and is
+    // restored here on purpose, scoped to this one test.
+    await db.query("delete from document_requirements where permit_type = 'Fencing Permit'");
+
     const applicationId = await file();
 
     const row = await db.query<{ required_documents: unknown[] }>(

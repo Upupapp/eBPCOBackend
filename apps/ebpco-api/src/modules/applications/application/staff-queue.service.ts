@@ -75,6 +75,16 @@ export interface QueueRow {
    * as a deadline nobody promised.
    */
   readonly pledge: Pledge | null;
+  /**
+   * When this application last reached Released, Completed, or Rejected —
+   * the same `completed_at` the pledge above is computed from (see
+   * `QUEUE_SQL`), just not previously surfaced on its own. Null while the
+   * application hasn't reached any of those yet. Added so a caller can
+   * measure real elapsed processing time (`completedAt - submittedAt`)
+   * without re-deriving it from a pledge object that exists for a different
+   * purpose and returns null once no charter classification applies.
+   */
+  readonly completedAt: string | null;
 }
 
 export interface QueuePage {
@@ -640,6 +650,7 @@ export class StaffQueueService {
 
   private toQueueRow(row: Record<string, unknown>, calendar: HolidayCalendar): QueueRow {
     const submitted = row['submitted_at'];
+    const completed = row['completed_at'];
     const amount = row['assessed_amount_centavos'];
 
     return {
@@ -683,6 +694,7 @@ export class StaffQueueService {
         : wholeFrom('assessed amount', amount, parseCentavos),
       paymentVerified: row['payment_verified'] === true,
       pledge: pledgeOf(row, calendar, this.clock()),
+      completedAt: completed === null || completed === undefined ? null : new Date(completed as string).toISOString(),
     };
   }
 

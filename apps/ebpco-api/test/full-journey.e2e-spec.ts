@@ -102,7 +102,7 @@ const SCOPE = 'Perimeter fence, 42 linear metres, hollow block on reinforced con
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
 
 const CITIZEN_EMAIL = 'juan.delacruz@example.ph';
-const CITIZEN_PASSWORD = 'a-long-enough-passphrase-9284';
+const CITIZEN_PASSWORD = 'A-long-enough-passphrase-9284';
 
 beforeEach(async () => {
   db = await PgliteClient.create();
@@ -117,14 +117,19 @@ beforeEach(async () => {
   // staff-actions.e2e-spec.ts's "whole path" test relies on, so this
   // suite's Order of Payment total (682,000 centavos) is provably the same
   // real figure, not a fixture that happens to agree with itself.
+  // Migration 044 already seeds this same '2026.1' schedule (including
+  // Fencing Permit's filing/processing/structural entries) on every fresh
+  // database, so these inserts are made idempotent rather than colliding.
   await db.query(
     `insert into fee_schedules (version, effective_from, published_by)
-     values ('2026.1','2026-01-01','City Ordinance 2026-004')`,
+     values ('2026.1','2026-01-01','City Ordinance 2026-004')
+     on conflict (version) do nothing`,
   );
   for (const [line, amount] of [['filing', 50_000], ['processing', 120_000], ['structural', 512_000]] as const) {
     await db.query(
       `insert into fee_schedule_entries (version, permit_type, line, amount_centavos, basis)
-       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')`,
+       values ('2026.1','Fencing Permit',$1,$2,'City Ordinance 2026-004 s.3')
+       on conflict (version, permit_type, line) do nothing`,
       [line, amount],
     );
   }

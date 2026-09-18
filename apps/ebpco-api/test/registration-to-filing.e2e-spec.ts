@@ -39,7 +39,7 @@ let app: NestFastifyApplication;
 let db: PgliteClient;
 
 const EMAIL = 'maria.santos@example.ph';
-const PASSWORD = 'a-long-enough-passphrase-2741';
+const PASSWORD = 'A-long-enough-passphrase-2741';
 
 beforeAll(async () => {
   db = await PgliteClient.create();
