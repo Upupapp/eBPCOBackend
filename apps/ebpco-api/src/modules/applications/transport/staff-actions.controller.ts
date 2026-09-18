@@ -411,17 +411,22 @@ export class StaffActionsController {
             if (!verified.ok) {
               this.logger.warn('onsite payment recorded but the application did not advance to Payment Verified', {
                 applicationId, paymentId: result.paymentId,
+                refusal: 'refusal' in verified ? verified.refusal : { kind: 'reused' },
               });
             }
           } else {
             this.logger.warn(
               'onsite payment recorded but the application did not advance to Payment Under Verification',
-              { applicationId, paymentId: result.paymentId },
+              {
+                applicationId, paymentId: result.paymentId,
+                refusal: 'refusal' in underVerification ? underVerification.refusal : { kind: 'reused' },
+              },
             );
           }
         } else {
           this.logger.warn('onsite payment recorded but the application did not advance to Payment Submitted', {
             applicationId, paymentId: result.paymentId,
+            refusal: 'refusal' in submitted ? submitted.refusal : { kind: 'reused' },
           });
         }
       }

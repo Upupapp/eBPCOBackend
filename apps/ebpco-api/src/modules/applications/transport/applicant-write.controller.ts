@@ -274,6 +274,7 @@ export class ApplicantWriteController {
           // minutes instead of by reading the database back by hand.
           this.logger.warn('payment proof submitted but the application did not advance to Payment Submitted', {
             applicationId, paymentId: result.paymentId,
+            refusal: 'refusal' in submitted ? submitted.refusal : { kind: 'reused' },
           });
         }
       }

@@ -169,11 +169,13 @@ export class StaffPaymentsController {
         if (!verified.ok) {
           this.logger.warn('payment verified but the application did not advance to Payment Verified', {
             applicationId: result.applicationId, paymentId: result.paymentId,
+            refusal: 'refusal' in verified ? verified.refusal : { kind: 'reused' },
           });
         }
       } else {
         this.logger.warn('payment verified but the application did not advance to Payment Under Verification', {
           applicationId: result.applicationId, paymentId: result.paymentId,
+          refusal: 'refusal' in underVerification ? underVerification.refusal : { kind: 'reused' },
         });
       }
       return { paymentId: result.paymentId, verified: true };
