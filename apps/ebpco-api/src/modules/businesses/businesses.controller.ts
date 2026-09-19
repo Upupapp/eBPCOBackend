@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Post, Req } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Patch, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../common/problem/problem';
@@ -6,6 +6,10 @@ import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
+import { LIFECYCLE_STATUSES, isTerminal } from '../applications/domain/lifecycle';
+
+/** Every status that means the LGU still has work in progress against a business — the set deactivate() refuses to leave stranded. */
+const IN_PROGRESS_STATUSES = LIFECYCLE_STATUSES.filter((status) => !isTerminal(status));
 
 /**
  * The businesses an applicant has registered with the LGU.
@@ -38,6 +42,28 @@ const businessShape = z.object({
   province: z.string().min(1).max(120),
   registrationNumber: z.string().min(1).max(80),
   dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+}).strict();
+
+/**
+ * What an owner may correct about a business already on file.
+ *
+ * Deliberately a SUBSET of `businessShape`, not `businessShape.partial()`:
+ * `registrationNumber` and `dateRegistered` are the government's own record
+ * of when and under what number this business was registered, not the
+ * owner's to rewrite, and `status` is not a free-text field here at all —
+ * see `deactivate`/`reactivate` below for why that is its own action rather
+ * than a value this endpoint accepts.
+ */
+const businessUpdateShape = z.object({
+  name: z.string().min(1).max(200),
+  category: z.enum([
+    'Retail', 'Food Service', 'Services', 'Manufacturing',
+    'Construction', 'Transport', 'Agriculture', 'Other',
+  ]),
+  street: z.string().min(1).max(200),
+  barangay: z.string().min(1).max(120),
+  city: z.string().min(1).max(120),
+  province: z.string().min(1).max(120),
 }).strict();
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -124,6 +150,117 @@ export class BusinessesController {
     );
 
     return onTheWire((inserted.rows as unknown as Record<string, unknown>[])[0] ?? {});
+  }
+
+  /**
+   * Correcting a business's own details — never who owns it, never its
+   * government-assigned registration facts. 404, not 403, for a business
+   * that exists but belongs to someone else: same reasoning as every other
+   * owned-resource lookup in this API (see `documents`' own contentUrl) —
+   * confirming it exists at all is itself a disclosure.
+   */
+  @Patch(':businessId')
+  @RequireScopes('profile:write')
+  async update(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const accountId = accountOf(request);
+    const input = parse(businessUpdateShape, body);
+
+    const owned = await this.db.query<{ id: string }>(
+      `select b.id from businesses b
+         join applicants ap on ap.id = b.owner_applicant_id
+        where b.id = $1 and ap.account_id = $2`,
+      [businessId, accountId],
+    );
+    if (owned.rows[0] === undefined) throw ProblemException.notFound('No such business.');
+
+    const updated = await this.db.query<Record<string, never>>(
+      `update businesses
+          set name = $2, category = $3, street = $4, barangay = $5, city = $6, province = $7,
+              updated_at = now()
+        where id = $1
+        returning id, name, category, street, barangay, city, province,
+                  registration_number, to_char(date_registered, 'YYYY-MM-DD') as date_registered, status`,
+      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province],
+    );
+
+    return onTheWire((updated.rows as unknown as Record<string, unknown>[])[0] ?? {});
+  }
+
+  /**
+   * Marks a business Inactive rather than deleting the row.
+   *
+   * `applications.business_id` is `on delete restrict` (migration 003) — a
+   * business with ANY application ever filed against it, in any state, can
+   * never be hard-deleted at all; Postgres refuses. `status` has existed on
+   * this table since that same migration for exactly this reason and had
+   * never been written by anything until now. Refused while an application
+   * against this business is still in progress (mirrors decision E-4's own
+   * boundary for cancelling an application): deactivating a business the
+   * LGU is actively processing paperwork for is confusing to both sides,
+   * and the applicant can always deactivate once that application reaches
+   * a terminal state, or withdraw it first.
+   */
+  @Post(':businessId/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('profile:write')
+  async deactivate(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.setStatus(request, businessId, 'Inactive');
+  }
+
+  /** The reverse of `deactivate` — a business the owner marked Inactive by mistake, or has resumed operating, is not stuck that way. */
+  @Post(':businessId/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('profile:write')
+  async reactivate(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.setStatus(request, businessId, 'Active');
+  }
+
+  private async setStatus(
+    request: AuthenticatedRequest, businessId: string, status: 'Active' | 'Inactive',
+  ): Promise<Record<string, unknown>> {
+    const accountId = accountOf(request);
+
+    const owned = await this.db.query<{ id: string }>(
+      `select b.id from businesses b
+         join applicants ap on ap.id = b.owner_applicant_id
+        where b.id = $1 and ap.account_id = $2`,
+      [businessId, accountId],
+    );
+    if (owned.rows[0] === undefined) throw ProblemException.notFound('No such business.');
+
+    if (status === 'Inactive') {
+      const inProgress = await this.db.query<{ id: string }>(
+        `select id from applications where business_id = $1 and lifecycle_status = any($2)`,
+        [businessId, IN_PROGRESS_STATUSES],
+      );
+      if (inProgress.rows[0] !== undefined) {
+        throw new ProblemException(
+          ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+          'This business has an application still in progress. Deactivate once it is decided, or withdraw it first.',
+        );
+      }
+    }
+
+    const updated = await this.db.query<Record<string, never>>(
+      `update businesses
+          set status = $2, updated_at = now()
+        where id = $1
+        returning id, name, category, street, barangay, city, province,
+                  registration_number, to_char(date_registered, 'YYYY-MM-DD') as date_registered, status`,
+      [businessId, status],
+    );
+
+    return onTheWire((updated.rows as unknown as Record<string, unknown>[])[0] ?? {});
   }
 }
 

@@ -58,6 +58,9 @@ const post = (url: string, bearer: string, payload: Record<string, unknown> = {}
 const get = (url: string, bearer: string) =>
   app.inject({ method: 'GET', url, headers: { authorization: `Bearer ${bearer}` } });
 
+const patch = (url: string, bearer: string, payload: Record<string, unknown> = {}) =>
+  app.inject({ method: 'PATCH', url, headers: { authorization: `Bearer ${bearer}` }, payload });
+
 /** A minimal, valid PDF the malware scanner and inspector will accept. */
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
 
@@ -585,6 +588,105 @@ describe('registering a business', () => {
       expect(response.json<{ category: string }>().category).toBe(category);
     },
   );
+});
+
+describe('editing a business already on file', () => {
+  const business = {
+    name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',
+    barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    registrationNumber: 'DTI-2024-004417', dateRegistered: '2024-01-15',
+  };
+
+  it('corrects the owner-editable fields', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+
+    const response = await patch(`/businesses/${businessId}`, maria, {
+      name: 'Nena\'s Sari-Sari Store', category: 'Food Service',
+      street: '14 Rizal Street', barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ name: string; category: string; street: string }>()).toMatchObject({
+      name: 'Nena\'s Sari-Sari Store', category: 'Food Service', street: '14 Rizal Street',
+    });
+  });
+
+  it('never lets the government-assigned facts be rewritten', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+
+    const response = await patch(`/businesses/${businessId}`, maria, {
+      ...business, registrationNumber: 'FORGED-0001',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('answers 404, not 403, for someone else’s business', async () => {
+    const businessId = (await post('/businesses', jose, business)).json<{ id: string }>().id;
+
+    const response = await patch(`/businesses/${businessId}`, maria, {
+      name: 'Hijacked', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+});
+
+describe('deactivating a business', () => {
+  const business = {
+    name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',
+    barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    registrationNumber: 'DTI-2024-004417', dateRegistered: '2024-01-15',
+  };
+
+  it('marks it Inactive rather than deleting it', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+
+    const response = await post(`/businesses/${businessId}/deactivate`, maria);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string }>().status).toBe('Inactive');
+    const row = await db.query<{ id: string }>('select id from businesses where id = $1', [businessId]);
+    expect(row.rows.length).toBe(1); // still there — never a hard delete
+  });
+
+  it('is reversible', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+    await post(`/businesses/${businessId}/deactivate`, maria);
+
+    const response = await post(`/businesses/${businessId}/reactivate`, maria);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string }>().status).toBe('Active');
+  });
+
+  it('refuses while an application against it is still in progress', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+    await post('/applications', maria, submission({ businessId }));
+
+    const response = await post(`/businesses/${businessId}/deactivate`, maria);
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/still in progress/i);
+  });
+
+  it('allows it once that application reaches a terminal state', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+    const filed = await post('/applications', maria, submission({ businessId }));
+    await post(`/applications/${filed.json<{ id: string }>().id}/cancel`, maria);
+
+    const response = await post(`/businesses/${businessId}/deactivate`, maria);
+
+    expect(response.statusCode).toBe(200);
+  });
+
+  it('answers 404, not 403, for someone else’s business', async () => {
+    const businessId = (await post('/businesses', jose, business)).json<{ id: string }>().id;
+
+    const response = await post(`/businesses/${businessId}/deactivate`, maria);
+
+    expect(response.statusCode).toBe(404);
+  });
 });
 
 describe('answering a Letter of Instruction', () => {
