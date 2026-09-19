@@ -141,16 +141,18 @@ describe('publishing a checklist', () => {
   });
 
   it('serves a permit type whose name contains a slash (D-10)', async () => {
-    // FOUR of the office's nineteen names contain a forward slash: 'Civil /
-    // Structural Permit', 'Zoning / Locational Clearance', and the Renovation
-    // and Addition building permits. Migration 033 made those names the primary
-    // key, and this route carries the permit type in the PATH.
+    // Two of the office's names contain a forward slash: 'Civil /
+    // Structural Permit' and 'Zoning / Locational Clearance'. (Until
+    // migration 047 consolidated them, the Renovation and Addition building
+    // permit sub-types also did -- 'Building Permit' does not.) Migration
+    // 033 made those names the primary key, and this route carries the
+    // permit type in the PATH.
     //
     // A slash in a path segment is the one character that changes what the URL
     // MEANS rather than how it reads, so this is measured on the real router
     // rather than reasoned about. If %2F does not route, a citizen cannot see
-    // what four of the nineteen permits require -- silently, as a 404 that
-    // looks like "no checklist published".
+    // what these permits require -- silently, as a 404 that looks like "no
+    // checklist published".
     const encoded = encodeURIComponent('Civil / Structural Permit');
     expect(encoded).toBe('Civil%20%2F%20Structural%20Permit');
 

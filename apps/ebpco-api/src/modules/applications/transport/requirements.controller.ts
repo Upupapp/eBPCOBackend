@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Param, Put, Req } from '@nestjs/common';
+import { Body, Controller, Get, Param, Put, Query, Req } from '@nestjs/common';
 import { HttpStatus } from '@nestjs/common';
 import { z } from 'zod';
 
@@ -27,6 +27,26 @@ const documentShape = z.object({
 const replaceShape = z.object({
   documents: z.array(documentShape).max(60),
 }).strict();
+
+/**
+ * Which action's checklist. Optional everywhere: every permit type but
+ * Building Permit has never distinguished by action, and omitting this
+ * still returns their (action-independent) checklist unchanged — see
+ * `RequirementsService.forPermitType`'s own doc comment for what omitting
+ * it means for Building Permit itself.
+ */
+const applicationActionShape = z.enum(['New', 'Renewal', 'Amendment']).optional();
+
+function parseApplicationAction(value: unknown): 'New' | 'Renewal' | 'Amendment' | undefined {
+  const result = applicationActionShape.safeParse(value === '' ? undefined : value);
+  if (!result.success) {
+    throw ProblemException.validation([{
+      pointer: '/applicationAction',
+      message: 'Must be "New", "Renewal", or "Amendment" if given.',
+    }]);
+  }
+  return result.data;
+}
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -59,14 +79,28 @@ export class RequirementsController {
    */
   @Get('requirements/:permitType')
   @RequireScopes('applications:read')
-  async forApplicant(@Param('permitType') permitType: string): Promise<Record<string, unknown>> {
-    return { permitType, documents: await this.requirements.forPermitType(permitType) };
+  async forApplicant(
+    @Param('permitType') permitType: string,
+    @Query('applicationAction') applicationActionParam?: string,
+  ): Promise<Record<string, unknown>> {
+    const applicationAction = parseApplicationAction(applicationActionParam);
+    return {
+      permitType, applicationAction: applicationAction ?? null,
+      documents: await this.requirements.forPermitType(permitType, applicationAction),
+    };
   }
 
   @Get('staff/config/requirements/:permitType')
   @RequireScopes('applications:read')
-  async forStaff(@Param('permitType') permitType: string): Promise<Record<string, unknown>> {
-    return { permitType, documents: await this.requirements.forPermitType(permitType) };
+  async forStaff(
+    @Param('permitType') permitType: string,
+    @Query('applicationAction') applicationActionParam?: string,
+  ): Promise<Record<string, unknown>> {
+    const applicationAction = parseApplicationAction(applicationActionParam);
+    return {
+      permitType, applicationAction: applicationAction ?? null,
+      documents: await this.requirements.forPermitType(permitType, applicationAction),
+    };
   }
 
   /**
@@ -81,10 +115,18 @@ export class RequirementsController {
     @Req() request: AuthenticatedRequest,
     @Param('permitType') permitType: string,
     @Body() body: unknown,
+    @Query('applicationAction') applicationActionParam?: string,
   ): Promise<Record<string, unknown>> {
     const input = parse(replaceShape, body);
+    const applicationAction = parseApplicationAction(applicationActionParam);
     const result = await this.requirements.replace({
-      permitType, officer: callerOf(request),
+      permitType,
+      // Spread rather than `applicationAction: applicationAction` — under
+      // `exactOptionalPropertyTypes`, an optional property may be ABSENT or
+      // hold a value, never explicitly `undefined`; omitted here is not the
+      // same as an omitted query param.
+      ...(applicationAction === undefined ? {} : { applicationAction }),
+      officer: callerOf(request),
       // `.default('')` leaves the type optional under exactOptionalPropertyTypes
       // even though a value is always produced, so the absent case is closed
       // here rather than widened in the domain.
@@ -97,6 +139,6 @@ export class RequirementsController {
         HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
       );
     }
-    return { permitType, documents: result.documents };
+    return { permitType, applicationAction: applicationAction ?? null, documents: result.documents };
   }
 }

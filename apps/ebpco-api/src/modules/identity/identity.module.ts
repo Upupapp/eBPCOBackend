@@ -39,6 +39,10 @@ import { RefusalRecorder } from './application/refusal-recorder';
 import { MAILER, Mailer } from './infrastructure/mailer';
 import { mailerFor } from './infrastructure/mailer-factory';
 import { AccountRecoveryMailer } from './application/account-recovery-mailer';
+import { ProfilePhotoService } from './application/profile-photo.service';
+import { OBJECT_STORE, MALWARE_SCANNER } from '../documents/documents.module';
+import { ObjectStore } from '../documents/domain/object-store';
+import { MalwareScanner } from '../documents/domain/malware-scanner';
 
 /**
  * Identity, wired.
@@ -204,6 +208,13 @@ import { AccountRecoveryMailer } from './application/account-recovery-mailer';
           action, reason: cause instanceof Error ? cause.message : String(cause),
         }),
       ),
+    },
+
+    {
+      provide: ProfilePhotoService,
+      inject: [SQL_CLIENT, OBJECT_STORE, MALWARE_SCANNER],
+      useFactory: (db: SqlClient, store: ObjectStore, scanner: MalwareScanner) =>
+        new ProfilePhotoService(db, store, scanner),
     },
 
     {

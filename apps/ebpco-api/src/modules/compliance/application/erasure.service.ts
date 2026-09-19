@@ -1,4 +1,5 @@
 import { SqlClient } from '../../../persistence/sql-client';
+import { ObjectStore } from '../../documents/domain/object-store';
 import { AuditService } from './audit.service';
 
 /**
@@ -119,14 +120,29 @@ export class ErasureService {
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    /**
+     * Optional, and checked before every use: the unit specs construct this
+     * service with no store, the same reason `audit` above is optional. A
+     * photo left in the bucket after a successful-looking erasure is a real
+     * gap, but it is a smaller harm than failing the erasure itself over a
+     * store that is not configured — so a missing store is a case this
+     * degrades around, not one it refuses on.
+     */
+    private readonly store?: ObjectStore,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
   }
 
   async erase(accountId: string): Promise<ErasureResult> {
-    return this.db.transaction(async (tx) => {
-      const account = await tx.query<{ kind: string; erased_at: Date | null }>(
-        'select kind, erased_at from accounts where id = $1 for update',
+    // Read outside the transaction below, deliberately: the object-store
+    // delete that uses it also has to happen outside that transaction (see
+    // the end of this method), and reading it in the same `for update` query
+    // the transaction already runs is one round trip rather than two.
+    let photoKeyToDelete: string | null = null;
+
+    const outcome = await this.db.transaction<ErasureResult>(async (tx) => {
+      const account = await tx.query<{ kind: string; erased_at: Date | null; photo_key: string | null }>(
+        'select kind, erased_at, photo_key from accounts where id = $1 for update',
         [accountId],
       );
       const row = account.rows[0];
@@ -151,6 +167,13 @@ export class ErasureService {
         // right response to that.
         return { ok: true, receipt: await this.receiptFor(tx, accountId, row.erased_at) };
       }
+
+      // Captured now, not in the outer scope's own read: this is the one
+      // moment inside the lock that knows the erasure is really happening
+      // rather than being refused or replayed, so it is the one moment an
+      // already-erased account's already-null key cannot be mistaken for one
+      // still pointing at real bytes.
+      photoKeyToDelete = row.photo_key;
 
       const erased: Record<string, number> = {};
 
@@ -191,6 +214,8 @@ export class ErasureService {
                 mobile_number = null,
                 totp_secret_encrypted = null,
                 password_hash = 'erased',
+                photo_key = null,
+                photo_content_type = null,
                 disabled_at = coalesce(disabled_at, $3),
                 erased_at = $3,
                 updated_at = $3
@@ -221,6 +246,19 @@ export class ErasureService {
         },
       };
     });
+
+    // Outside the transaction, deliberately: an object-store delete is not a
+    // database operation the transaction can roll back, and best-effort here
+    // means best-effort — a bucket that is briefly unreachable must not turn
+    // a completed, committed erasure into a failed request. An object left
+    // behind this way is an orphaned key nothing references any more, not a
+    // disclosure: `GET /me/photo` below refuses the instant `photo_key` is
+    // null, which this transaction has already committed by the time this line runs.
+    if (photoKeyToDelete !== null && this.store !== undefined) {
+      await this.store.delete(photoKeyToDelete).catch(() => undefined);
+    }
+
+    return outcome;
   }
 
   /** The receipt for an account already erased, so a repeated request is answerable. */

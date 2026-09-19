@@ -36,8 +36,8 @@ import { AuditController } from './transport/audit.controller';
     },
     {
       provide: ErasureService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new ErasureService(db),
+      inject: [SQL_CLIENT, OBJECT_STORE],
+      useFactory: (db: SqlClient, store: ObjectStore) => new ErasureService(db, undefined, undefined, store),
     },
   ],
   exports: [AuditService, ErasureService, DataExportService],

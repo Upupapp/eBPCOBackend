@@ -121,9 +121,9 @@ describe('what the report counts', () => {
 
   it('groups by permit type and classification', async () => {
     await charter('Fencing Permit', 'Simple', 3);
-    await charter('Building Permit – New Construction', 'Complex', 7);
+    await charter('Building Permit', 'Complex', 7);
     await application({ permitType: 'Fencing Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-06T02:00:00Z' });
-    await application({ permitType: 'Building Permit – New Construction', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-12T02:00:00Z' });
+    await application({ permitType: 'Building Permit', submittedAt: '2026-08-03T02:00:00Z', completedAt: '2026-08-12T02:00:00Z' });
 
     const report = await run();
 

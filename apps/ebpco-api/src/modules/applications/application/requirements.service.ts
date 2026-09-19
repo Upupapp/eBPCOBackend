@@ -50,19 +50,37 @@ export class RequirementsService {
     this.audit = audit ?? new AuditService(db, clock);
   }
 
-  async forPermitType(permitType: string, tx: SqlClient = this.db): Promise<readonly RequirementDocument[]> {
-    const result = await tx.query<{
-      code: string; label: string; description: string; required: boolean;
-    }>(
-      `select code, label, description, required from document_requirements
-        where permit_type = $1 order by position, code`,
-      [permitType],
-    );
+  /**
+   * `applicationAction`, when given, also returns every requirement that
+   * applies regardless of action (`application_action is null` — every
+   * permit type but Building Permit, unchanged since before 047). Omitted
+   * entirely, only the action-independent rows come back — which is empty
+   * for Building Permit, since 047 tagged all of its rows with an action:
+   * a caller has to say which one it is filing to see its checklist, the
+   * same way the wizard already has to know before it can show step 3.
+   */
+  async forPermitType(
+    permitType: string, applicationAction?: string, tx: SqlClient = this.db,
+  ): Promise<readonly RequirementDocument[]> {
+    const result = applicationAction === undefined
+      ? await tx.query<{ code: string; label: string; description: string; required: boolean }>(
+          `select code, label, description, required from document_requirements
+            where permit_type = $1 and application_action is null order by position, code`,
+          [permitType],
+        )
+      : await tx.query<{ code: string; label: string; description: string; required: boolean }>(
+          `select code, label, description, required from document_requirements
+            where permit_type = $1 and (application_action is null or application_action = $2)
+            order by position, code`,
+          [permitType, applicationAction],
+        );
     return result.rows;
   }
 
   /**
-   * Replaces the whole checklist for one permit type.
+   * Replaces the whole checklist for one permit type (and, for Building
+   * Permit, one application action — the other two actions' rows are left
+   * untouched; see the partial-unique-index design in 047).
    *
    * Wholesale, not per-document. An LGU revising a checklist is publishing a
    * list, and a diff API would let a client drop one document by forgetting to
@@ -70,9 +88,9 @@ export class RequirementsService {
    * merging them.
    */
   async replace(options: {
-    permitType: string; documents: readonly RequirementDocument[]; officer: Caller;
+    permitType: string; applicationAction?: string; documents: readonly RequirementDocument[]; officer: Caller;
   }): Promise<RequirementsResult> {
-    const { permitType, documents, officer } = options;
+    const { permitType, applicationAction, documents, officer } = options;
 
     const codes = documents.map((document) => document.code.trim());
     const duplicates = codes.filter((code, index) => codes.indexOf(code) !== index);
@@ -96,16 +114,26 @@ export class RequirementsService {
         };
       }
 
-      const before = await this.forPermitType(permitType, tx);
+      const before = await this.forPermitType(permitType, applicationAction, tx);
 
-      await tx.query('delete from document_requirements where permit_type = $1', [permitType]);
+      if (applicationAction === undefined) {
+        await tx.query(
+          'delete from document_requirements where permit_type = $1 and application_action is null',
+          [permitType],
+        );
+      } else {
+        await tx.query(
+          'delete from document_requirements where permit_type = $1 and application_action = $2',
+          [permitType, applicationAction],
+        );
+      }
       for (const [position, document] of documents.entries()) {
         await tx.query(
           `insert into document_requirements
-             (permit_type, code, label, description, required, position, updated_at, updated_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+             (permit_type, code, label, description, required, position, application_action, updated_at, updated_by)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
           [permitType, document.code.trim(), document.label.trim(), document.description ?? '',
-           document.required, position, this.clock(), officer.accountId],
+           document.required, position, applicationAction ?? null, this.clock(), officer.accountId],
         );
       }
 
@@ -116,11 +144,11 @@ export class RequirementsService {
         outcome: 'allowed',
         actorAccountId: officer.accountId,
         actorRole: officer.kind,
-        beforeState: { permitType, documents: before },
-        afterState: { permitType, documents },
+        beforeState: { permitType, applicationAction: applicationAction ?? null, documents: before },
+        afterState: { permitType, applicationAction: applicationAction ?? null, documents },
       }, tx);
 
-      return { ok: true, documents: await this.forPermitType(permitType, tx) };
+      return { ok: true, documents: await this.forPermitType(permitType, applicationAction, tx) };
     });
   }
 }

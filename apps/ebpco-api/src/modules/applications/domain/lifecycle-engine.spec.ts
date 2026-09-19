@@ -25,7 +25,7 @@ const satisfied = (status: LifecycleStatus, overrides: Partial<ApplicationSnapsh
   applicantAccountId: APPLICANT_ACCOUNT,
   // The engine does not read it — the forms allow-list is checked in the
   // service, inside the transaction — but the snapshot carries it.
-  permitType: 'Building Permit – New Construction',
+  permitType: 'Building Permit',
   status,
   version: 1,
   identityDocumentVerified: true,

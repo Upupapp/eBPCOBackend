@@ -110,7 +110,7 @@ describe('registering and then filing, with nothing seeded', () => {
     const { accessToken } = JSON.parse(signIn.body) as { accessToken: string };
 
     const response = await post('/applications', {
-      permitType: 'Building Permit – New Construction',
+      permitType: 'Building Permit',
       applicationAction: 'New',
       location: 'Purok 3, Cumadcad, Castilla, Sorsogon',
       form: { ownerName: 'Maria Santos', floorArea: 120 },

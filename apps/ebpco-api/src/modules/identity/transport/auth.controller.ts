@@ -1,4 +1,7 @@
-import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Patch, Post, Req } from '@nestjs/common';
+import {
+  Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Patch, Post, Put, Req, Res,
+} from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -8,6 +11,7 @@ import { ErasureService } from '../../compliance/application/erasure.service';
 import { StaffAccessService } from '../application/staff-access.service';
 import { RectificationService } from '../application/rectification.service';
 import { DataExportService } from '../../compliance/application/data-export.service';
+import { ProfilePhotoService } from '../application/profile-photo.service';
 import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 import { AccountRecoveryMailer } from '../application/account-recovery-mailer';
@@ -46,17 +50,33 @@ const registration = z.object({
   // Migration 038. Optional, not required: the mobile client's live request
   // still sends exactly the five fields above, and `.strict()` below rejects
   // an UNKNOWN field, never an omitted optional one, so that keeps working
-  // unchanged. The web portal's registration form sends all four.
+  // unchanged.
   dateOfBirth: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').optional(),
   sex: z.enum(['Male', 'Female', 'Prefer not to say']).optional(),
   civilStatus: z.enum(['Single', 'Married', 'Widowed', 'Separated', 'Divorced']).optional(),
   nationality: z.string().min(1).max(100).optional(),
+  // Migration 036, added here 2026-09-19. The web portal's registration form
+  // has asked Step 2 for all six of these — house number/street, barangay,
+  // city, province, postal code, plus middle name on Step 1 — since before
+  // this endpoint existed, marked required and blocking progress to Step 3
+  // without them. None of the six had a field here, so `AuthService
+  // .register()` on that portal quietly never sent what its own form had
+  // just collected and validated: a citizen who filled in a real address
+  // believing it was being recorded found it blank on their own Profile
+  // screen afterward, with no error anywhere along the way. Optional here
+  // for the same reason dateOfBirth/etc. are: the mobile client's request
+  // still sends none of this and must keep registering cleanly.
+  middleName: z.string().min(1).max(100).optional(),
+  street: z.string().min(1).max(200).optional(),
+  barangay: z.string().min(1).max(120).optional(),
+  city: z.string().min(1).max(120).optional(),
+  province: z.string().min(1).max(120).optional(),
+  postalCode: z.string().regex(/^[0-9]{4}$/, 'a Philippine postal code is four digits').optional(),
 // `.strict()`, because Zod's default SILENTLY STRIPS what it does not know.
-// A client adding `address` here would get 202 and the field would vanish --
-// success reported over data thrown away, which is the failure this service
-// has already found in three other places. The address is still corrected
-// through PATCH /me, not collected at registration — migration 038 gave this
-// table a place for date of birth/sex/civil status/nationality, not address.
+// A client adding an unlisted field here would get 202 and the field would
+// vanish -- success reported over data thrown away, which is the exact
+// failure the comment above just described for six fields that used to be
+// on this list's blind side.
 }).strict();
 
 /**
@@ -102,6 +122,18 @@ const resetRequest = z.object({
   token: z.string().uuid('must be a reset token'),
   password: z.string().min(1).max(512),
 });
+const changePasswordRequest = z.object({
+  currentPassword: z.string().min(1).max(512),
+  newPassword: z.string().min(1).max(512),
+}).strict();
+
+const photoUploadRequest = z.object({
+  fileName: z.string().min(1).max(255),
+  // The cap is on decoded bytes; this bound only stops an absurd body
+  // reaching the decoder. The real limit is `ProfilePhotoService`'s own
+  // `MAX_PHOTO_BYTES`, applied to the decoded bytes.
+  contentBase64: z.string().min(1).max(8_000_000),
+}).strict();
 
 function parse<T>(schema: z.ZodType<T>, body: unknown): T {
   const result = schema.safeParse(body);
@@ -225,6 +257,12 @@ export class AuthController {
       sex: input.sex,
       civilStatus: input.civilStatus,
       nationality: input.nationality,
+      middleName: input.middleName,
+      street: input.street,
+      barangay: input.barangay,
+      city: input.city,
+      province: input.province,
+      postalCode: input.postalCode,
     });
 
     // A weak password IS reported: that is the caller's own input, not a fact
@@ -282,6 +320,33 @@ export class AuthController {
       );
     }
   }
+
+  /**
+   * Changing a password from inside an active session. No `@RequireScopes`,
+   * same as `revoke` above: the account acted on is always the caller's own,
+   * taken from the token, so being signed in at all is the whole requirement
+   * — there is no narrower scope this could be gated on.
+   */
+  @Post('password/change')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async changePassword(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<void> {
+    const caller = request.caller;
+    if (caller === undefined) throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);
+
+    const input = parse(changePasswordRequest, body);
+    const result = await this.identity.changePassword(caller.sub, input.currentPassword, input.newPassword);
+
+    if (!result.ok) {
+      if (result.reason === 'weak-password') {
+        throw ProblemException.validation(
+          result.rejections.map((rejection) => ({ pointer: '/newPassword', message: rejection.message })),
+        );
+      }
+      throw new ProblemException(
+        ProblemType.unauthorized, 'That is not your current password', HttpStatus.UNAUTHORIZED,
+      );
+    }
+  }
 }
 
 @Controller('me')
@@ -292,6 +357,7 @@ export class MeController {
     private readonly dataExports: DataExportService,
     private readonly staffAccess: StaffAccessService,
     private readonly rectification: RectificationService,
+    private readonly photos: ProfilePhotoService,
   ) {}
 
   /**
@@ -404,6 +470,10 @@ export class MeController {
       kind: account?.kind ?? 'applicant',
       email: account?.email ?? null,
       emailVerifiedAt: account?.emailVerifiedAt?.toISOString() ?? null,
+      // Present on GET too (see this controller's own note there) — a
+      // correction must stay a strict superset of a read, and this is one
+      // of the fields that superset promise covers.
+      hasPhoto: await this.photos.hasPhoto(caller.sub),
       firstName: profile?.firstName ?? null,
       middleName: profile?.middleName ?? null,
       lastName: profile?.lastName ?? null,
@@ -461,6 +531,12 @@ export class MeController {
       // is a property of the account, not a fact about a correction, so the
       // read is where it belongs most.
       mobileVerifiedAt: account.mobileVerifiedAt?.toISOString() ?? null,
+      // Whether to draw an avatar and offer `GET /me/photo` — not the bytes
+      // themselves. Those are megabytes-adjacent and single-purpose; sending
+      // them on every `/me` call (session restore, background refresh) would
+      // make the one request every screen depends on carry an image nobody
+      // asked to see yet.
+      hasPhoto: await this.photos.hasPhoto(account.id),
     };
 
     if (account.kind === 'staff') {
@@ -523,6 +599,90 @@ export class MeController {
       civilStatus: profile?.civilStatus ?? null,
       nationality: profile?.nationality ?? null,
     };
+  }
+
+  /**
+   * Replacing the profile photo. `PUT`, not `POST`: there is at most one, and
+   * a second upload replaces it rather than adding another — the same
+   * reasoning `notification-preferences.controller.ts` gives for using PUT
+   * over PATCH on a set with no ambiguous partial meaning.
+   *
+   * `profile:write`, the same scope the rest of this profile screen's own
+   * corrections use — a photo is a self-correction like a name or an
+   * address, not a document submitted about an application.
+   */
+  @Put('photo')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('profile:write')
+  async uploadPhoto(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<Record<string, unknown>> {
+    const caller = request.caller;
+    if (caller === undefined) throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);
+    const input = parse(photoUploadRequest, body);
+
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(input.contentBase64, 'base64');
+      if (bytes.length === 0) throw new Error('empty');
+    } catch {
+      throw ProblemException.validation([
+        { pointer: '/contentBase64', message: 'could not be decoded as base64' },
+      ]);
+    }
+
+    const outcome = await this.photos.upload(caller.sub, bytes, input.fileName);
+    if (!outcome.ok) {
+      if (outcome.reason === 'infected') {
+        throw new ProblemException(
+          ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+          outcome.detail,
+        );
+      }
+      throw ProblemException.validation([{ pointer: '/contentBase64', message: outcome.detail }]);
+    }
+    return { contentType: outcome.contentType };
+  }
+
+  @Delete('photo')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireScopes('profile:write')
+  async removePhoto(@Req() request: AuthenticatedRequest): Promise<void> {
+    const caller = request.caller;
+    if (caller === undefined) throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);
+    await this.photos.remove(caller.sub);
+  }
+
+  /**
+   * The bytes. `profile:read`, not public: unlike a document link handed to
+   * an applicant to open once, this is fetched by the same signed-in citizen
+   * who owns it, every time their own Profile screen renders — an ordinary
+   * authenticated GET, not a link anyone else would ever hold.
+   *
+   * `inline`, not `attachment` — the one deliberate deviation from
+   * `documents.controller.ts`'s "ALWAYS an attachment" rule, which exists to
+   * stop an uploaded file that LOOKS like an image from being rendered as
+   * HTML/SVG and executing script. `ProfilePhotoService.upload()` already
+   * refused anything that is not a real, structurally-verified JPEG or PNG
+   * — not a declared content type, the actual bytes — and `nosniff` below
+   * still stands, so there is nothing here for a browser to reinterpret.
+   */
+  @Get('photo')
+  @RequireScopes('profile:read')
+  async photo(
+    @Req() request: AuthenticatedRequest,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<Buffer> {
+    const caller = request.caller;
+    if (caller === undefined) throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);
+
+    const stored = await this.photos.photoFor(caller.sub);
+    if (stored === null) throw ProblemException.notFound('No photo on file.');
+
+    void reply
+      .header('content-disposition', 'inline')
+      .header('content-type', stored.contentType)
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store');
+    return stored.bytes;
   }
 
   /**

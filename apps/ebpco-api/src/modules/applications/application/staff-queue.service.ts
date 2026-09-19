@@ -52,8 +52,9 @@ export interface QueueRow {
    */
   readonly permitTypeName: string;
   /**
-   * 'Construction Permit' for the office's nineteen, 'Business Permit' for the
-   * twentieth. The durable way to tell them apart -- see the note on the value.
+   * 'Construction Permit' for the office's own permit types, 'Business Permit'
+   * for the one legacy extra. The durable way to tell them apart -- see the
+   * note on the value.
    */
   readonly serviceDomain: string;
   readonly applicationAction: string;
@@ -667,13 +668,13 @@ export class StaffQueueService {
       permitTypeName: row['permit_type'] as string,
       /**
        * Which service this permit belongs to: 'Construction Permit' for the
-       * office's nineteen, 'Business Permit' for the twentieth.
+       * office's own permit types, 'Business Permit' for the one legacy extra.
        *
        * Added because the admin portal had to hard-code that 'Business Permit'
        * is not one of the office's permits in order to render it at all -- its
-       * union holds the nineteen, so the twentieth failed validation and every
-       * legacy application read "Not recorded", which was false. The server
-       * already knew the answer and was not saying it.
+       * union holds only the office's own types, so the extra one failed
+       * validation and every legacy application read "Not recorded", which was
+       * false. The server already knew the answer and was not saying it.
        *
        * A hard-coded name in a client breaks the next time the LGU adds a
        * non-construction permit type; this does not.

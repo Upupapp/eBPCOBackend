@@ -13,6 +13,7 @@ import { ApplicantQueryService } from './application/applicant-query.service';
 import { InstructionResponseService } from './application/instruction-response.service';
 import { SubmissionService } from './application/submission.service';
 import { RecordsService } from './application/records.service';
+import { NotesService } from './application/notes.service';
 import { StaffQueueService } from './application/staff-queue.service';
 import { StaffActionsController } from './transport/staff-actions.controller';
 import { ApplicantApplicationsController } from './transport/applicant-applications.controller';
@@ -78,6 +79,11 @@ export { CALENDAR_REPOSITORY };
       provide: RecordsService,
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new RecordsService(db),
+    },
+    {
+      provide: NotesService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new NotesService(db),
     },
     {
       provide: SubmissionService,

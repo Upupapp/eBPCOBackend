@@ -323,14 +323,18 @@ describe('the second signature', () => {
   });
 
   it('is refused by the database too, not only by the service', async () => {
-    // A bug that has to defeat a constraint is much harder to write than one
-    // that has to defeat an `if`.
+    // A bug that has to defeat a trigger is much harder to write than one
+    // that has to defeat an `if`. Migration 042 replaced the plain
+    // `approver_is_not_the_assessor` CHECK constraint with a trigger (so
+    // Super Admin's self-approval exception can look the approver's role up)
+    // and, with it, this message — the trigger and function names still say
+    // `approver_is_not_the_assessor`, but the raised text no longer does.
     const id = await submitted();
 
     await expect(db.query(
       'update assessments set approved_by = $1, approved_at = now() where id = $2',
       [preparer.id, id],
-    )).rejects.toThrow(/approver_is_not_the_assessor/);
+    )).rejects.toThrow(/is not Super Admin, so it may not approve it/);
   });
 
   it('refuses to approve something that was never submitted', async () => {

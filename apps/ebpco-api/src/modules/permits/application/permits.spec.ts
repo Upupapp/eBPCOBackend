@@ -184,7 +184,7 @@ describe('the counter behind the number', () => {
     // An LGU numbers its fencing permits and its new-construction permits
     // independently, and restarts both in January.
     const fence = await file('BP-1', 'Approved', 'Fencing Permit');
-    const building = await file('BP-2', 'Approved', 'Building Permit – New Construction');
+    const building = await file('BP-2', 'Approved', 'Building Permit');
 
     const first = await permits.generate({ applicationId: fence, officer: official, scope: SCOPE, conditions: [] });
     const second = await permits.generate({ applicationId: building, officer: official, scope: SCOPE, conditions: [] });

@@ -1,13 +1,11 @@
 {
-  "_comment": "Extracted by scripts/sync-permit-vocabulary.ts. Do not hand-edit: re-run the script, and if the two lists disagree that is the finding.",
+  "_comment": "Extracted by scripts/sync-permit-vocabulary.ts. Do not hand-edit: re-run the script, and if the two lists disagree that is the finding. Exception: 2026-09-19, hand-updated for the Building Permit consolidation (047) -- the script's PORTAL_REPO/PORTAL_FILE point at a repo layout ('castilla-lgu-portal/src/app/core/data/permits.data.ts') that predates this session's ebpco-user-portal restructuring and no longer resolves; see scripts/sync-permit-vocabulary.ts's own comment. Re-run the script once it is repointed at the current portal repo, to get a real stamped commit again.",
   "admin": {
     "repo": "ebpco-admin",
     "file": "src/app/core/domain/permit.model.ts",
     "commit": "20773cfe400d08cd95f8ccf3daac71dfe3619ec7",
     "names": [
-      "Building Permit – New Construction",
-      "Building Permit – Renovation / Alteration",
-      "Building Permit – Addition / Extension",
+      "Building Permit",
       "Demolition Permit",
       "Zoning / Locational Clearance",
       "Architectural Permit",
@@ -31,9 +29,7 @@
     "file": "castilla-lgu-portal/src/app/core/data/permits.data.ts",
     "commit": "21b1a10c9ac6861b47947391b54edccd09496555",
     "names": [
-      "Building Permit – New Construction",
-      "Building Permit – Renovation / Alteration",
-      "Building Permit – Addition / Extension",
+      "Building Permit",
       "Demolition Permit",
       "Zoning / Locational Clearance",
       "Architectural Permit",

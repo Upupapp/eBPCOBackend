@@ -552,7 +552,7 @@ export class SubmissionService {
     // in March cannot become non-compliant in April because the LGU added a
     // document, and an officer looking at this later needs the list it was
     // actually judged against — not whatever the catalogue says today.
-    const requirements = await this.requirements.forPermitType(submission.permitType, tx);
+    const requirements = await this.requirements.forPermitType(submission.permitType, submission.applicationAction, tx);
 
     const referenceNumber = await this.nextReference(tx, now);
     const inserted = await tx.query<{ id: string }>(

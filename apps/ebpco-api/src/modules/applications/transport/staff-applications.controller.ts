@@ -13,6 +13,7 @@ import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { SubmissionService } from '../application/submission.service';
 import { EditableFields, RecordsService } from '../application/records.service';
+import { NotesService } from '../application/notes.service';
 
 /**
  * The officer's surface.
@@ -131,6 +132,11 @@ const patchShape = z.object({
   form: z.record(z.string(), z.unknown()).optional(),
 }).strict();
 
+const noteShape = z.object({
+  body: z.string().min(1).max(4000),
+  parentNoteId: z.string().uuid().nullable().optional(),
+}).strict();
+
 const archiveShape = z.object({
   applicationIds: z.array(z.string().uuid()).min(1).max(200),
   // Required, not optional. Remarks are how the next officer learns why a
@@ -146,6 +152,7 @@ export class StaffApplicationsController {
     private readonly lifecycle: LifecycleService,
     private readonly submissions: SubmissionService,
     private readonly records: RecordsService,
+    private readonly notes: NotesService,
   ) {}
 
   @Get()
@@ -323,6 +330,61 @@ export class StaffApplicationsController {
     const detail = await this.queue.detail(callerOf(request), applicationId);
     if (detail === null) throw ProblemException.notFound('No such application.');
     return { ...detail };
+  }
+
+  /**
+   * Internal staff notes — a workspace for the office to leave each other
+   * context, never shown to the applicant. `applications:read`, the same
+   * scope `detail` above requires: any staff role that can open this
+   * application at all can read what colleagues have already written on it.
+   */
+  @Get(':applicationId/notes')
+  @RequireScopes('applications:read')
+  async listNotes(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<Record<string, unknown>> {
+    if (await this.queue.detail(callerOf(request), applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+    return { notes: await this.notes.listFor(applicationId) };
+  }
+
+  /**
+   * Adding one. `staff:annotate`, not `applications:read` — every ACTING role
+   * that holds `applications:read` also held this route until 2026-09-19,
+   * which included `auditor`. That role's entire definition is oversight
+   * WITHOUT authority (see `account.ts`), and a read scope authorising a
+   * write grants that write to everyone holding it — the exact failure mode
+   * `staff:receive` was added to close, on the same file, a page above. Nor
+   * is it `applications:write` (records-officer/super-admin only): this is a
+   * colleague-to-colleague annotation, not a change to the application
+   * record, and every acting role but the auditor should be able to leave
+   * one.
+   */
+  @Post(':applicationId/notes')
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('staff:annotate')
+  async addNote(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = callerOf(request);
+    if (await this.queue.detail(caller, applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+    const input = parse(noteShape, body);
+    const result = await this.notes.create({
+      applicationId, body: input.body, parentNoteId: input.parentNoteId ?? null, caller,
+    });
+    if (!result.ok) {
+      throw new ProblemException(
+        ProblemType.unprocessable, 'The note could not be saved',
+        HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+      );
+    }
+    return { note: result.note };
   }
 
   /**

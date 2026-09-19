@@ -24,6 +24,9 @@ const env = (overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv => ({
 });
 
 const GOOD_PASSWORD = 'The quiet Barangay hall, on Tuesday at 3pm!';
+// A second, equally policy-compliant password (upper/lower/digit/punctuation,
+// 12+ chars, no context words) for tests that change AWAY from GOOD_PASSWORD.
+const OTHER_GOOD_PASSWORD = 'The quiet Plaza bells ring again at 5pm!';
 
 const MIGRATIONS_DIR = join(__dirname, '../db/migrations');
 
@@ -241,6 +244,74 @@ describe('registration over HTTP', () => {
     expect(response.statusCode).toBe(400);
     expect(JSON.stringify(response.json())).toContain('/mobileNumber');
   });
+
+  /**
+   * Migration 036's middleName/street/barangay/city/province/postalCode,
+   * added to this route 2026-09-19. The web portal's registration form has
+   * required all six on Step 1/2 since before this route accepted them, so
+   * a citizen who filled in a real address had it silently discarded —
+   * caught live, reported by a citizen reading their own Profile screen
+   * afterward and finding every address field blank.
+   */
+  it('saves middle name and address when the caller sends them, and returns them from /me', async () => {
+    const email = 'full-address@example.ph';
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        firstName: 'Maria', middleName: 'Santos', lastName: 'Dela Cruz', email,
+        mobileNumber: '09171234567', password: GOOD_PASSWORD,
+        street: '12 Rizal Street', barangay: 'Poblacion', city: 'Castilla',
+        province: 'Sorsogon', postalCode: '4713',
+      },
+    });
+    expect(registered.statusCode).toBe(202);
+
+    const signedIn = await signIn(app, email);
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+    const me = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${accessToken}` } });
+
+    expect(me.json()).toMatchObject({
+      middleName: 'Santos', street: '12 Rizal Street', barangay: 'Poblacion',
+      city: 'Castilla', province: 'Sorsogon', postalCode: '4713',
+    });
+  });
+
+  it('still registers cleanly without any of the six — the mobile client sends none of them', async () => {
+    const email = 'no-address@example.ph';
+    const registered = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        firstName: 'Juan', lastName: 'Santos', email,
+        mobileNumber: '09171234567', password: GOOD_PASSWORD,
+      },
+    });
+    expect(registered.statusCode).toBe(202);
+
+    const signedIn = await signIn(app, email);
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+    const me = await app.inject({ method: 'GET', url: '/me', headers: { authorization: `Bearer ${accessToken}` } });
+
+    // Null, not empty strings — NOT RECORDED, never "the citizen left it blank".
+    expect(me.json()).toMatchObject({
+      middleName: null, street: null, barangay: null, city: null, province: null, postalCode: null,
+    });
+  });
+
+  it('rejects a malformed postal code the same way the address form itself would refuse to submit', async () => {
+    const response = await app.inject({
+      method: 'POST',
+      url: '/auth/register',
+      payload: {
+        firstName: 'A', lastName: 'B', email: 'bad-postal@example.ph',
+        mobileNumber: '09171234567', password: GOOD_PASSWORD, postalCode: '471',
+      },
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.stringify(response.json())).toContain('/postalCode');
+  });
 });
 
 describe('sign-in over HTTP', () => {
@@ -448,5 +519,80 @@ describe('account recovery over HTTP', () => {
     });
 
     expect(response.statusCode).toBe(400);
+  });
+});
+
+describe('changing a password from inside a session', () => {
+  let app: NestFastifyApplication;
+
+  beforeAll(async () => {
+    ({ app } = await build());
+    await register(app, 'maria@example.ph');
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const changePassword = (accessToken: string, payload: Record<string, unknown>) =>
+    app.inject({
+      method: 'POST', url: '/auth/password/change',
+      headers: { authorization: `Bearer ${accessToken}` }, payload,
+    });
+
+  it('accepts the correct current password and lets the new one sign in', async () => {
+    const signedIn = await signIn(app, 'maria@example.ph');
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+
+    const response = await changePassword(accessToken, {
+      currentPassword: GOOD_PASSWORD, newPassword: OTHER_GOOD_PASSWORD,
+    });
+    expect(response.statusCode).toBe(204);
+
+    const withOld = await signIn(app, 'maria@example.ph', GOOD_PASSWORD);
+    expect(withOld.statusCode).toBe(401);
+    const withNew = await signIn(app, 'maria@example.ph', OTHER_GOOD_PASSWORD);
+    expect(withNew.statusCode).toBe(200);
+  });
+
+  it('refuses the wrong current password without touching the real one', async () => {
+    await register(app, 'refuse-wrong@example.ph');
+    const signedIn = await signIn(app, 'refuse-wrong@example.ph');
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+
+    const response = await changePassword(accessToken, {
+      currentPassword: 'not what maria typed at all', newPassword: OTHER_GOOD_PASSWORD,
+    });
+    expect(response.statusCode).toBe(401);
+
+    // The original password still works — a refused change must not be a
+    // silent change.
+    expect((await signIn(app, 'refuse-wrong@example.ph', GOOD_PASSWORD)).statusCode).toBe(200);
+  });
+
+  it('reports a weak new password with the same policy registration uses', async () => {
+    await register(app, 'weak-change@example.ph');
+    const signedIn = await signIn(app, 'weak-change@example.ph');
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+
+    const response = await changePassword(accessToken, {
+      currentPassword: GOOD_PASSWORD, newPassword: 'password1234',
+    });
+    expect(response.statusCode).toBe(400);
+    expect(JSON.stringify(response.json())).toContain('/newPassword');
+  });
+
+  it('ends every other session, the same as a reset does', async () => {
+    await register(app, 'end-sessions@example.ph');
+    const first = await signIn(app, 'end-sessions@example.ph');
+    const { accessToken, refreshToken } = first.json<{ accessToken: string; refreshToken: string }>();
+
+    await changePassword(accessToken, {
+      currentPassword: GOOD_PASSWORD, newPassword: OTHER_GOOD_PASSWORD,
+    });
+
+    const refreshed = await app.inject({
+      method: 'POST', url: '/auth/token/refresh', payload: { refreshToken },
+    });
+    expect(refreshed.statusCode).toBe(401);
   });
 });

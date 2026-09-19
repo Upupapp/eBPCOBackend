@@ -492,10 +492,10 @@ describe('metrics count only what the caller can open', () => {
   };
 
   it('counts only the caller’s own forms in total and byStatus', async () => {
-    await file({ reference: 'BP-1', status: 'Submitted', permitType: 'Building Permit – New Construction' });
-    await file({ reference: 'BP-2', status: 'Submitted', permitType: 'Building Permit – Renovation / Alteration' });
+    await file({ reference: 'BP-1', status: 'Submitted', permitType: 'Building Permit' });
+    await file({ reference: 'BP-2', status: 'Submitted', permitType: 'Demolition Permit' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['Building Permit – New Construction']);
+    await assign(caller.accountId, ['Building Permit']);
 
     const metrics = await queue.metrics(caller);
 
@@ -507,10 +507,10 @@ describe('metrics count only what the caller can open', () => {
     // The property that matters more than any single number: a card saying 2
     // above a list showing 1 is a bug an officer reports, and a card saying 1
     // above a list showing 1 is trustworthy.
-    await file({ reference: 'BP-3', status: 'Submitted', permitType: 'Building Permit – New Construction' });
+    await file({ reference: 'BP-3', status: 'Submitted', permitType: 'Building Permit' });
     await file({ reference: 'BP-4', status: 'Submitted', permitType: 'Demolition Permit' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['Building Permit – New Construction']);
+    await assign(caller.accountId, ['Building Permit']);
 
     const metrics = await queue.metrics(caller);
     const page = await queue.page(caller);
@@ -519,7 +519,7 @@ describe('metrics count only what the caller can open', () => {
   });
 
   it('reports nothing at all for an officer with no forms', async () => {
-    await file({ reference: 'BP-5', status: 'Submitted', permitType: 'Building Permit – New Construction' });
+    await file({ reference: 'BP-5', status: 'Submitted', permitType: 'Building Permit' });
     const caller = await officer('administrator');
     await assign(caller.accountId, []);
 
@@ -537,9 +537,9 @@ describe('metrics count only what the caller can open', () => {
   it('scopes the statutory pledge figure too', async () => {
     // An officer told they have overdue applications belonging to another
     // office cannot act on the number and cannot correct it.
-    await file({ reference: 'BP-6', status: 'Submitted', permitType: 'Building Permit – Renovation / Alteration' });
+    await file({ reference: 'BP-6', status: 'Submitted', permitType: 'Demolition Permit' });
     const caller = await officer('administrator');
-    await assign(caller.accountId, ['Building Permit – New Construction']);
+    await assign(caller.accountId, ['Building Permit']);
 
     const metrics = await queue.metrics(caller);
 

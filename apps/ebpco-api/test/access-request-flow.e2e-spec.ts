@@ -47,7 +47,7 @@ const superAdmin = async (email = 'paul@lguids.com.ph'): Promise<string> => {
   return account!.id;
 };
 
-const raise = async (email = 'ana@castilla.gov.ph', permitTypes = ['Building Permit – New Construction']):
+const raise = async (email = 'ana@castilla.gov.ph', permitTypes = ['Building Permit']):
 Promise<string> => {
   await requests.raise({
     fullName: 'Ana Cruz', email, mobile: '09171234567',
@@ -112,7 +112,7 @@ describe('the answer is the same whoever asks', () => {
     for (let attempt = 0; attempt < 6; attempt += 1) {
       await requests.raise({
         fullName: 'Ana Cruz', email: `spam${String(attempt)}@x.ph`, mobile: '0917',
-        officePosition: 'Engineering', permitTypes: ['Building Permit – New Construction'],
+        officePosition: 'Engineering', permitTypes: ['Building Permit'],
         requestedLevel: 'view',
         justification: 'A justification long enough to pass validation here.',
       }, '198.51.100.7');
@@ -131,7 +131,7 @@ describe('approval creates the account and its assignment together', () => {
     const id = await raise();
 
     const result = await requests.approve(id, {
-      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit – New Construction', 'Building Permit – Renovation / Alteration'],
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit', 'Demolition Permit'],
     }, { accountId: admin, role: 'super-admin' });
     expect(result.ok).toBe(true);
 
@@ -183,7 +183,7 @@ describe('approval creates the account and its assignment together', () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
 
     const [created] = await query<{ password_hash: string }>(
@@ -199,7 +199,7 @@ describe('approval creates the account and its assignment together', () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
 
     const [entry] = await query<{ actor_account_id: string; after_state: { level: string } }>(
@@ -252,17 +252,17 @@ describe('role × level × forms', () => {
   }[] = [
     // The owner's named cases first.
     { role: 'evaluator', level: 'view-edit', forms: [], canAct: true, reaches: null },
-    { role: 'auditor', level: 'view', forms: ['Building Permit – New Construction', 'Building Permit – Renovation / Alteration'],
-      canAct: false, reaches: 'Building Permit – New Construction' },
+    { role: 'auditor', level: 'view', forms: ['Building Permit', 'Demolition Permit'],
+      canAct: false, reaches: 'Building Permit' },
     // And the ordinary ones, so the table is not only edge cases.
-    { role: 'evaluator', level: 'view-edit', forms: ['Building Permit – New Construction'],
-      canAct: true, reaches: 'Building Permit – New Construction' },
-    { role: 'evaluator', level: 'view', forms: ['Building Permit – New Construction'],
-      canAct: false, reaches: 'Building Permit – New Construction' },
-    { role: 'cashier', level: 'view-edit', forms: ['Building Permit – Renovation / Alteration'],
-      canAct: true, reaches: 'Building Permit – Renovation / Alteration' },
-    { role: 'super-admin', level: 'view-edit', forms: ['Building Permit – New Construction'],
-      canAct: true, reaches: 'Building Permit – New Construction' },
+    { role: 'evaluator', level: 'view-edit', forms: ['Building Permit'],
+      canAct: true, reaches: 'Building Permit' },
+    { role: 'evaluator', level: 'view', forms: ['Building Permit'],
+      canAct: false, reaches: 'Building Permit' },
+    { role: 'cashier', level: 'view-edit', forms: ['Demolition Permit'],
+      canAct: true, reaches: 'Demolition Permit' },
+    { role: 'super-admin', level: 'view-edit', forms: ['Building Permit'],
+      canAct: true, reaches: 'Building Permit' },
   ];
 
   it.each(CASES)('$role at $level with $forms.length forms',
@@ -332,7 +332,7 @@ describe('changing level and forms is recorded with both sides', () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
     const [officer] = await query<{ id: string }>(
       "select id from accounts where email_normalised = 'ana@castilla.gov.ph'");
@@ -353,31 +353,29 @@ describe('changing level and forms is recorded with both sides', () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
     const [officer] = await query<{ id: string }>(
       "select id from accounts where email_normalised = 'ana@castilla.gov.ph'");
 
-    await access.setForms(officer!.id, ['Building Permit – Renovation / Alteration', 'Demolition Permit'],
+    await access.setForms(officer!.id, ['Fencing Permit', 'Demolition Permit'],
       { accountId: admin, role: 'super-admin' });
 
     const [entry] = await query<{
       before_state: { permitTypes: string[] }; after_state: { permitTypes: string[] };
     }>("select before_state, after_state from audit_events where action = 'access.forms-changed'");
 
-    expect(entry!.before_state.permitTypes).toEqual(['Building Permit – New Construction']);
-    // Recorded in the stored order. The office's names sort differently from
-    // the short keys this table used before migration 033 -- the three
-    // building permits now sort under B, not under their old short names.
+    expect(entry!.before_state.permitTypes).toEqual(['Building Permit']);
+    // Recorded in the stored order (setForms sorts alphabetically).
     expect(entry!.after_state.permitTypes)
-      .toEqual(['Building Permit – Renovation / Alteration', 'Demolition Permit']);
+      .toEqual(['Demolition Permit', 'Fencing Permit']);
   });
 
   it('refuses to empty an allow-list, naming the alternative', async () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
     const [officer] = await query<{ id: string }>(
       "select id from accounts where email_normalised = 'ana@castilla.gov.ph'");
@@ -396,7 +394,7 @@ describe('changing level and forms is recorded with both sides', () => {
     const admin = await superAdmin();
     const id = await raise();
     await requests.approve(id, {
-      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit – New Construction'],
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
     const [officer] = await query<{ id: string }>(
       "select id from accounts where email_normalised = 'ana@castilla.gov.ph'");
@@ -493,7 +491,7 @@ describe('the officer’s own name survives approval (F-32)', () => {
 
     await requests.approve(id, {
       roles: ['evaluator'], level: 'view-edit',
-      permitTypes: ['Building Permit – New Construction'],
+      permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
 
     const [created] = await query<{ full_name: string | null }>(
@@ -509,7 +507,7 @@ describe('the officer’s own name survives approval (F-32)', () => {
     const id = await raise();
     await requests.approve(id, {
       roles: ['evaluator'], level: 'view-edit',
-      permitTypes: ['Building Permit – New Construction'],
+      permitTypes: ['Building Permit'],
     }, { accountId: admin, role: 'super-admin' });
     await query("update accounts set full_name = null where email_normalised = 'ana@castilla.gov.ph'");
 

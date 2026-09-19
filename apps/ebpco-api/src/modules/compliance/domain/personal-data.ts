@@ -220,6 +220,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     updated_at: none('account-lifetime'),
     created_by: linkable('account-lifetime', ACCOUNTABILITY),
     updated_by: linkable('account-lifetime', ACCOUNTABILITY),
+    // A reference into the object store, not personal data on its own — the
+    // same reasoning as `documents.storage_key`. Deliberately on `accounts`,
+    // not `applicants`: a profile photo is an account convenience, not a
+    // permit-record fact, so it is account-lifetime and cleared outright on
+    // erasure (erasure.service.ts) rather than surviving the way
+    // `applicants.first_name`/`street` deliberately do.
+    photo_key: structural,
+    photo_content_type: none('account-lifetime'),
   },
 
   account_roles: {
@@ -340,6 +348,26 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     office: none('statutory'),
     // An officer writes these and an applicant reads them. Free text.
     remarks: content('statutory', PERMIT_RECORD),
+  },
+
+  /**
+   * Internal staff notes on an application — never shown to the applicant,
+   * unlike `application_transitions.remarks` beside it, but classified the
+   * same way: an officer's own free text on a permanent part of the permit
+   * record, which is what it is whether or not the applicant ever reads it.
+   */
+  application_notes: {
+    id: structural,
+    application_id: structural,
+    author_account_id: linkable('statutory', ACCOUNTABILITY),
+    // A reference to a sibling row in this same table, not a fact about a
+    // person — the same class as `renews_permit_id`/`supersedes_document_id`.
+    parent_note_id: structural,
+    depth: none('statutory'),
+    // Free text an officer wrote. May name the applicant, a colleague, or
+    // anyone else — the same reasoning as `application_transitions.remarks`.
+    body: content('statutory', PERMIT_RECORD),
+    created_at: none('statutory'),
   },
 
   documents: {
@@ -502,12 +530,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
   },
 
   document_requirements: {
+    id: structural,
     permit_type: none('statutory'),
     code: none('statutory'),
     label: none('statutory'),
     description: none('statutory'),
     required: none('statutory'),
     position: none('statutory'),
+    application_action: none('statutory'),
     updated_at: none('statutory'),
     updated_by: linkable('audit', ACCOUNTABILITY),
   },

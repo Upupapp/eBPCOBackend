@@ -23,6 +23,13 @@ import { PERMIT_NUMBER_PREFIXES, FALLBACK_PREFIX } from './permit.service';
  *
  * A spec that cannot be violated is not a spec, so each assertion below is one
  * that a wrong migration would actually fail.
+ *
+ * 047, 2026-09-19: seventeen names now, not nineteen. The three Building
+ * Permit sub-types D-10 distinguished by name are one published type here
+ * onward, `application_action` doing the distinguishing instead — see
+ * 047's own comment and `requirements.spec.ts`. The fixture below was
+ * hand-updated to match (its own header explains why the sync script
+ * couldn't be re-run for this).
  */
 
 const VOCABULARY = JSON.parse(
@@ -62,17 +69,17 @@ describe('the permit vocabulary the office publishes', () => {
     expect(await seeded()).toEqual([...VOCABULARY.admin.names, NOT_A_CONSTRUCTION_PERMIT].sort());
   });
 
-  it('keeps the en dash the clients match on', async () => {
-    // U+2013, not a hyphen. It is what the admin portal uses and what both
-    // citizen clients compare against; a hyphen is a different string and every
-    // one of them would silently fail to match it. Asserted on the DATABASE
-    // rather than on the fixture, because the fixture is where it is already
-    // right and the migration is where it could be typed wrong.
+  it('holds exactly one Building Permit entry, consolidated by 047', async () => {
+    // Until 047 this was three rows -- New Construction, Renovation /
+    // Alteration, Addition / Extension -- distinguished by an en dash (U+2013)
+    // in the name. The product owner directed collapsing them into one
+    // published type, with the real checklists now varying by
+    // `application_action` instead (see requirements.spec.ts). Asserted on
+    // the DATABASE rather than the fixture, same reasoning the en-dash check
+    // this replaces always had: the fixture is where it is already right.
     const building = (await seeded()).filter((name) => name.startsWith('Building Permit'));
 
-    expect(building).toHaveLength(3);
-    for (const name of building) expect(name).toContain('–');
-    expect(building.join()).not.toMatch(/Building Permit -/);
+    expect(building).toEqual(['Building Permit']);
   });
 
   it('carries the three permits another office issues', async () => {

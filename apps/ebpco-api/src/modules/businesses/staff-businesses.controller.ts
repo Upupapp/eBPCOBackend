@@ -1,10 +1,15 @@
-import { Controller, Get, Inject, Param, Query } from '@nestjs/common';
+import {
+  Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, Post, Query, Req,
+} from '@nestjs/common';
 import { z } from 'zod';
 
-import { ProblemException } from '../../common/problem/problem';
+import { ProblemException, ProblemType } from '../../common/problem/problem';
 import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
+import { Caller } from '../applications/domain/application';
+import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
+import { StaffBusinessRegistrationService } from './staff-business-registration.service';
 
 /**
  * The LGU's business directory, as an officer sees it.
@@ -104,9 +109,122 @@ function onTheWire(row: BusinessRow): Record<string, unknown> {
   };
 }
 
+/**
+ * The caller, as the domain understands it. Mirrors
+ * `staff-applications.controller.ts`'s own `callerOf` — throws rather than
+ * returning a nullable, because a request that reached a guarded handler
+ * without claims is a wiring fault, not a client error.
+ */
+function callerOf(request: AuthenticatedRequest): Caller {
+  const claims = request.caller;
+  if (claims === undefined) {
+    throw new ProblemException(
+      ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED,
+    );
+  }
+  return { accountId: claims.sub, kind: claims.kind, scopes: claims.scopes };
+}
+
+const registrationShape = z.object({
+  owner: z.object({
+    firstName: z.string().min(1).max(80),
+    lastName: z.string().min(1).max(80),
+    // Required, and the schema is why: `applicants.account_id` is NOT NULL and
+    // an account needs a unique address. An owner with no email cannot be
+    // registered until that constraint changes -- which is a schema decision.
+    email: z.string().email().max(320),
+    mobileNumber: z.string().min(7).max(20).optional(),
+  }).strict(),
+  business: z.object({
+    name: z.string().min(1).max(200),
+    category: z.enum([
+      'Retail', 'Food Service', 'Services', 'Manufacturing',
+      'Construction', 'Transport', 'Agriculture', 'Other',
+    ]),
+    street: z.string().min(1).max(200),
+    barangay: z.string().min(1).max(120),
+    city: z.string().min(1).max(120),
+    province: z.string().min(1).max(120),
+    registrationNumber: z.string().min(1).max(60),
+    dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+  }).strict(),
+}).strict();
+
 @Controller('staff/businesses')
 export class StaffBusinessesController {
-  constructor(@Inject(SQL_CLIENT) private readonly db: SqlClient) {}
+  constructor(
+    @Inject(SQL_CLIENT) private readonly db: SqlClient,
+    private readonly registration: StaffBusinessRegistrationService,
+  ) {}
+
+  /**
+   * Registering a business at the counter -- the "+ Business" wizard's real
+   * backing endpoint. Declared before `:businessId` for the same reason
+   * `staff-applications.controller.ts`'s `archive` is: Nest matches routes in
+   * declaration order, and a POST here never collides with the GET below
+   * regardless, but keeping creation next to `list()` keeps the read/write
+   * pair for this collection together.
+   */
+  @Post()
+  @HttpCode(HttpStatus.CREATED)
+  @RequireScopes('applications:write')
+  async create(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+    @Headers('idempotency-key') idempotencyKey?: string,
+  ): Promise<Record<string, unknown>> {
+    const result = registrationShape.safeParse(body);
+    if (!result.success) {
+      throw ProblemException.validation(
+        result.error.issues.map((issue) => ({
+          pointer: `/${issue.path.join('/')}`, message: issue.message,
+        })),
+      );
+    }
+    const key = z.string().uuid('must be a UUID').safeParse(idempotencyKey ?? null);
+    if (!key.success) {
+      throw ProblemException.validation(
+        key.error.issues.map((issue) => ({ pointer: '/idempotencyKey', message: issue.message })),
+      );
+    }
+    const input = result.data;
+
+    const created = await this.registration.create({
+      caller: callerOf(request),
+      owner: {
+        firstName: input.owner.firstName,
+        lastName: input.owner.lastName,
+        email: input.owner.email,
+        mobileNumber: input.owner.mobileNumber ?? null,
+      },
+      business: input.business,
+      idempotencyKey: key.data,
+    });
+
+    if (!created.ok) {
+      if (created.reason === 'key-reused') {
+        throw new ProblemException(
+          ProblemType.conflict, 'That key was used for a different request',
+          HttpStatus.CONFLICT, created.detail,
+        );
+      }
+      throw new ProblemException(
+        ProblemType.unprocessable, 'The registration could not be accepted',
+        HttpStatus.UNPROCESSABLE_ENTITY, created.detail,
+      );
+    }
+
+    return {
+      businessId: created.businessId,
+      applicantId: created.applicantId,
+      // Said plainly, because the officer is standing in front of the owner it
+      // concerns: nothing has been emailed, and the owner cannot sign in until
+      // they set a password through account recovery.
+      ownerNextStep: created.accountCreated
+        ? 'The owner sets a password through account recovery before they can sign in online.'
+        : null,
+    };
+  }
 
   @Get()
   @RequireScopes('applications:read')

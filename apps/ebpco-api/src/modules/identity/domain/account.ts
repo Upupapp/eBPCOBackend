@@ -62,6 +62,16 @@ export type Scope =
   | 'staff:approve'
   | 'staff:release'
   | 'staff:administer'
+  /**
+   * Leaving a note on an application for other staff to read. Added
+   * 2026-09-19 to close the same hole `staff:receive` closed above:
+   * `application_notes` was first gated on `applications:read`, which
+   * `auditor` also holds -- so "oversight without authority" could write.
+   * A `staff:*` scope, not `applications:write`, because adding a note is
+   * not a record edit and every ACTING role that can already read an
+   * application (every one but `auditor`) should be able to leave one.
+   */
+  | 'staff:annotate'
   | 'audit:read';
 
 /**
@@ -77,7 +87,7 @@ export const ALL_SCOPES = [
   'notifications:read', 'notifications:write',
   'profile:read', 'profile:write',
   'staff:receive', 'staff:evaluate', 'staff:assess', 'staff:verify-payment',
-  'staff:approve', 'staff:release', 'staff:administer',
+  'staff:approve', 'staff:release', 'staff:administer', 'staff:annotate',
   'audit:read',
 ] as const satisfies readonly Scope[];
 
@@ -121,7 +131,7 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  * keys while it is still being built.
  */
 const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, readonly Scope[]>> = {
-  'receiving-officer': ['applications:read', 'documents:read', 'staff:receive'],
+  'receiving-officer': ['applications:read', 'documents:read', 'staff:receive', 'staff:annotate'],
   // `applications:write` because withdrawing an application on the applicant's
   // behalf, or expiring one after inaction, is maintenance of the record --
   // which is what this role exists to do. Its absence made three staff
@@ -136,13 +146,15 @@ const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, rea
   // receive applications.
   'records-officer': [
     'applications:read', 'applications:write', 'documents:read', 'documents:write',
-    'staff:receive',
+    'staff:receive', 'staff:annotate',
   ],
-  evaluator: ['applications:read', 'documents:read', 'staff:evaluate'],
-  assessor: ['applications:read', 'payments:read', 'staff:assess'],
-  cashier: ['applications:read', 'payments:read', 'staff:verify-payment'],
-  'building-official': ['applications:read', 'documents:read', 'payments:read', 'staff:approve'],
-  'releasing-officer': ['applications:read', 'staff:release'],
+  evaluator: ['applications:read', 'documents:read', 'staff:evaluate', 'staff:annotate'],
+  assessor: ['applications:read', 'payments:read', 'staff:assess', 'staff:annotate'],
+  cashier: ['applications:read', 'payments:read', 'staff:verify-payment', 'staff:annotate'],
+  'building-official': [
+    'applications:read', 'documents:read', 'payments:read', 'staff:approve', 'staff:annotate',
+  ],
+  'releasing-officer': ['applications:read', 'staff:release', 'staff:annotate'],
   administrator: ['staff:administer'],
 
   // ── added by the web-portal reconciliation (WP-01) ───────────────────

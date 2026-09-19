@@ -300,9 +300,9 @@ export class PermitService {
  * adds must not stop a permit being issued while someone updates this file.
  */
 export const PERMIT_NUMBER_PREFIXES: Readonly<Record<string, string>> = {
-  'Building Permit – New Construction': 'BP',
-  'Building Permit – Renovation / Alteration': 'RNV',
-  'Building Permit – Addition / Extension': 'ADD',
+  // 047 consolidated the three Building Permit sub-types into one published
+  // permit type ('Building Permit'); RNV/ADD no longer apply to anything.
+  'Building Permit': 'BP',
   'Demolition Permit': 'DMP',
   'Architectural Permit': 'ARP',
   'Civil / Structural Permit': 'CSP',

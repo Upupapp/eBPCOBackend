@@ -38,7 +38,11 @@ export interface AuditInput {
     // moment it is raised there IS no account — recording it against one would
     // mean inventing a subject that does not exist, and a rejected request
     // never acquires one.
-    | 'access-request';
+    | 'access-request'
+    // A business registered at the counter (StaffBusinessRegistrationService).
+    // Not `'account'`: the subject is the business, and its owner's account is
+    // a side effect of creating it, not what the event is about.
+    | 'business';
   readonly subjectId: string | null;
   readonly outcome: AuditOutcome;
   readonly actorAccountId?: string | null;

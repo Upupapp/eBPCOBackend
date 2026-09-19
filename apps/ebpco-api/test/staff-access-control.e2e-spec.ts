@@ -255,9 +255,9 @@ describe('retirement is a flag, never a delete', () => {
     const id = await staffAccount('officer@castilla.gov.ph', ['evaluator']);
     await query(
       'insert into staff_permit_access (account_id, permit_type, granted_by) values ($1,$2,$1)',
-      [id, 'Building Permit – New Construction']);
+      [id, 'Building Permit']);
 
     await expect(query(
-      "delete from permit_types where permit_type = 'Building Permit – New Construction'")).rejects.toThrow();
+      "delete from permit_types where permit_type = 'Building Permit'")).rejects.toThrow();
   });
 });

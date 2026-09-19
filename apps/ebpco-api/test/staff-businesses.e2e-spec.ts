@@ -38,6 +38,7 @@ let app: NestFastifyApplication;
 let db: SqlClient;
 let tokens: TokenService;
 let officerToken: string;
+let recordsOfficerToken: string;
 let mariaBusiness: string;
 let joseBusiness: string;
 let mariaApplicantId: string;
@@ -93,6 +94,10 @@ beforeAll(async () => {
   await app.getHttpAdapter().getInstance().ready();
   tokens = app.get(TokenService);
   officerToken = await staffToken('receiving-officer');
+  // `applications:write`, which `GET /staff/businesses` never needed but
+  // `POST /staff/businesses` does -- the same scope `fileOnBehalf` requires,
+  // since this is the same kind of counter transaction.
+  recordsOfficerToken = await staffToken('records-officer');
 
   const maria = await applicantWithBusiness({
     first: 'Maria', last: 'Santos', email: 'maria@example.ph', mobile: '+639171234567',
@@ -310,5 +315,133 @@ describe('filters', () => {
       });
       expect(response.statusCode).toBe(404);
     }
+  });
+});
+
+describe('registering a business at the counter', () => {
+  const register = (payload: Record<string, unknown>, token = recordsOfficerToken, key = randomUUID()) =>
+    app.inject({
+      method: 'POST', url: '/staff/businesses',
+      headers: { authorization: `Bearer ${token}`, 'idempotency-key': key },
+      payload,
+    });
+
+  const WALK_IN = {
+    owner: {
+      firstName: 'Pedro', lastName: 'Cruz',
+      email: 'pedro.walkin@example.ph', mobileNumber: '+639187654321',
+    },
+    business: {
+      name: 'Cruz Bakeshop', category: 'Food Service', street: '5 Rizal Street',
+      barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
+      registrationNumber: 'BN-2026-9001', dateRegistered: '2026-01-15',
+    },
+  };
+
+  it('creates the owner\'s account, applicant record and the business in one request', async () => {
+    const response = await register(WALK_IN);
+
+    expect(response.statusCode).toBe(201);
+    const body = response.json<{ businessId: string; applicantId: string; ownerNextStep: string | null }>();
+    expect(body.ownerNextStep).toMatch(/account recovery/);
+
+    const row = await db.query<{ owner_applicant_id: string; name: string }>(
+      'select owner_applicant_id, name from businesses where id = $1', [body.businessId],
+    );
+    expect(row.rows[0]?.name).toBe('Cruz Bakeshop');
+    expect(row.rows[0]?.owner_applicant_id).toBe(body.applicantId);
+
+    const account = await db.query<{ password_hash: string; kind: string }>(
+      `select acc.password_hash, acc.kind from accounts acc
+         join applicants ap on ap.account_id = acc.id where ap.id = $1`,
+      [body.applicantId],
+    );
+    expect(account.rows[0]?.kind).toBe('applicant');
+    // Never a password an officer chose -- see NewBusiness's own doc comment.
+    expect(account.rows[0]?.password_hash).not.toBe('');
+  });
+
+  it('never asks for -- or accepts -- a password for the owner', async () => {
+    const response = await register({
+      ...WALK_IN,
+      owner: { ...WALK_IN.owner, email: 'no.password.field@example.ph', password: 'hunter2' },
+    });
+    // `.strict()` refuses the unknown `password` field outright, rather than
+    // silently dropping it -- a client sending it has been given no reason to
+    // think it was ignored.
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('reuses the SAME applicant record for a returning owner rather than splitting their businesses', async () => {
+    const first = await register(WALK_IN, recordsOfficerToken, randomUUID());
+    const firstBody = first.json<{ applicantId: string }>();
+
+    const second = await register({
+      owner: WALK_IN.owner,
+      business: { ...WALK_IN.business, name: 'Cruz Sari-Sari Store', registrationNumber: 'BN-2026-9002' },
+    }, recordsOfficerToken, randomUUID());
+    const secondBody = second.json<{ applicantId: string }>();
+
+    expect(second.statusCode).toBe(201);
+    expect(secondBody.applicantId).toBe(firstBody.applicantId);
+  });
+
+  it('replays the same result for a repeated Idempotency-Key rather than double-registering', async () => {
+    const key = randomUUID();
+    const owner = { ...WALK_IN.owner, email: 'idempotent.owner@example.ph' };
+    const business = { ...WALK_IN.business, registrationNumber: 'BN-2026-9099' };
+
+    const first = await register({ owner, business }, recordsOfficerToken, key);
+    const second = await register({ owner, business }, recordsOfficerToken, key);
+
+    expect(first.statusCode).toBe(201);
+    expect(second.statusCode).toBe(201);
+    expect(second.json()).toEqual(first.json());
+
+    const count = await db.query<{ n: string }>(
+      'select count(*)::text as n from businesses where registration_number = $1',
+      [business.registrationNumber],
+    );
+    expect(count.rows[0]?.n).toBe('1');
+  });
+
+  it('refuses a reused key carrying a different request', async () => {
+    const key = randomUUID();
+    const owner = { ...WALK_IN.owner, email: 'mismatch.owner@example.ph' };
+    await register({ owner, business: WALK_IN.business }, recordsOfficerToken, key);
+
+    const response = await register(
+      { owner, business: { ...WALK_IN.business, name: 'A Different Business' } },
+      recordsOfficerToken, key,
+    );
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('refuses an owner email that belongs to an LGU staff account', async () => {
+    const staffId = randomUUID();
+    const staffEmail = `existing-staff-${staffId.slice(0, 8)}@lgu.gov.ph`;
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+      [staffId, staffEmail],
+    );
+
+    const response = await register({ owner: { ...WALK_IN.owner, email: staffEmail }, business: WALK_IN.business });
+    expect(response.statusCode).toBe(422);
+  });
+
+  it('refuses without applications:write', async () => {
+    const evaluatorToken = await staffToken('evaluator');
+    const response = await register(WALK_IN, evaluatorToken);
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('requires an Idempotency-Key', async () => {
+    const response = await app.inject({
+      method: 'POST', url: '/staff/businesses',
+      headers: { authorization: `Bearer ${recordsOfficerToken}` },
+      payload: WALK_IN,
+    });
+    expect(response.statusCode).toBe(400);
   });
 });

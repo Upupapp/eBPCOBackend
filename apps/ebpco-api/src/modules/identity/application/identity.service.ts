@@ -208,6 +208,14 @@ export class IdentityService {
     sex?: 'Male' | 'Female' | 'Prefer not to say' | null | undefined;
     civilStatus?: 'Single' | 'Married' | 'Widowed' | 'Separated' | 'Divorced' | null | undefined;
     nationality?: string | null | undefined;
+    // Migration 036. Same optionality reasoning as the four above — the
+    // mobile client's registration request still sends none of these six.
+    middleName?: string | null | undefined;
+    street?: string | null | undefined;
+    barangay?: string | null | undefined;
+    city?: string | null | undefined;
+    province?: string | null | undefined;
+    postalCode?: string | null | undefined;
   }): Promise<{ accepted: boolean; rejections: readonly PasswordRejection[] }> {
     // The password is checked before the address is looked up, because a weak
     // password must be reported to the person choosing it -- that is not an
@@ -242,15 +250,16 @@ export class IdentityService {
         // worse than a registration that failed because it looks like success.
         firstName: input.firstName,
         lastName: input.lastName,
-        // Registration does not collect these (migration 036). They arrive via
-        // PATCH /me, so a new account starts with them NOT RECORDED rather
-        // than with empty strings that read as "the citizen left it blank".
-        middleName: null,
-        street: null,
-        barangay: null,
-        city: null,
-        province: null,
-        postalCode: null,
+        // Migration 036. `?? null` rather than left undefined: a caller that
+        // does not collect these (the mobile client, today) gets NOT
+        // RECORDED, same as before; a caller that does (the web portal) gets
+        // what was actually typed, for the first time.
+        middleName: input.middleName ?? null,
+        street: input.street ?? null,
+        barangay: input.barangay ?? null,
+        city: input.city ?? null,
+        province: input.province ?? null,
+        postalCode: input.postalCode ?? null,
         mobileNumber: input.mobileNumber ?? null,
         // Registration DOES collect these (migration 038) — unlike the address
         // above, the web portal's own registration form is where these come
@@ -362,6 +371,39 @@ export class IdentityService {
     await this.tokens.endAllSessions(account.id);
 
     return { ok: true, rejections: [] };
+  }
+
+  /**
+   * Changing a password from inside an active session — the counterpart to
+   * `completePasswordReset` above for someone who still knows their current
+   * one. Same policy object as registration and reset, so a password this
+   * refuses here is refused everywhere else too; same "every session,
+   * everywhere" ending, for the same reason reset does it — a citizen
+   * changing their password from inside a session they still hold is
+   * unusual enough, on its own, to treat like a possible compromise.
+   */
+  async changePassword(
+    accountId: string,
+    currentPassword: string,
+    newPassword: string,
+  ): Promise<
+    | { ok: true }
+    | { ok: false; reason: 'wrong-current-password' }
+    | { ok: false; reason: 'weak-password'; rejections: readonly PasswordRejection[] }
+  > {
+    const account = await this.accounts.findById(accountId);
+    if (account === null) return { ok: false, reason: 'wrong-current-password' };
+
+    const matches = await this.hasher.verify(currentPassword, account.passwordHash);
+    if (!matches) return { ok: false, reason: 'wrong-current-password' };
+
+    const rejections = await this.policy.evaluate(newPassword, { email: account.email });
+    if (rejections.length > 0) return { ok: false, reason: 'weak-password', rejections };
+
+    await this.accounts.updatePasswordHash(account.id, await this.hasher.hash(newPassword));
+    await this.tokens.endAllSessions(account.id);
+
+    return { ok: true };
   }
 
   private async issueFor(account: Account): Promise<IssuedTokens> {
