@@ -58,6 +58,27 @@ export const TEST_SCRYPT_COST: ScryptCost = { N: 1_024, r: 8, p: 1, keyLength: 3
 
 const SALT_BYTES = 16;
 
+/**
+ * Ceiling on a PARSED verifier's own embedded cost parameters, enforced
+ * before scrypt is ever called with them.
+ *
+ * `this.cost` (what a NEW hash is made with) is trusted -- it comes from
+ * this process's own config. A verifier's EMBEDDED N/r/p are not: they came
+ * out of a database row, and `verify()`'s own doc comment already promises
+ * "a corrupt row must fail the sign-in, not take the endpoint down" for a
+ * malformed one. scrypt's memory cost is `128 * N * r` bytes with no upper
+ * bound of its own, so an out-of-range N or r turns every sign-in attempt
+ * against that one row into an unbounded allocation -- the
+ * resource-exhaustion shape of exactly the failure that comment already
+ * rules out, just reached through a value instead of a shape. 4x this
+ * module's own default N and 2x its default r is headroom for a future cost
+ * increase without ever accepting a value nothing here would plausibly have
+ * written.
+ */
+const MAX_PARSED_N = DEFAULT_SCRYPT_COST.N * 4;
+const MAX_PARSED_R = DEFAULT_SCRYPT_COST.r * 2;
+const MAX_PARSED_P = 16;
+
 export class PasswordHasher {
   constructor(
     private readonly cost: ScryptCost = DEFAULT_SCRYPT_COST,
@@ -140,6 +161,13 @@ export class PasswordHasher {
     const r = Number(rawR);
     const p = Number(rawP);
     if (!Number.isInteger(N) || !Number.isInteger(r) || !Number.isInteger(p)) return null;
+    // scrypt itself requires N to be a power of two and would throw
+    // otherwise -- checked here, not left to surface as an uncaught
+    // exception out of `derive()`, for the same reason the range check
+    // below is: a stored value drives this, not this process's own config.
+    if (N < 2 || N > MAX_PARSED_N || !Number.isInteger(Math.log2(N))) return null;
+    if (r < 1 || r > MAX_PARSED_R) return null;
+    if (p < 1 || p > MAX_PARSED_P) return null;
     if (rawSalt === undefined || rawHash === undefined) return null;
 
     try {

@@ -60,6 +60,18 @@ describe('password hashing', () => {
     ['too few fields', 'scrypt$1024$8$salt'],
     ['non-numeric cost', 'scrypt$N$8$1$c2FsdA$aGFzaA'],
     ['plain text, as if a migration went wrong', 'hunter2'],
+    // A stored N/r/p is not this process's own config -- it came out of a
+    // database row -- so these are not merely malformed, they are the shape
+    // an attacker (or a corrupt migration) would use to turn a sign-in
+    // attempt into an unbounded memory allocation.
+    ['N absurdly beyond the ceiling', 'scrypt$4194304$8$2$c2FsdA$aGFzaA'],
+    // Not a power of two: real scrypt would THROW on this rather than
+    // return a wrong answer, which the old code let escape verify() as an
+    // uncaught exception -- a corrupt row taking the endpoint down, exactly
+    // what this whole test table exists to rule out.
+    ['N not a power of two', 'scrypt$100000$8$2$c2FsdA$aGFzaA'],
+    ['r beyond the ceiling', 'scrypt$1024$999$1$c2FsdA$aGFzaA'],
+    ['p beyond the ceiling', 'scrypt$1024$8$999$c2FsdA$aGFzaA'],
   ])('returns false rather than throwing on a corrupt verifier: %s', async (_label, encoded) => {
     // A corrupt row must fail the sign-in, not take the endpoint down.
     await expect(hasher.verify('anything', encoded)).resolves.toBe(false);
