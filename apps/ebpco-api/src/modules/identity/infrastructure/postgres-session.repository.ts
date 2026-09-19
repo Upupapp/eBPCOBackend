@@ -50,8 +50,18 @@ export class PostgresSessionRepository implements SessionRepository {
     };
   }
 
-  async markConsumed(id: string, at: Date): Promise<void> {
-    await this.db.query('update refresh_tokens set consumed_at = $1 where id = $2 and consumed_at is null', [at, id]);
+  async markConsumed(id: string, at: Date): Promise<boolean> {
+    // `where consumed_at is null` makes the write itself race-safe -- of two
+    // concurrent UPDATEs for the same id, only the first to commit matches
+    // this predicate, and the second affects zero rows. `rowCount` reports
+    // which one this call was, atomically, rather than the caller inferring
+    // it from a separate read that could already be stale by the time this
+    // statement runs.
+    const result = await this.db.query(
+      'update refresh_tokens set consumed_at = $1 where id = $2 and consumed_at is null',
+      [at, id],
+    );
+    return result.rowCount > 0;
   }
 
   async revokeFamily(familyId: string, at: Date, accessTokenTtlSeconds: number): Promise<number> {

@@ -154,26 +154,47 @@ export class TokenService {
     const now = this.clock();
 
     if (stored.consumedAt !== null) {
-      // A replayed refresh token is a possible theft, so the family's access
-      // tokens must stop working too — not just its refresh tokens.
-      await this.sessions.revokeFamily(stored.familyId, now, this.accessTtl);
-      this.onSecurityEvent({
-        type: 'refresh-token-replayed',
-        accountId: stored.accountId,
-        familyId: stored.familyId,
-        at: now,
-        detail:
-          'A refresh token was presented a second time. The whole family was revoked; ' +
-          'treat as a possible token theft.',
-      });
+      await this.reactToReplay(stored.accountId, stored.familyId, now);
       throw new TokenError('replayed');
     }
 
     if (stored.revokedAt !== null) throw new TokenError('revoked');
     if (stored.expiresAt.getTime() <= now.getTime()) throw new TokenError('expired');
 
-    await this.sessions.markConsumed(stored.id, now);
+    // The check above and this write are two separate statements, so a
+    // second request for the SAME token can reach here between them —
+    // `stored.consumedAt !== null` read `null` for both before either wrote
+    // anything. `markConsumed`'s own write is the atomic point (an UPDATE
+    // guarded by `consumed_at is null`), and its return value is which
+    // request that was: only the one `markConsumed` actually reports true
+    // for may proceed to mint. The other lost the race, which is exactly as
+    // suspicious as presenting an already-consumed token outright — the
+    // caller cannot tell "two legitimate requests overlapped" from "a thief
+    // raced the real client" — so it gets the same answer: replay.
+    const wonTheRace = await this.sessions.markConsumed(stored.id, now);
+    if (!wonTheRace) {
+      await this.reactToReplay(stored.accountId, stored.familyId, now);
+      throw new TokenError('replayed');
+    }
+
     return this.mint(stored.accountId, stored.familyId);
+  }
+
+  /**
+   * A replayed refresh token is a possible theft, so the family's access
+   * tokens must stop working too — not just its refresh tokens.
+   */
+  private async reactToReplay(accountId: string, familyId: string, at: Date): Promise<void> {
+    await this.sessions.revokeFamily(familyId, at, this.accessTtl);
+    this.onSecurityEvent({
+      type: 'refresh-token-replayed',
+      accountId,
+      familyId,
+      at,
+      detail:
+        'A refresh token was presented a second time. The whole family was revoked; ' +
+        'treat as a possible token theft.',
+    });
   }
 
   async endSession(familyId: string): Promise<void> {

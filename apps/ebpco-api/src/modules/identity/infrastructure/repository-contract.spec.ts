@@ -234,15 +234,40 @@ describe('accounts', () => {
       expect(await harness.sessions.findById('not-a-uuid')).toBeNull();
     });
 
-    it('marks a token consumed', async () => {
+    it('marks a token consumed, and reports that it was the one that did', async () => {
       const account = anAccount();
       await harness.accounts.save(account);
       const token = aToken(account.id);
       await harness.sessions.save(token);
 
-      await harness.sessions.markConsumed(token.id, new Date('2026-08-19T13:00:00Z'));
+      const won = await harness.sessions.markConsumed(token.id, new Date('2026-08-19T13:00:00Z'));
 
+      expect(won).toBe(true);
       expect((await harness.sessions.findById(token.id))?.consumedAt).not.toBeNull();
+    });
+
+    it('reports false, not true, for a second consume of the same token', async () => {
+      // The whole point of markConsumed reporting an outcome rather than
+      // returning void: two callers racing to consume the SAME refresh
+      // token must not both be told they won. Sequential here (there is no
+      // real way to fire two requests at the identical instant from a test),
+      // but the write this exercises is the same single guarded UPDATE
+      // either way -- `where consumed_at is null` -- so a second call always
+      // affects zero rows regardless of how close together the two arrive.
+      const account = anAccount();
+      await harness.accounts.save(account);
+      const token = aToken(account.id);
+      await harness.sessions.save(token);
+
+      const first = await harness.sessions.markConsumed(token.id, new Date('2026-08-19T13:00:00Z'));
+      const second = await harness.sessions.markConsumed(token.id, new Date('2026-08-19T13:00:01Z'));
+
+      expect(first).toBe(true);
+      expect(second).toBe(false);
+      // And the second call's later timestamp must not have overwritten the
+      // first's -- the guarded UPDATE means it never even tried to.
+      expect((await harness.sessions.findById(token.id))?.consumedAt)
+        .toEqual(new Date('2026-08-19T13:00:00Z'));
     });
 
     it('revokes a family and reports how many it revoked', async () => {

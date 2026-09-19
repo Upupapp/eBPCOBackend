@@ -20,10 +20,11 @@ export class InMemorySessionRepository implements SessionRepository {
     return Promise.resolve(this.tokens.get(id) ?? null);
   }
 
-  markConsumed(id: string, at: Date): Promise<void> {
+  markConsumed(id: string, at: Date): Promise<boolean> {
     const token = this.tokens.get(id);
-    if (token !== undefined) this.tokens.set(id, { ...token, consumedAt: at });
-    return Promise.resolve();
+    if (token === undefined || token.consumedAt !== null) return Promise.resolve(false);
+    this.tokens.set(id, { ...token, consumedAt: at });
+    return Promise.resolve(true);
   }
 
   /** The revoked set stands in for the `revoked_sessions` table. */

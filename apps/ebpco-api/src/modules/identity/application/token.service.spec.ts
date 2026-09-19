@@ -252,6 +252,38 @@ describe('replay detection', () => {
     await expect(service.rotate(`${issued.id}.wrong`)).rejects.toBeInstanceOf(TokenError);
     expect(events).toHaveLength(0);
   });
+
+  it('lets exactly one of two concurrent rotations of the same token succeed, and revokes the family', async () => {
+    // The race this guards: rotate() reads `consumedAt`, decides it is
+    // null, and only THEN writes it -- two requests for the identical
+    // refresh token can both pass the read before either has written,
+    // exactly like this test fires both `rotate()` calls before awaiting
+    // either. Before the fix, `markConsumed` returned void and both callers
+    // proceeded to mint, so a stolen-and-replayed-concurrently-with-the-
+    // real-client token minted TWO valid sessions from one presentation.
+    const { service, events } = build();
+    const issued = await service.startSession('account-1');
+
+    const [first, second] = await Promise.allSettled([
+      service.rotate(issued.presented),
+      service.rotate(issued.presented),
+    ]);
+
+    const outcomes = [first, second];
+    const fulfilled = outcomes.filter((o) => o.status === 'fulfilled');
+    const rejected = outcomes.filter((o) => o.status === 'rejected');
+    expect(fulfilled).toHaveLength(1);
+    expect(rejected).toHaveLength(1);
+    expect((rejected[0] as PromiseRejectedResult).reason).toMatchObject({ failure: 'replayed' });
+
+    // Losing the race is treated exactly like a genuine replay: the whole
+    // family is revoked, so even the token minted by the WINNING call no
+    // longer works.
+    const won = (fulfilled[0] as PromiseFulfilledResult<Awaited<ReturnType<typeof service.rotate>>>).value;
+    await expect(service.rotate(won.presented)).rejects.toMatchObject({ failure: 'revoked' });
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'refresh-token-replayed', accountId: 'account-1' });
+  });
 });
 
 describe('revocation', () => {
