@@ -14,7 +14,7 @@ import { Mailer, OutboundEmail } from './mailer';
 export class ConsoleMailer implements Mailer {
   constructor(private readonly logger: StructuredLogger) {}
 
-  async send(message: OutboundEmail): Promise<void> {
+  send(message: OutboundEmail): Promise<void> {
     this.logger.info(
       `[ConsoleMailer] No SMTP configured (MAIL_DRIVER=console) — this email was not sent, only logged.\n`
       + `  To:      ${message.to}\n`
@@ -23,5 +23,6 @@ export class ConsoleMailer implements Mailer {
       + `${message.text}\n`
       + `  ---`,
     );
+    return Promise.resolve();
   }
 }

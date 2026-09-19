@@ -5,8 +5,8 @@ if (!secret) throw new Error('usage: qa-print-otp.ts <base32-secret>');
 
 const now = new Date();
 const step = stepAt(now);
-console.log(JSON.stringify({
+process.stdout.write(`${JSON.stringify({
   now: now.toISOString(),
   code: codeFor(secret, step),
   secondsRemaining: 30 - (Math.floor(now.getTime() / 1000) % 30),
-}));
+})}\n`);

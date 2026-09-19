@@ -143,13 +143,13 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
   it('goes from a real registration to a real, citizen-visible released permit — no shortcuts', async () => {
     // ---- The citizen, for real ------------------------------------------
 
-    const registered = await post('/auth/register', 'unused-no-token-route', {
+    const registered = await publicPost('/auth/register', {
       firstName: 'Juan', lastName: 'Dela Cruz', email: CITIZEN_EMAIL,
       mobileNumber: '09171234567', password: CITIZEN_PASSWORD,
     });
     expect(registered.statusCode).toBe(202);
 
-    const signIn = await post('/auth/token', 'unused-no-token-route', {
+    const signIn = await publicPost('/auth/token', {
       grantType: 'password', email: CITIZEN_EMAIL, password: CITIZEN_PASSWORD,
     });
     expect(signIn.statusCode).toBe(200);

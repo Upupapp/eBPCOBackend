@@ -252,7 +252,7 @@ async function main(): Promise<void> {
 
   const credentialsPath = resolve(__dirname, '../.dev-persistent-credentials.json');
 
-  let mfaEnrolled: { email: string; uri: string }[] = [];
+  const mfaEnrolled: { email: string; uri: string }[] = [];
   let password = PASSWORD;
 
   if (!alreadySeeded) {
