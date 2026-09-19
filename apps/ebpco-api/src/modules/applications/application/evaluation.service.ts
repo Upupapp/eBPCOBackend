@@ -231,8 +231,12 @@ export class EvaluationService {
     const rows: EvaluationQueueRow[] = [];
     for (const row of page) {
       const evaluations = await this.of(row.id);
-      const decided = new Set(evaluations.map((evaluation) => evaluation.stage));
-      const next = ORDER.find((stage) => !decided.has(stage)) ?? null;
+      // Same rule as record()'s own ordering check: a stage only counts as
+      // settled once it has PASSED, so an application stuck on an adverse
+      // verdict keeps showing that stage as next rather than the queue
+      // reporting it as waiting on whatever comes after.
+      const passed = new Set(evaluations.filter((evaluation) => evaluation.result === 'Passed').map((evaluation) => evaluation.stage));
+      const next = ORDER.find((stage) => !passed.has(stage)) ?? null;
       if (filters.stage !== undefined && next !== filters.stage) continue;
 
       const required = (row.required_documents ?? []).filter((document) => document.required);
@@ -264,11 +268,24 @@ export class EvaluationService {
   /**
    * Records one stage's outcome.
    *
-   * A stage is decided ONCE. Re-deciding is refused rather than overwritten:
-   * an evaluation an applicant was shown, silently replaced, is a record that
-   * no longer matches what they were told — and if the first decision was
-   * wrong, the honest correction is a new evaluation cycle, which the lifecycle
-   * already provides through Revision Required.
+   * A PASSED stage is decided once and is never revisited — an evaluation an
+   * applicant was shown, silently replaced, is a record that no longer
+   * matches what they were told. An ADVERSE stage (Revision Required or
+   * Rejected) is not the same kind of decided: the lifecycle sends the
+   * applicant back through 'Revision Required' precisely so the deficiency
+   * can be fixed and the stage re-decided, and `unique (application_id,
+   * stage)` (migration 005) means there is only ever one row to hold that
+   * correction in — this upserts onto it rather than inserting a second.
+   *
+   * Before this, an adverse verdict on ANY stage made `evaluations_complete`
+   * permanently false for that application: `record()` refused to touch the
+   * row again ("already-decided") no matter how many times the applicant
+   * corrected the deficiency and cycled back through 'Revision Required',
+   * so the application could never reach Assessed or Approved. The audit
+   * trail's own `afterState` on every call already anticipated this ("the
+   * entry that survives if the evaluation is ever superseded") — the schema
+   * and the audit log were ready for a correction; only this method refused
+   * to ever make one.
    */
   async record(options: {
     applicationId: string;
@@ -315,7 +332,7 @@ export class EvaluationService {
       );
       const decided = new Map(existing.rows.map((e) => [e.stage, e.result]));
 
-      if (decided.has(stage)) {
+      if (decided.get(stage) === 'Passed') {
         return {
           ok: false,
           reason: 'already-decided',
@@ -323,7 +340,11 @@ export class EvaluationService {
         };
       }
 
-      const next = ORDER.find((candidate) => !decided.has(candidate));
+      // A stage only counts as settled, for ordering purposes, once it has
+      // PASSED — an adverse verdict still occupies its row (see the doc
+      // comment above) but must keep blocking every stage after it until it
+      // is corrected, the same as a never-decided stage would.
+      const next = ORDER.find((candidate) => decided.get(candidate) !== 'Passed');
       if (next !== stage) {
         return {
           ok: false,
@@ -334,7 +355,12 @@ export class EvaluationService {
 
       const inserted = await tx.query<{ id: string }>(
         `insert into evaluations (application_id, stage, result, evaluator_id, remarks, evaluated_at)
-         values ($1,$2,$3,$4,$5,$6) returning id`,
+         values ($1,$2,$3,$4,$5,$6)
+         on conflict (application_id, stage) do update
+           set result = excluded.result, evaluator_id = excluded.evaluator_id,
+               remarks = excluded.remarks, evaluated_at = excluded.evaluated_at
+           where evaluations.result <> 'Passed'
+         returning id`,
         [applicationId, stage, result, evaluator.accountId, remarks ?? null, this.clock()],
       );
 

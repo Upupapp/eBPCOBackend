@@ -127,6 +127,80 @@ describe('the stages are worked in order', () => {
   });
 });
 
+describe('an adverse stage can be corrected — a real application got stuck here', () => {
+  // Reproduces a live bug: Initial was marked Revision Required, the
+  // applicant fixed the deficiency, and the officer went on to pass Zoning,
+  // Fire Safety, OBO and Final Approval — every stage but Initial showed
+  // Passed forever, and the application could never reach Assessed, because
+  // record() refused to ever touch the Initial row again.
+
+  it('lets the SAME stage be corrected to Passed after an adverse verdict', async () => {
+    const first = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Revision Required', evaluator,
+      remarks: 'The lot plan is not signed by a geodetic engineer.',
+    });
+    expect(first.ok).toBe(true);
+
+    const corrected = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Passed', evaluator,
+    });
+
+    expect(corrected.ok).toBe(true);
+    const rows = await evaluations.of(APPLICATION);
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.result).toBe('Passed');
+  });
+
+  it('still refuses to skip past an uncorrected adverse stage', async () => {
+    await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Revision Required', evaluator,
+      remarks: 'The lot plan is not signed by a geodetic engineer.',
+    });
+
+    const skipped = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Zoning', result: 'Passed', evaluator,
+    });
+
+    expect(skipped.ok).toBe(false);
+    if (skipped.ok) return;
+    expect(skipped.reason).toBe('out-of-order');
+    expect(skipped.detail).toContain('Initial');
+  });
+
+  it('reaches complete once the corrected stage and every later one have passed', async () => {
+    await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Revision Required', evaluator,
+      remarks: 'The lot plan is not signed by a geodetic engineer.',
+    });
+    const corrected = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Passed', evaluator,
+    });
+    expect(corrected.ok && corrected.complete).toBe(false);
+
+    for (const stage of EVALUATION_STAGES.slice(1)) {
+      const result = await pass(stage);
+      expect(result.ok).toBe(true);
+    }
+
+    const rows = await evaluations.of(APPLICATION);
+    expect(rows.length).toBe(EVALUATION_STAGES.length);
+    expect(rows.every((r) => r.result === 'Passed')).toBe(true);
+  });
+
+  it('still refuses to correct a stage that already Passed', async () => {
+    await pass('Initial');
+
+    const again = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Initial', result: 'Revision Required', evaluator,
+      remarks: 'On reflection this does not conform.',
+    });
+
+    expect(again.ok).toBe(false);
+    if (again.ok) return;
+    expect(again.reason).toBe('already-decided');
+  });
+});
+
 describe('completeness, which the lifecycle asks about', () => {
   it('is false until every stage is decided', async () => {
     for (const stage of EVALUATION_STAGES.slice(0, 4)) {

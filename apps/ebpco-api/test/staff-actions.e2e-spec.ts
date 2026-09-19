@@ -276,6 +276,47 @@ describe('recording an evaluation', () => {
 
     expect(response.statusCode).toBe(404);
   });
+
+  it('lets a corrected stage reach Assessed — a real application got stuck exactly here', async () => {
+    // Reproduces a live bug: Initial was marked Revision Required, the
+    // applicant fixed the deficiency, and Zoning/Fire Safety/OBO/Final
+    // Approval were all then marked Passed — but Initial's own row could
+    // never be corrected, so evaluationsComplete stayed false forever and
+    // Under Evaluation -> Assessed was permanently refused.
+    const id = await file('BP-1', 'Under Evaluation');
+    const evaluator = await staffToken('evaluator');
+    const assessor = await staffToken('assessor');
+
+    const adverse = await post(`/staff/applications/${id}/evaluations`, evaluator,
+      { stage: 'Initial', result: 'Revision Required', remarks: 'Missing the engineer\'s signature.' });
+    expect(adverse.statusCode).toBe(201);
+
+    // Skipping straight to the next stage while Initial is uncorrected must
+    // still be refused — the fix corrects the SAME row, it does not let
+    // ordering be bypassed.
+    const skipped = await post(`/staff/applications/${id}/evaluations`, evaluator,
+      { stage: 'Zoning', result: 'Passed' });
+    expect(skipped.statusCode).toBe(422);
+    expect(skipped.json().detail).toContain('Initial');
+
+    const corrected = await post(`/staff/applications/${id}/evaluations`, evaluator,
+      { stage: 'Initial', result: 'Passed' });
+    expect(corrected.statusCode).toBe(201);
+
+    let complete = false;
+    for (const stage of STAGES.slice(1)) {
+      const response = await post(`/staff/applications/${id}/evaluations`, evaluator, { stage, result: 'Passed' });
+      expect(response.statusCode).toBe(201);
+      complete = response.json<{ evaluationsComplete: boolean }>().evaluationsComplete;
+    }
+    expect(complete).toBe(true);
+
+    await approvedAssessment(id);
+    await post(`/staff/applications/${id}/order-of-payment`, assessor);
+
+    const assessed = await post(`/staff/applications/${id}/transitions`, assessor, { to: 'Assessed' });
+    expect(assessed.statusCode).toBe(200);
+  });
 });
 
 describe('the permit precondition that was missing', () => {
