@@ -451,7 +451,16 @@ export class PaymentService {
             + 'settlement to reverse or refund.',
         };
       }
-      if (kind !== 'Voided' && payment.verified_by === officer.accountId) {
+      // Super Admin is exempt, the same deliberate reversal as the acting
+      // scopes themselves (account.ts's own doc comment on
+      // SUPER_ADMIN_SCOPES: "Nothing enforces separation of duty for this
+      // role from here on", owner's explicit request, 2026-09-13). Every
+      // OTHER role reaching here already holds staff:verify-payment, which
+      // auditor does not, so audit:read on a caller who does is Super Admin
+      // and nothing else -- not a new field, the same scope-based identity
+      // the rest of this codebase already reads a role from.
+      const isSuperAdmin = officer.scopes.includes('audit:read');
+      if (kind !== 'Voided' && payment.verified_by === officer.accountId && !isSuperAdmin) {
         // The officer who confirmed the money arrived may not be the one who
         // says it did not, or who sends it back. Undoing your own confirmation
         // alone is the same weakness the verifier/submitter rule already

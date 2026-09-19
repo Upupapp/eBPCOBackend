@@ -25,10 +25,12 @@ let payments: PaymentService;
 const APPLICANT_ACCOUNT = randomUUID();
 const ASSESSOR_ACCOUNT = randomUUID();
 const CASHIER_ACCOUNT = randomUUID();
+const SUPER_ADMIN_ACCOUNT = randomUUID();
 const APPLICATION = randomUUID();
 
 const applicant: Caller = { accountId: APPLICANT_ACCOUNT, kind: 'applicant', scopes: APPLICANT_SCOPES };
 const assessor: Caller = { accountId: ASSESSOR_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.assessor };
+const superAdmin: Caller = { accountId: SUPER_ADMIN_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES['super-admin'] };
 const REVIEWER_ACCOUNT = randomUUID();
 const reviewer: Caller = { accountId: REVIEWER_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.assessor };
 
@@ -123,8 +125,9 @@ beforeEach(async () => {
      values ($1,'applicant','a@x.ph','a@x.ph','scrypt$1$1$1$a$b'),
             ($2,'staff','assessor@lgu.gov.ph','assessor@lgu.gov.ph','scrypt$1$1$1$a$b'),
             ($3,'staff','cashier@lgu.gov.ph','cashier@lgu.gov.ph','scrypt$1$1$1$a$b'),
-            ($4,'staff','reviewer@lgu.gov.ph','reviewer@lgu.gov.ph','scrypt$1$1$1$a$b')`,
-    [APPLICANT_ACCOUNT, ASSESSOR_ACCOUNT, CASHIER_ACCOUNT, REVIEWER_ACCOUNT],
+            ($4,'staff','reviewer@lgu.gov.ph','reviewer@lgu.gov.ph','scrypt$1$1$1$a$b'),
+            ($5,'staff','super-admin@lgu.gov.ph','super-admin@lgu.gov.ph','scrypt$1$1$1$a$b')`,
+    [APPLICANT_ACCOUNT, ASSESSOR_ACCOUNT, CASHIER_ACCOUNT, REVIEWER_ACCOUNT, SUPER_ADMIN_ACCOUNT],
   );
   const applicantId = randomUUID();
   await db.query(
@@ -554,6 +557,66 @@ describe('verification is an officer act', () => {
       "select after_state from audit_events where action = 'payment.rejected'",
     );
     expect(audit.rows[0]?.after_state.reason).toContain('does not match any deposit');
+  });
+});
+
+describe('undoing a payment: separation of duty, and Super Admin\'s exemption from it', () => {
+  beforeEach(loadSchedule);
+
+  const submitAndVerify = async (officer: Caller): Promise<string> => {
+    await approvedAssessment();
+    await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+    const submitted = await payments.submitProof({
+      applicationId: APPLICATION,
+      proof: { referenceNumber: 'BDO-2', method: 'Bank Transfer', paidOn: '2026-08-20', amountCentavos: 682_000, proofDocumentId: null },
+      caller: applicant,
+      idempotencyKey: randomUUID(),
+    });
+    if (!submitted.ok) return '';
+    await payments.verify({ paymentId: submitted.paymentId, officer, officialReceiptNumber: 'OR-9' });
+    return submitted.paymentId;
+  };
+
+  it('still refuses an ordinary officer reversing a payment they themselves verified', async () => {
+    const paymentId = await submitAndVerify(cashier);
+
+    const result = await payments.undo({
+      paymentId, kind: 'Reversed', officer: cashier,
+      reason: 'Reversing my own verification to check the rule still holds.',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-permitted');
+  });
+
+  it('lets Super Admin reverse a payment Super Admin themselves verified', async () => {
+    // The owner's explicit, knowing trade-off (account.ts's own doc comment
+    // on SUPER_ADMIN_SCOPES): nothing enforces separation of duty for this
+    // role. Same caller both verifies and reverses here, on purpose.
+    const paymentId = await submitAndVerify(superAdmin);
+
+    const result = await payments.undo({
+      paymentId, kind: 'Reversed', officer: superAdmin,
+      reason: 'The bank confirms this deposit never actually settled.',
+    });
+
+    expect(result.ok).toBe(true);
+    const row = await db.query<{ status: string }>('select status from payments where id = $1', [paymentId]);
+    expect(row.rows[0]?.status).toBe('Reversed');
+  });
+
+  it('lets Super Admin refund a payment Super Admin themselves verified', async () => {
+    const paymentId = await submitAndVerify(superAdmin);
+
+    const result = await payments.undo({
+      paymentId, kind: 'Refunded', officer: superAdmin,
+      reason: 'Applicant withdrew the application; refunding the settled amount.',
+    });
+
+    expect(result.ok).toBe(true);
+    const row = await db.query<{ status: string }>('select status from payments where id = $1', [paymentId]);
+    expect(row.rows[0]?.status).toBe('Refunded');
   });
 });
 
