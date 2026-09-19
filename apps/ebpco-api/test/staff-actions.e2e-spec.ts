@@ -317,6 +317,25 @@ describe('recording an evaluation', () => {
     const assessed = await post(`/staff/applications/${id}/transitions`, assessor, { to: 'Assessed' });
     expect(assessed.statusCode).toBe(200);
   });
+
+  it('names only the incomplete evaluation, not a downstream Order of Payment the officer cannot act on yet', async () => {
+    // Live bug: an officer who tried Send to Assessed before finishing
+    // evaluation saw "Not every evaluation stage has been completed. No
+    // Order of Payment has been issued for this application, so there is
+    // nothing to pay." in one breath — the second sentence names a step
+    // that is not reachable at all until the first is fixed (issue() itself
+    // now refuses to be called before evaluations-complete), so it read as
+    // confusing noise rather than a second thing to do.
+    const id = await file('BP-1', 'Under Evaluation');
+    const assessor = await staffToken('assessor');
+
+    const response = await post(`/staff/applications/${id}/transitions`, assessor, { to: 'Assessed' });
+
+    expect(response.statusCode).toBe(422);
+    const detail = response.json<{ detail: string }>().detail;
+    expect(detail).toContain('Not every evaluation stage has been completed');
+    expect(detail).not.toContain('Order of Payment');
+  });
 });
 
 describe('the permit precondition that was missing', () => {

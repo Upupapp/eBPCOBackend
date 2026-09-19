@@ -105,6 +105,18 @@ beforeEach(async () => {
   for (const status of ['Received', 'Document Verification', 'Under Evaluation']) {
     await db.query('update applications set lifecycle_status = $1 where id = $2', [status, applicationId]);
   }
+  // AssessmentService.issue() now refuses to issue an Order of Payment
+  // before every evaluation stage has passed — this file's own concern is
+  // the SECOND signature on the fee figures, a different question, so the
+  // five stages are seeded directly rather than exercised through their own
+  // real endpoint (which is what evaluation.spec.ts/staff-actions already do).
+  for (const stage of ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']) {
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, evaluated_at)
+       values ($1,$2,'Passed',$3,now())`,
+      [applicationId, stage, reviewer.id],
+    );
+  }
 
   // Migration 044 already seeds this same '2026.1' schedule (including
   // Fencing Permit's filing/processing/structural entries) on every fresh

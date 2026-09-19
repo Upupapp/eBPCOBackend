@@ -13,6 +13,7 @@ import {
 } from '../domain/order-of-payment';
 import { FeeSchedule, FeeScheduleUnavailable, scheduleInForce } from '../domain/fee-schedule';
 import { AssessmentWorkflowService } from './assessment-workflow.service';
+import { EVALUATION_STAGES } from '../../applications/application/evaluation.service';
 
 /**
  * Issuing and correcting Orders of Payment.
@@ -26,7 +27,11 @@ import { AssessmentWorkflowService } from './assessment-workflow.service';
 
 export type IssueResult =
   | { readonly ok: true; readonly orderId: string; readonly number: string; readonly total: Centavos }
-  | { readonly ok: false; readonly reason: 'no-schedule' | 'already-assessed' | 'invalid' | 'not-approved'; readonly detail: string };
+  | {
+      readonly ok: false;
+      readonly reason: 'no-schedule' | 'already-assessed' | 'invalid' | 'not-approved' | 'evaluations-incomplete';
+      readonly detail: string;
+    };
 
 export class AssessmentService {
   private readonly audit: AuditService;
@@ -93,6 +98,24 @@ export class AssessmentService {
       // Correcting one is `supersede`, deliberately a different operation with
       // a different name and a required reason.
       return { ok: false, reason: 'already-assessed', detail: 'an Order of Payment is already in force' };
+    }
+
+    // An Order of Payment quotes what the application owes for what it was
+    // found to require — which is not known until every evaluation stage has
+    // actually passed. Before this, an officer could issue one (and an
+    // applicant could see and be quoted a fee) while the application was
+    // still mid-evaluation, e.g. with Zoning still pending: a real fee, on an
+    // application that had not yet cleared the checks that fee was for.
+    const passedStages = await this.db.query<{ n: string }>(
+      `select count(*) as n from evaluations where application_id = $1 and result = 'Passed'`,
+      [applicationId],
+    );
+    if (Number(passedStages.rows[0]?.n ?? 0) < EVALUATION_STAGES.length) {
+      return {
+        ok: false,
+        reason: 'evaluations-incomplete',
+        detail: 'Not every evaluation stage has been completed. Finish evaluating this application before issuing an Order of Payment.',
+      };
     }
 
     // ── THE SECOND SIGNATURE ────────────────────────────────────────────

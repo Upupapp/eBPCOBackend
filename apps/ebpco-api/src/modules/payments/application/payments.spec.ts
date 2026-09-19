@@ -85,6 +85,23 @@ async function approvedAssessment(applicationId: string = APPLICATION): Promise<
 }
 const cashier: Caller = { accountId: CASHIER_ACCOUNT, kind: 'staff', scopes: ROLE_SCOPES.cashier };
 
+/**
+ * AssessmentService.issue() refuses to issue an Order of Payment before
+ * every evaluation stage has passed. This file's own concern is the
+ * assessment/payment workflow, a different question — seeded directly
+ * rather than exercised through evaluation.service.ts's own real record(),
+ * which evaluation.spec.ts already covers.
+ */
+async function seedPassedEvaluations(applicationId: string): Promise<void> {
+  for (const stage of ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']) {
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, evaluated_at)
+       values ($1,$2,'Passed',$3,now())`,
+      [applicationId, stage, REVIEWER_ACCOUNT],
+    );
+  }
+}
+
 async function loadSchedule(): Promise<void> {
   await db.query(
     `insert into fee_schedules (version, effective_from, published_by)
@@ -140,6 +157,7 @@ beforeEach(async () => {
      values ($1,'BP-2026-000001',$2,'Fencing Permit','New','Submitted',now(),$3)`,
     [APPLICATION, applicantId, APPLICANT_ACCOUNT],
   );
+  await seedPassedEvaluations(APPLICATION);
 });
 
 afterEach(async () => {
@@ -270,6 +288,37 @@ describe('issuing an Order of Payment', () => {
     const bases = audit.rows.map((r) => r.after_state.basis);
     expect(bases).toContain('National Building Code IRR, Table III.1');
     expect(audit.rows).toHaveLength(3);
+  });
+
+  it('refuses while any evaluation stage has not passed — a real fee must not be quoted before the checks it is for are done', async () => {
+    // Live bug: an officer could issue (and an applicant could be shown) a
+    // real Order of Payment for an application still mid-evaluation, e.g.
+    // with Zoning still Revision Required.
+    await db.query(`delete from evaluations where application_id = $1`, [APPLICATION]);
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, remarks, evaluated_at)
+       values ($1,'Initial','Passed',$2,null,now()),
+              ($1,'Zoning','Revision Required',$2,'Setback not shown on the plan.',now())`,
+      [APPLICATION, REVIEWER_ACCOUNT],
+    );
+    await approvedAssessment();
+
+    const result = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('evaluations-incomplete');
+  });
+
+  it('allows it once every stage has passed', async () => {
+    // The fixture's own beforeEach already seeds all five as Passed — this
+    // guards that the happy path stays reachable, not just that the refusal
+    // above fires.
+    await approvedAssessment();
+
+    const result = await assessment.issue({ applicationId: APPLICATION, officer: assessor });
+
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -632,6 +681,7 @@ describe('reconciliation', () => {
        values ($1,$2,$3,'Fencing Permit','New','Submitted',now(),$4)`,
       [application, `BP-2026-${receipt}`, applicantRow.rows[0]?.id, APPLICANT_ACCOUNT],
     );
+    await seedPassedEvaluations(application);
     await approvedAssessment(application);
     const order = await assessment.issue({ applicationId: application, officer: assessor });
     if (!order.ok) throw new Error('could not assess');
@@ -757,6 +807,7 @@ describe('the Order of Payment number', () => {
                  'Submitted',now(),$4)`,
         [application, `BP-2026-EXTRA-${i}`, APPLICATION, APPLICANT_ACCOUNT],
       );
+      await seedPassedEvaluations(application);
       await approvedAssessment(application);
       const issued = await assessment.issue({ applicationId: application, officer: assessor });
       if (issued.ok) numbers.push(issued.number);

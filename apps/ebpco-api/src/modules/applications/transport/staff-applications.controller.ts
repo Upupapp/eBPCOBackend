@@ -475,14 +475,24 @@ function refusalToProblem(refusal: Refusal): ProblemException {
           : `An application at ${refusal.from} cannot move to ${refusal.to}. It can move to: ${refusal.legalMoves.join(', ')}.`,
       );
 
-    case 'precondition-unmet':
-      // Every unmet precondition, not the first. An officer told to fix one
-      // thing, who fixes it and is then told about the next, learns to distrust
-      // the message.
+    case 'precondition-unmet': {
+      // Every unmet precondition, not the first — an officer told to fix one
+      // thing, who fixes it and is then told about the next, learns to
+      // distrust the message. `order-of-payment-issued` is the one
+      // exception: since AssessmentService.issue() itself now refuses to
+      // issue an Order before every evaluation stage has passed, an officer
+      // cannot act on "no Order of Payment" until `evaluations-complete` is
+      // already true — reporting it alongside an incomplete evaluation
+      // doesn't name a second thing to fix, it names a step that is not
+      // reachable yet, which is exactly the noise this rule exists to avoid.
+      const reportable = refusal.unmet.includes('evaluations-complete')
+        ? refusal.unmet.filter((precondition) => precondition !== 'order-of-payment-issued')
+        : refusal.unmet;
       return new ProblemException(
         PROBLEM_TYPE['precondition-unmet'], 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
-        refusal.unmet.map((precondition) => PRECONDITION_MESSAGE[precondition]).join(' '),
+        reportable.map((precondition) => PRECONDITION_MESSAGE[precondition]).join(' '),
       );
+    }
 
     case 'stale-version':
       return new ProblemException(
