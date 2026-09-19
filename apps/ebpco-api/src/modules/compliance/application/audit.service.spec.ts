@@ -117,6 +117,55 @@ describe('appending to the chain', () => {
   });
 });
 
+describe('append() opens its own transaction when the caller has none', () => {
+  /**
+   * `SELECT ... FOR UPDATE` outside an explicit transaction auto-commits (and
+   * releases the row lock) the instant that one statement finishes -- before
+   * the INSERT it was meant to be serialised ahead of even runs. append()'s
+   * own doc comment says it "must be called inside the caller's transaction",
+   * but several real call sites (identity.service.ts's sign-in audit,
+   * profile-photo.service.ts) never had one to pass. PGlite does not model
+   * real connection-level concurrency (its own doc comment says so), so this
+   * cannot be proved by racing two calls the way the refresh-token fix was --
+   * it is proved structurally instead: does append() actually open a
+   * transaction when none is given, and does it use the CALLER's when one is?
+   */
+  function spyingClient(): { client: SqlClient; transactionCalls: () => number } {
+    let calls = 0;
+    const client: SqlClient = {
+      query: (text, values) => db.query(text, values),
+      exec: (sql) => db.exec(sql),
+      transaction: (fn) => { calls += 1; return db.transaction(fn); },
+      close: () => db.close(),
+    };
+    return { client, transactionCalls: () => calls };
+  }
+
+  it('opens a transaction itself when called with no tx', async () => {
+    const { client, transactionCalls } = spyingClient();
+    const spiedAudit = new AuditService(client, () => NOW);
+
+    await spiedAudit.append(anEvent());
+
+    expect(transactionCalls()).toBe(1);
+  });
+
+  it('does not open a second transaction around one the caller already opened', async () => {
+    const { client, transactionCalls } = spyingClient();
+    const spiedAudit = new AuditService(client, () => NOW);
+
+    await client.transaction(async (tx) => {
+      await spiedAudit.append(anEvent(), tx);
+    });
+
+    // Exactly the one transaction opened explicitly above. A second, nested
+    // one here would mean the audit write is no longer atomic WITH the
+    // caller's own domain write -- the whole reason to pass tx through in
+    // the first place.
+    expect(transactionCalls()).toBe(1);
+  });
+});
+
 describe('the chain detects tampering', () => {
   const seed = async (): Promise<void> => {
     for (let i = 0; i < 4; i += 1) await audit.append(anEvent({ action: `action.${i}` }));

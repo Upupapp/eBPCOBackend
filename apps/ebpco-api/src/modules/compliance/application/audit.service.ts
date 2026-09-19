@@ -82,10 +82,24 @@ export class AuditService {
    * real cost and the price of the chain meaning anything: two entries pointing
    * at one predecessor is indistinguishable from a forgery.
    *
-   * Must be called inside the caller's transaction, so an audited act and its
-   * record commit together or not at all.
+   * Pass the caller's own transaction when one exists, so an audited act and
+   * its record commit together or not at all. When none is passed, this opens
+   * its OWN transaction rather than running the row lock as a standalone
+   * statement, which is not the belt-and-braces it looks like -- `SELECT ...
+   * FOR UPDATE` outside an explicit transaction auto-commits (and releases the
+   * lock) the instant that one statement finishes, before the INSERT that was
+   * supposed to be serialised behind it even runs. Two of the ~15 call sites
+   * that never had a surrounding transaction to pass (identity.service.ts's
+   * sign-in audit, profile-photo.service.ts's photo events) were making
+   * exactly that unprotected call, silently, for as long as this method has
+   * existed -- the unique index on `sequence` turns the resulting race into a
+   * loud failure rather than a corrupted chain, but "loud failure under
+   * concurrent sign-ins" is still the wrong answer for a codebase that treats
+   * losing one audit entry as an acceptable outcome and colliding two as not.
    */
-  async append(input: AuditInput, tx: SqlClient = this.db): Promise<number> {
+  async append(input: AuditInput, tx?: SqlClient): Promise<number> {
+    if (tx === undefined) return this.db.transaction((inner) => this.append(input, inner));
+
     const head = await tx.query<{ last_hash: string; last_sequence: number }>(
       'select last_hash, last_sequence from audit_chain_head where id = 1 for update',
     );
@@ -226,7 +240,7 @@ export class AuditService {
    * serialisation this exists to avoid.
    */
   async appendOncePerWindow(
-    input: AuditInput, windowSeconds: number, tx: SqlClient = this.db,
+    input: AuditInput, windowSeconds: number, tx?: SqlClient,
   ): Promise<number | null> {
     if (input.actorAccountId === undefined || input.actorAccountId === null) {
       // Nothing to debounce on. An anonymous refusal cannot be attributed, so
@@ -236,7 +250,14 @@ export class AuditService {
     }
 
     const since = new Date(this.clock().getTime() - windowSeconds * 1000);
-    const recent = await tx.query<{ one: number }>(
+    // The debounce READ never needs the caller's transaction -- the doc
+    // comment above already accepts two concurrent refusals both finding
+    // nothing and both appending, so there is nothing here worth serialising
+    // against. Only `tx` (still possibly undefined) is forwarded to
+    // `append()`, so its own internal locking still applies when no caller
+    // transaction exists, exactly as an `append()` call without a debounce
+    // in front of it now gets.
+    const recent = await (tx ?? this.db).query<{ one: number }>(
       `select 1 as one from audit_events
         where action = $1 and actor_account_id = $2 and occurred_at >= $3
         limit 1`,
