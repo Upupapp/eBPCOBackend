@@ -40,6 +40,34 @@ for over a minute before being killed by hand. Now bounded to 4×/2× this
 process's own defaults, and a non-power-of-two N is refused outright (real
 `scrypt` would otherwise throw, uncaught, out of `verify()`).
 
+**staff-directory audit misattribution.** `actorOf()` hardcoded
+`role: 'administrator'` regardless of who was actually signed in.
+`staff:administer` is held by both `administrator` and `super-admin`, so every
+account created, role changed, disabled/enabled or session revoked by a
+super-admin was silently misattributed in the audit trail. Not a live bypass —
+`actorRole` is never used for any authorisation decision, only recorded — but a
+real governance/accountability defect. Now resolves the caller's real role(s)
+via a DB lookup.
+
+**Audit chain row lock, ineffective outside a transaction.** `append()`'s own
+doc comment says it "must be called inside the caller's transaction" — the
+`SELECT ... FOR UPDATE` that serialises concurrent appends only holds the lock
+for the length of that transaction. At least two real call sites never had one:
+`identity.service.ts`'s sign-in audit and `profile-photo.service.ts`'s photo
+events call `append()` with no transaction at all, so their row lock
+auto-committed (and released) the instant the SELECT finished — a no-op,
+exactly at sign-in, the traffic pattern most likely to see genuine
+concurrency. The unique index on `sequence` prevents actual chain corruption
+(a losing concurrent insert fails loudly rather than silently), but "loud
+failure under concurrent sign-ins" was still the wrong answer. `append()` now
+opens its own transaction when the caller passes none, closing the gap for
+every current and future call site without needing each one fixed
+individually. PGlite does not model real connection-level concurrency (its own
+doc comment says so), so this was proved structurally — a spy confirming
+`db.transaction()` is called exactly once when no `tx` is passed, and not
+double-called when the caller already passed one — rather than by racing two
+calls the way the refresh-token fix was.
+
 **Pre-existing gaps fixed as groundwork, not findings:**
 - `npm run test`/`verify` invoked `node node_modules/.bin/jest`, which is a
   POSIX shell shim on Windows (not the real JS entry point) — `verify.sh`
@@ -50,8 +78,12 @@ process's own defaults, and a non-power-of-two N is refused outright (real
 ## How it was verified
 
 - `npm run typecheck && npm run lint`: clean after every change.
-- `npm test` (full suite): **88 suites, 1790 tests, all passing** — last full run
-  after all four fixes above landed together (`2671.7s`).
+- `npm test` (full suite): **88 suites, 1793 tests, all passing** — last full run
+  after all six fixes above landed together (`1990.7s`).
+- An IDOR sweep of every applicant-facing controller (`applicant-write`,
+  `applicant-applications`, `documents`, `businesses`) and a read-through of
+  every staff controller found nothing beyond the two findings above — an
+  honest "looked hard, found nothing further" result, not a placeholder.
 - Every fix above has a dedicated regression test proved to fail against the
   pre-fix code and pass against the post-fix code (not just written and assumed
   correct) — for the scrypt fix, "fails before" was an actual process hang, not
