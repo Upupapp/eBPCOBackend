@@ -1,4 +1,4 @@
-import { createHash, randomInt, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
@@ -22,12 +22,18 @@ import { AuditService } from '../../compliance/application/audit.service';
  *
  * ── What makes the code a secret ────────────────────────────────────────
  *
- * A digest, never the code — anyone who could read the table could otherwise
- * verify any channel in it, and a backup would carry live credentials. A
- * constant-time comparison, because `!==` on a secret leaks through timing how
- * many leading characters were right. An attempt limit, because six digits is a
- * million guesses and a million guesses is nothing to a machine. And an expiry,
- * because a code that works forever is a password nobody chose.
+ * A PEPPERED digest, never the code. A digest alone is not enough against
+ * this particular table: six digits is only a million values, and without a
+ * secret key mixed in, anyone who could read the table could precompute
+ * every possible digest once, offline, in a fraction of a second, and reverse
+ * any row in it instantly — a backup would carry live credentials just the
+ * same as if the code were stored in the clear. The pepper (`digestOf`) is
+ * what an attacker with only the table, and not the secret manager, does not
+ * have. A constant-time comparison, because `!==` on a secret leaks through
+ * timing how many leading characters were right. An attempt limit, because
+ * six digits is a million guesses and a million guesses is nothing to a
+ * machine ONLINE. And an expiry, because a code that works forever is a
+ * password nobody chose.
  */
 
 export type Channel = 'email' | 'mobile';
@@ -69,6 +75,13 @@ export class ContactVerificationService {
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    /**
+     * Mixed into every code digest, the same role `PasswordHasher`'s pepper
+     * plays. Empty is permitted so development does not need a secret
+     * manager -- see that class's own doc comment for the trade-off; the
+     * config layer enforces a real value outside development the same way.
+     */
+    private readonly pepper: string = '',
   ) {
     this.audit = audit ?? new AuditService(db, clock);
   }
@@ -179,7 +192,7 @@ export class ContactVerificationService {
       await tx.query(
         `insert into contact_verification_challenges (account_id, channel, code_digest, issued_at, expires_at)
          values ($1,$2,$3,$4,$5)`,
-        [accountId, channel, digestOf(code), now, new Date(now.getTime() + TTL_MINUTES * 60_000)],
+        [accountId, channel, this.digestOf(code), now, new Date(now.getTime() + TTL_MINUTES * 60_000)],
       );
       await tx.query(
         `insert into contact_verifications (account_id, channel, status, last_requested_at)
@@ -236,7 +249,7 @@ export class ContactVerificationService {
         };
       }
 
-      if (!matches(challenge.code_digest, code)) {
+      if (!this.matches(challenge.code_digest, code)) {
         const attempts = challenge.attempts + 1;
         const spent = attempts >= MAX_ATTEMPTS;
         await tx.query(
@@ -298,21 +311,30 @@ export class ContactVerificationService {
       return { ok: true, state: states.find((entry) => entry.channel === channel)! };
     });
   }
-}
+  private digestOf(code: string): string {
+    // HMAC-SHA256, not scrypt, and not plain SHA-256 either.
+    //
+    // Not scrypt: this secret lives for fifteen minutes, is six digits from a
+    // cryptographic source, and is rate-limited to five guesses ONLINE. A
+    // slow hash defends against an attacker who already has the digest and
+    // is guessing at it as fast as the hash allows; the online path is
+    // already covered by the short life and the attempt count, and a
+    // per-request scrypt would cost the LGU real latency for no gain there.
+    //
+    // Not plain SHA-256: a bare, unkeyed hash of a six-digit code is
+    // reversible by anyone who can read the table, in bulk, in well under a
+    // second -- a million SHA-256 computations is nothing, "slow" or not,
+    // and this doc comment used to say the opposite by only reasoning about
+    // the ONLINE attack. `code_digest` on its own is not the secret the rest
+    // of this file's own doc comment claims it is; the pepper is what makes
+    // it one, the same way `PasswordHasher`'s does for a password verifier.
+    return createHmac('sha256', this.pepper).update(code, 'utf8').digest('hex');
+  }
 
-function digestOf(code: string): string {
-  // SHA-256 rather than scrypt, deliberately and with a reason: this secret
-  // lives for fifteen minutes, is six digits from a cryptographic source, and
-  // is rate-limited to five guesses. A slow hash defends against an offline
-  // attack on a stolen table; the defence here is the short life and the
-  // attempt count, and a per-request scrypt would cost the LGU real latency for
-  // no gain against the attack that matters.
-  return createHash('sha256').update(code, 'utf8').digest('hex');
-}
-
-function matches(storedDigest: string, presented: string): boolean {
-  const expected = Buffer.from(storedDigest, 'utf8');
-  const candidate = Buffer.from(digestOf(presented), 'utf8');
-  if (expected.length !== candidate.length) return false;
-  return timingSafeEqual(expected, candidate);
+  private matches(storedDigest: string, presented: string): boolean {
+    const expected = Buffer.from(storedDigest, 'utf8');
+    const candidate = Buffer.from(this.digestOf(presented), 'utf8');
+    if (expected.length !== candidate.length) return false;
+    return timingSafeEqual(expected, candidate);
+  }
 }

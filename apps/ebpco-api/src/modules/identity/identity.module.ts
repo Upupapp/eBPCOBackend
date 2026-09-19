@@ -79,8 +79,14 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
     },
     {
       provide: ContactVerificationService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new ContactVerificationService(db),
+      inject: [SQL_CLIENT, CONFIG],
+      // Same pepper as PasswordHasher's, reused rather than a new required
+      // secret for one file's one HMAC key: both exist to keep a table read
+      // alone from being enough to reverse a stored credential, and this
+      // repo's config layer already enforces PASSWORD_PEPPER is real (32+
+      // chars) outside development.
+      useFactory: (db: SqlClient, config: AppConfig) =>
+        new ContactVerificationService(db, undefined, undefined, config.PASSWORD_PEPPER),
     },
     {
       provide: StaffDirectoryService,

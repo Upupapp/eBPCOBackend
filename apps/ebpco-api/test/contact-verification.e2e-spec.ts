@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { join } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 import { createApp } from '../src/bootstrap';
 import { PgliteClient } from '../src/persistence/pglite-client';
@@ -50,17 +50,19 @@ const send = (method: 'GET' | 'POST', url: string, payload?: Record<string, unkn
 /**
  * Puts a KNOWN code in the outstanding challenge.
  *
- * The service never reveals the code, and reversing a SHA-256 digest by trying
- * a million candidates took twenty seconds a call — a test that slow is one
- * that gets deleted. This replaces the digest instead, which is closer to the
- * truth anyway: what a real applicant has is the code, and the only thing that
- * could give it to them is a delivery adapter that does not exist.
+ * The service never reveals the code, and reversing an HMAC digest without
+ * the pepper is not a thing a test should even attempt — that is the whole
+ * point of it being peppered. This replaces the digest instead, which is
+ * closer to the truth anyway: what a real applicant has is the code, and the
+ * only thing that could give it to them is a delivery adapter that does not
+ * exist. The HMAC here uses the same PASSWORD_PEPPER this suite's own ENV
+ * hands the running app, matching contact-verification.service.ts's digestOf.
  */
 const plantCode = async (channel: string, code = '424242'): Promise<string> => {
   const result = await db.query(
     `update contact_verification_challenges set code_digest = $1
       where account_id = $2 and channel = $3 and consumed_at is null`,
-    [createHash('sha256').update(code, 'utf8').digest('hex'), account, channel],
+    [createHmac('sha256', ENV.PASSWORD_PEPPER!).update(code, 'utf8').digest('hex'), account, channel],
   );
   if (result.rowCount === 0) throw new Error(`no live challenge for ${channel}`);
   return code;
