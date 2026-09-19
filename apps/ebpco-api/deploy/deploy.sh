@@ -1,55 +1,54 @@
 #!/usr/bin/env sh
-# Build, migrate, roll out, verify — docs/DEPLOYMENT.md §Deploy as one command,
-# run ON THE HOST from this directory. Idempotent: a re-run with nothing new
-# rebuilds from cache, reports "already current", and restarts nothing.
+# Build, migrate, roll out, verify — docs/DEPLOYMENT.md §Deploy as one command.
+# Runs ON THE HOST, in /opt/ebpco, after push-source.sh has put the source and
+# this directory's files there. Normally invoked BY push-source.sh, not by hand.
 #
-#   ./deploy.sh              # deploy the checked-out commit
-#   ./deploy.sh --pull       # git pull first, then the same
+#   ./deploy.sh <build-label>      e.g. ./deploy.sh 6199992-dirty
 #
-# It stops at the first failure. In particular: if migrations fail, the old
-# container keeps serving and nothing is rolled out (step 1 before step 2,
-# which is what makes a bad deploy survivable). If /ready never reports ready,
-# the new container is left running for inspection and the script exits 1 —
-# it does not roll back on its own (docs/DEPLOYMENT.md, "What is not covered").
+# The label is what /version will report as `commit`; push-source.sh derives
+# it from the developer's checkout because the source on the host is a copy,
+# not a clone. It stops at the first failure: a failed migration leaves the
+# old container serving; a /ready that never says `ready` leaves the new one
+# running for inspection and exits 1. No automatic rollback.
 set -eu
 
 cd "$(dirname "$0")"
 
-if [ ! -f .env ]; then
-  echo "deploy/.env is missing. Copy .env.example to .env and fill it in." >&2
-  exit 78 # EX_CONFIG, the same code the service uses for a bad environment
-fi
+for f in server.env infra.env Caddyfile docker-compose.yml backend/apps/ebpco-api/Dockerfile; do
+  if [ ! -e "$f" ]; then
+    echo "missing $f — see deploy/README.md" >&2
+    exit 78 # EX_CONFIG, the same code the service uses for a bad environment
+  fi
+done
 
-if [ "${1:-}" = "--pull" ]; then
-  git pull --ff-only
-fi
-
-# Baked into the image so /version can be checked against what was intended.
-BUILD_COMMIT="$(git rev-parse --short HEAD)"
+BUILD_COMMIT="${1:-unknown}"
 BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 export BUILD_COMMIT BUILD_TIME
 
-# Read once; the same value Caddy serves on and the check below hits.
-API_HOST="$(sed -n 's/^API_HOST=\(.*\)$/\1/p' .env | head -n1)"
+# The public name Caddy serves and the checks below hit: the second site
+# block in the Caddyfile (the first is the real domain, not yet resolving).
+API_HOST="$(grep -oE '^[0-9]+-[0-9]+-[0-9]+-[0-9]+\.sslip\.io' Caddyfile | head -n1)"
+: "${API_HOST:?no sslip.io site block found in Caddyfile}"
 
 echo "==> building ${BUILD_COMMIT} (${BUILD_TIME})"
-docker compose build --pull api migrate
+docker compose build ebpco-api migrate
 
 echo "==> migrating"
 docker compose run --rm migrate
+
+echo "==> reloading caddy config (no-op if unchanged)"
+docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || true
 
 echo "==> rolling out"
 docker compose up -d --remove-orphans
 
 echo "==> waiting for https://${API_HOST}/ready"
-# 30 × 2 s. Covers a cold start plus, on the very first deploy, Caddy's
-# certificate issuance. No -k: a wrong certificate is a failure.
 i=0
 until READY_JSON="$(curl -fsS "https://${API_HOST}/ready" 2>/dev/null)"; do
   i=$((i + 1))
   if [ "$i" -ge 30 ]; then
     echo "!! /ready did not answer 200 in 60 s. Inspect with:" >&2
-    echo "     docker compose logs --tail=100 api caddy" >&2
+    echo "     docker compose logs --tail=100 ebpco-api caddy" >&2
     exit 1
   fi
   sleep 2
@@ -57,8 +56,7 @@ done
 
 # 200 is also what `degraded` answers (health.controller.ts): a non-critical
 # dependency is down. docs/DEPLOYMENT.md step 3 says that stops the rollout
-# for a human decision, so it stops here too — the container is up, but this
-# script does not call it deployed.
+# for a human decision, so it stops here too.
 case "$READY_JSON" in
   *'"status":"ready"'*) ;;
   *)

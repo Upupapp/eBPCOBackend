@@ -1,16 +1,14 @@
-# TLS termination for the eBPCO API. API_HOST comes from deploy/.env via the
-# compose file; Caddy obtains and renews a Let's Encrypt certificate for it
-# automatically, which is the whole reason Caddy and not nginx: there is no
-# certbot cron to forget.
-#
-# Requires: an A record for API_HOST pointing at this host, and ports 80 and
-# 443 open. The first request after `up` may take a few seconds while the
-# certificate is issued.
-#
-# reverse_proxy sets X-Forwarded-For and X-Forwarded-Proto on its own; the
-# API trusts them because TRUST_PROXY=true, and it is safe to because nothing
-# but this proxy can reach api:3000 (see the compose file: no published port).
-# HSTS is set by the API itself (security.ts), not duplicated here.
-{$API_HOST} {
-	reverse_proxy api:3000
+# The real domain. Its DNS still points at a parking address (198.54.117.242,
+# 2026-09-19), so Caddy cannot obtain a certificate for it yet; it keeps
+# retrying in the background and will start serving the moment the A record
+# points here. Until then the sslip.io name below is what the portals use.
+api.castilla-ebpco.online {
+	reverse_proxy ebpco-api:3000
+}
+
+# Wildcard DNS that needs no registrar: the host IP spelled with dashes.
+# Let's Encrypt issues for it. Both Netlify portals are built with
+# EBPCO_API_BASE_URL=https://139-162-51-165.sslip.io (their netlify.toml).
+139-162-51-165.sslip.io {
+	reverse_proxy ebpco-api:3000
 }

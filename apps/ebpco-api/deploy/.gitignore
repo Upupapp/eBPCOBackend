@@ -1,0 +1,4 @@
+# The real environment files live on the host (/opt/ebpco/*.env), never here.
+# Only the .example templates are tracked.
+*.env
+!*.env.example

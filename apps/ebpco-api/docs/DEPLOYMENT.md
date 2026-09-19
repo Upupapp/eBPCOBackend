@@ -5,9 +5,10 @@
 would run, written as a runbook so it is at least repeatable by hand, and so porting it
 to a workflow later is transcription rather than design.
 
-The first real environment is a single Linode running the Compose stack in
-[`deploy/`](../deploy/README.md) — `deploy/deploy.sh` is this runbook's §Deploy as one
-command. What follows is still the reference sequence it implements.
+The real environment is a single Linode (LGUIDS-SHARED-LINODE, 139.162.51.165) running the
+Compose stack in [`deploy/`](../deploy/README.md). `deploy/push-source.sh`, run from a
+developer machine, ships the source there and runs `deploy/deploy.sh` — this runbook's
+§Deploy as one command. What follows is still the reference sequence it implements.
 
 ## Before anything is committed
 

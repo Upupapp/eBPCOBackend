@@ -1,6 +1,6 @@
 # These run on a Linux host verbatim. A CRLF shebang line is "bad interpreter",
-# and Caddy/Compose read the other two byte-for-byte. Never let autocrlf touch them.
-*.sh          text eol=lf
-Caddyfile     text eol=lf
-.env.example  text eol=lf
-*.yml         text eol=lf
+# and Caddy/Compose read the others byte-for-byte. Never let autocrlf touch them.
+*.sh            text eol=lf
+Caddyfile       text eol=lf
+*.env.example   text eol=lf
+*.yml           text eol=lf

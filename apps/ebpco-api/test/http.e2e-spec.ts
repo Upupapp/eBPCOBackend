@@ -367,6 +367,33 @@ describe('CORS', () => {
     }
   });
 
+  it('allows PUT, PATCH and DELETE in a preflight — the library default is GET,HEAD,POST only', async () => {
+    // The Admin Portal saves with PUT and DELETE. Under `@fastify/cors`'s
+    // default `methods` a cross-origin portal signs in and then fails every
+    // non-POST write with a preflight rejection the API never logs; the
+    // dev server's same-origin proxy never sends a preflight, so only a
+    // real two-host deployment (2026-09-19) surfaced it.
+    const { app } = await build();
+    try {
+      for (const method of ['PUT', 'PATCH', 'DELETE']) {
+        const response = await app.inject({
+          method: 'OPTIONS',
+          url: '/staff/users/some-id',
+          headers: {
+            origin: 'http://localhost:4200',
+            'access-control-request-method': method,
+            'access-control-request-headers': 'authorization,content-type',
+          },
+        });
+
+        expect(response.statusCode).toBeLessThan(300);
+        expect(String(response.headers['access-control-allow-methods'])).toContain(method);
+      }
+    } finally {
+      await app.close();
+    }
+  });
+
   it('never sends Allow-Credentials — auth here is a bearer header, not a cookie', async () => {
     const { app } = await build();
     try {

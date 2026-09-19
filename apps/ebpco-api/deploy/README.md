@@ -1,232 +1,174 @@
-# Deploying the API to one Linux host
+# The API on LGUIDS-SHARED-LINODE
 
-Docker Compose on a single Linode: Caddy terminates TLS and proxies to the API, the API
-talks to Postgres on a private network. This is `docs/DEPLOYMENT.md`'s runbook made
-runnable, and `docs/ENVIRONMENTS.md`'s resource graph collapsed onto one box. It is the
-first real environment; it is not the production graph (no PITR, one zone, no secret
-manager — see [What this is not](#what-this-is-not) before pointing citizens at it).
-
-Files in this directory:
+The eBPCO API runs on one Linode — **LGUIDS-SHARED-LINODE**, `139.162.51.165`, Linode 2 GB,
+Singapore — as a Docker Compose stack in `/opt/ebpco`. This directory is that stack, versioned:
+the compose file, the Caddyfile, templates for the two env files, and the two scripts that
+deploy to it. Stood up by hand on 2026-09-17; brought under version control on 2026-09-19.
 
 | | |
 |---|---|
-| `docker-compose.yml` | the stack: `postgres`, `api`, `caddy`; `clamav` behind the `production` profile; `migrate` as a one-off |
-| `Caddyfile` | one site block, TLS from Let's Encrypt, proxy to `api:3000` |
-| `.env.example` | every variable the deployment needs, with the ones to change marked |
-| `deploy.sh` | build → migrate → roll out → verify `/ready` and `/version` |
-| `docker-compose.host-caddy.yml` | override for a host whose own Caddy/nginx already owns 80/443 |
+| API (HTTPS) | `https://139-162-51-165.sslip.io` — `/health`, `/ready`, `/version` |
+| API (plain HTTP, legacy) | `http://139.162.51.165:3000` — see [Port 3000](#port-3000) |
+| Admin portal | `https://ebpcowebadmin.netlify.app` |
+| Citizen portal | `https://fastidious-chimera-7a7a18.netlify.app` |
+| Real domain | `api.castilla-ebpco.online` — registered, **not yet pointed here** |
+| Environment | `staging` (MinIO for documents, local signature scanner) |
 
-## 0. What you need
-
-- A Linode (or any Ubuntu 22.04+/Debian 12 host) with **2 GB RAM** or more. 1 GB runs
-  `api + postgres + caddy`; it does not run ClamAV alongside them.
-- A **hostname** for the API. Caddy cannot issue a certificate for a bare IP, and the
-  portals are served over HTTPS, so an HTTP API would be blocked by the browser as mixed
-  content. Either:
-  - a real one, e.g. `api.ebpco.castilla.gov.ph`, with an **A record** at the host's IP; or
-  - **no DNS at all**: `<ip-with-dashes>.sslip.io` — for a Linode at `172.105.1.2` that is
-    `172-105-1-2.sslip.io`. sslip.io is a public wildcard DNS that answers with the IP in
-    the name, and Let's Encrypt issues certificates for it. Adequate for staging; a real
-    hostname is a one-line change in `.env` and both portals' `netlify.toml` later.
-- The two portals' deployed origins, already in `.env.example`:
-  `https://ebpcowebadmin.netlify.app` (admin) and
-  `https://fastidious-chimera-7a7a18.netlify.app` (citizen).
-- SSH access as a user who can `sudo`.
-
-## 1. Prepare the host (once)
-
-```sh
-# Firewall: SSH, HTTP (for the ACME challenge and the redirect to HTTPS), HTTPS.
-sudo ufw allow OpenSSH && sudo ufw allow 80/tcp && sudo ufw allow 443/tcp && sudo ufw allow 443/udp
-sudo ufw --force enable
-
-# Docker Engine + Compose plugin, from Docker's own repository (the distro's is old).
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker "$USER"
-newgrp docker                      # or log out and back in
-docker compose version             # must print v2.x
+```
+public ── :443 ──► caddy ──► ebpco-api:3000 ──► postgres:5432   (./data/postgres)
+                                     └────────► minio:9000      (./data/minio, S3 driver)
 ```
 
-If the Linode is behind Linode's Cloud Firewall as well, open the same three ports there.
+Files here and where they live on the host (`/opt/ebpco`):
 
-**Check nothing already owns ports 80/443.** On `139.162.51.165` (2026-09-19) a Caddy was
-already answering — `curl -sI http://139.162.51.165/` returned `Server: Caddy`. The stack
-brings its own, and two cannot bind the same port. Pick one:
+| here | on the host | |
+|---|---|---|
+| `docker-compose.yml` | `docker-compose.yml` | the stack |
+| `Caddyfile` | `Caddyfile` | TLS + reverse proxy; two site blocks |
+| `server.env.example` | `server.env` (600, real values) | the API's environment |
+| `infra.env.example` | `infra.env` (600, real values) | Postgres / MinIO secrets |
+| `deploy.sh` | `deploy.sh` | build → migrate → up → verify, run on the host |
+| `push-source.sh` | — | run from a dev machine: sync source + run deploy.sh |
+| — | `backend/apps/ebpco-api/` | copy of this app's source (not a git clone) |
 
-- **Replace it** — if that Caddy is serving nothing you need:
-  `sudo systemctl disable --now caddy`. The stack's Caddy takes over 80/443 in step 3.
-- **Keep it** — if it already serves another site on this host. Use the override in
-  [`docker-compose.host-caddy.yml`](docker-compose.host-caddy.yml): it drops the stack's
-  Caddy, publishes the API on loopback only, and the host's Caddy gets one more site block
-  (the file's header has it). Export `COMPOSE_FILE` as the header says **before** step 3,
-  and `deploy.sh` uses both files from then on.
+## Deploying a change
 
-`sudo ss -ltnp 'sport = :443'` names the process if it is not Caddy.
-
-## 2. Get the code and configure
+There is no CI. From a developer machine with SSH access (below):
 
 ```sh
-git clone https://github.com/Upupapp/eBPCOBackend.git
-cd eBPCOBackend/apps/ebpco-api/deploy
-cp .env.example .env
-chmod 600 .env
+apps/ebpco-api/deploy/push-source.sh
 ```
 
-Now edit `.env`. Every line marked `# CHANGE:` needs a value:
+That tars `Dockerfile`, `package*.json`, `tsconfig*.json`, `src/`, `scripts/`, `db/migrations/`
+and this directory to the host, refreshes the stack files at `/opt/ebpco` from it, then runs
+`deploy.sh <label>` there, which:
+
+1. `docker compose build ebpco-api migrate` — with `BUILD_COMMIT=<label>` baked in;
+2. `docker compose run --rm migrate` — applies pending migrations, prints "already current"
+   otherwise; a failure here leaves the old container serving;
+3. reloads Caddy, then `docker compose up -d`;
+4. polls `https://139-162-51-165.sslip.io/ready` and insists on `"status":"ready"`
+   (`degraded` is a 200 too and means a human decides);
+5. fetches `/version` and checks it names `<label>` — a green check on the previous build is
+   the classic false pass.
+
+`<label>` is the short commit, with `-dirty` appended when the working tree differs from
+HEAD. It is what `/version` reports, so a `-dirty` deployment is visible for what it is.
+
+Roll back by checking out the previous commit and running `push-source.sh` again; migrations
+are additive, so the previous build runs against the newer schema.
+
+## Access
+
+SSH as `root`. Keys in `/root/.ssh/authorized_keys`; the Linode dashboard's LISH console
+(Linodes → LGUIDS-SHARED-LINODE → Launch LISH Console) is the way in when no key works,
+and where a new key gets added:
 
 ```sh
-# Five random values — run this five times, one per secret. Each must differ.
-openssl rand -base64 48
+echo '<public key>' >> ~/.ssh/authorized_keys
 ```
 
-- `API_HOST` — the hostname from step 0, no scheme.
-- `POSTGRES_PASSWORD` — one random value.
-- `JWT_SIGNING_KEY`, `PASSWORD_PEPPER`, `TOTP_ENCRYPTION_KEY`, `PUSH_TOKEN_ENCRYPTION_KEY`
-  — four more, all different. **Back these up somewhere that is not this host**: losing
-  `TOTP_ENCRYPTION_KEY` locks out every officer who has enrolled a second factor;
-  losing `PASSWORD_PEPPER` invalidates every password.
-- `PORTAL_BASE_URL` / `USER_PORTAL_BASE_URL` are pre-filled with the two Netlify origins.
-  They are the CORS allowlist: if a portal ever moves, change it here too, or that portal
-  fails every request with a CORS error in the browser console and nothing in the API's logs.
+A convenient `~/.ssh/config` entry on the developer machine, which is what `push-source.sh`
+defaults to:
 
-Leave `EBPCO_ENVIRONMENT=staging` for now. See [Upgrading to production](#upgrading-to-production).
-
-## 3. First deploy
-
-```sh
-./deploy.sh
 ```
-
-Roughly two minutes the first time: `npm ci`, the TypeScript build, Postgres
-initialising, migrations, then Caddy fetching a certificate. The script ends with the
-`/version` document naming the commit it just built, or exits non-zero at the first step
-that did not go as it should. Nothing after a failed step runs — in particular the old
-container keeps serving if a migration fails.
-
-What just happened, in order (this is `docs/DEPLOYMENT.md` §Deploy):
-
-1. `docker compose build` — the `runtime` image for the API and the `migrate` image
-   (same Dockerfile, the one stage allowed to keep `ts-node` and `scripts/`).
-2. `docker compose run --rm migrate` — applies pending migrations against the compose
-   network's Postgres and exits. It prints the host and database it is about to touch
-   before it touches anything.
-3. `docker compose up -d` — Postgres (if not already), the API, Caddy.
-4. Polls `https://$API_HOST/ready` until it answers, then insists on `"status":"ready"`
-   — `degraded` is a 200 too, and means a human decides.
-5. Fetches `/version` and checks the commit in it is the commit that was built.
-
-## 4. The first account
-
-There is no route to the first staff account, by design (see `scripts/seed-super-admin.ts`).
-Create it once, against the database inside the stack:
-
-```sh
-docker compose run --rm -e EBPCO_SUPERADMIN_PASSWORD='choose ≥ 12 characters' \
-  migrate npm run seed:super-admin
+Host ebpco-linode
+  HostName 139.162.51.165
+  User root
+  IdentityFile ~/.ssh/ebpco-linode
+  IdentitiesOnly yes
 ```
-
-It creates `paul@lguids.com.ph` as `super-admin`, enrols a second factor, and **prints
-the TOTP secret once**. Add it to an authenticator app now — it is not shown again, and a
-super-admin cannot sign in without a code. Re-running the seed is safe: an account that
-already exists is left alone.
-
-Then sign in at `https://ebpcowebadmin.netlify.app/login` with that address, the
-password you chose, and the current code. If the login page shows **"The request
-failed"**, the portal is not pointed at this API yet — see [The portals](#the-portals).
-If the browser console shows a **CORS** error, `PORTAL_BASE_URL` in `.env` does not match
-the portal's real origin.
-
-## 5. Every deploy after that
-
-```sh
-cd eBPCOBackend/apps/ebpco-api/deploy
-./deploy.sh --pull
-```
-
-Same five steps. Roll back by checking out the previous commit and running
-`./deploy.sh` again; migrations are additive, so the previous build runs against the
-newer schema (`docs/DEPLOYMENT.md` step 5).
-
-## The portals
-
-The API's origin has to be told to the two Netlify sites, or they keep posting logins to
-themselves and getting a 404 HTML page back — that is what "The request failed" on the
-login page was. Both sites read `EBPCO_API_BASE_URL` at build time from
-`[build.environment]` in their `netlify.toml`, so the value is in the repository and a
-redeploy picks it up:
-
-- admin portal — `eBPCO-Web/netlify.toml`
-- citizen portal — `eBPCO-Information-Portal-Website/netlify.toml`
-
-Set it to `https://$API_HOST` (no trailing slash) in each, push, and let Netlify build.
 
 ## Looking around
 
 ```sh
-docker compose ps                          # what is running
-docker compose logs -f api                 # structured JSON, one line per event
-docker compose logs -f caddy               # certificate issuance lives here
-curl -s https://$API_HOST/ready | jq       # per-dependency status
-docker compose exec postgres psql -U ebpco # a shell in the database
+ssh ebpco-linode
+cd /opt/ebpco
+docker compose ps
+docker compose logs -f ebpco-api          # structured JSON, one line per event
+docker compose logs -f caddy              # certificate issuance lives here
+curl -s https://139-162-51-165.sslip.io/ready | jq
+docker compose exec postgres psql -U ebpco -d ebpco
 ```
 
-Password-reset emails are printed to `docker compose logs api` while `MAIL_DRIVER=console`.
+`MAIL_DRIVER` is unset, so it is `console`: password-reset mail is printed to
+`docker compose logs ebpco-api`, not sent.
+
+### Accounts
+
+`paul@lguids.com.ph` is the seeded `super-admin` (2026-09-17). Sign-in for that role needs a
+TOTP code as well as the password. If the account is ever lost, re-seed against the stack:
+
+```sh
+docker compose run --rm -e EBPCO_SUPERADMIN_PASSWORD='≥ 12 characters' \
+  migrate npm run seed:super-admin       # prints the TOTP secret ONCE
+```
+
+## Port 3000
+
+`ebpco-api` publishes `0.0.0.0:3000` — plain HTTP, open to the internet. It predates HTTPS
+(the first deploy had no name to get a certificate for) and still exists because both
+portals' *local dev servers* proxy to it:
+
+- admin: `E-BPCO-Software-main/proxy.conf.json`
+- citizen: `ebpco-user-portal/proxy.conf.js`
+
+A staff login through it crosses the internet unencrypted. Point those two configs at
+`https://139-162-51-165.sslip.io`, then change the compose line to `"127.0.0.1:3000:3000"` and
+`push-source.sh`. Nothing else uses it: the Netlify portals have been on the HTTPS name since
+2026-09-19.
+
+## The real domain
+
+`castilla-ebpco.online` is registered but its DNS points at a parking address
+(`198.54.117.242`, Namecheap). The Caddyfile already has the `api.castilla-ebpco.online` site
+block; Caddy retries certificate issuance for it in the background and will start serving the
+moment the A record points at `139.162.51.165` — nothing to deploy. Then, in this order:
+
+1. change `EBPCO_API_BASE_URL` in both portals' `netlify.toml` to `https://api.castilla-ebpco.online`
+   and let Netlify rebuild;
+2. if the portals themselves move to `admin.`/`citizen.castilla-ebpco.online`, change
+   `PORTAL_BASE_URL`/`USER_PORTAL_BASE_URL` in `server.env` (they are the CORS allowlist) and
+   `docker compose up -d ebpco-api`;
+3. optionally drop the sslip.io block.
 
 ## Backups
 
-The compose stack gives you one host and one disk. Until there is a managed database
-with point-in-time recovery, take a dump daily and copy it off the host:
+One host, one disk, no point-in-time recovery. Until there is a managed database:
 
 ```sh
 docker compose exec -T postgres pg_dump -U ebpco -Fc ebpco > "ebpco-$(date -u +%F).dump"
+tar czf "minio-$(date -u +%F).tgz" -C data minio
 ```
 
-Restore with `pg_restore -U ebpco -d ebpco --clean` into a fresh database. Rehearse it
-once before you need it. Documents (`OBJECT_STORE_DRIVER=filesystem`) live in the
-`documents` volume — `docker run --rm -v ebpco_documents:/d -v "$PWD":/out alpine tar czf
-/out/documents.tgz -C /d .` copies them out — until the store is S3.
+Copy both off the host. Restore with `pg_restore -U ebpco -d ebpco --clean` into a fresh
+database. Rehearse it once before you need it.
 
 ## Upgrading to production
 
-`EBPCO_ENVIRONMENT=production` refuses to boot (exit 78, naming the variable) until:
+`EBPCO_ENVIRONMENT=production` refuses to boot (exit 78, naming the variable) until
+`MALWARE_SCANNER_DRIVER=clamav`. The S3 requirement is already met by MinIO. So:
 
-1. **Object store is S3.** Create a Linode Object Storage bucket (nearest region is
-   `ap-south-1`, Singapore — a data-residency fact the NPC filing must state), keep it
-   private, and set in `.env`:
-   ```
-   OBJECT_STORE_DRIVER=s3
-   OBJECT_STORE_ENDPOINT=https://ap-south-1.linodeobjects.com
-   OBJECT_STORE_BUCKET=<bucket>
-   OBJECT_STORE_REGION=ap-south-1
-   OBJECT_STORE_PUBLIC_PROBE_URL=https://ap-south-1.linodeobjects.com/<bucket>
-   AWS_ACCESS_KEY_ID=<key>
-   AWS_SECRET_ACCESS_KEY=<secret>
-   ```
-   The readiness probe makes an anonymous read against the probe URL and takes the
-   instance **out of rotation if it succeeds** — a public bucket of identity documents is
-   treated as an outage.
-2. **Scanner is ClamAV.** `MALWARE_SCANNER_DRIVER=clamav` and start the stack with the
-   profile from now on: `docker compose --profile production up -d`. Needs the 2 GB host.
-   The first start downloads signatures (a few minutes); until then `/ready` reports
-   `degraded` and uploads are held, not lost.
-3. **Real mail.** `MAIL_DRIVER=smtp` plus `SMTP_HOST/USER/PASS` and `MAIL_FROM`, or
-   password resets go to the logs where no officer will see them.
-4. `DOCS_ENABLED` stays `false` — production rejects `true` at boot.
-
-And the recorded, revocable approval from a named person that `docs/DEPLOYMENT.md`
-§Production requires. Then `./deploy.sh`.
+1. add a `clamav` service (`clamav/clamav:stable`, volume for `/var/lib/clamav`) to the compose
+   file and set `MALWARE_SCANNER_URL=tcp://clamav:3310`. It needs about 1 GB of RAM for its
+   signature database — this is a 2 GB Linode *shared with other services*; measure with
+   `free -m` first, and expect to resize the Linode;
+2. `MAIL_DRIVER=smtp` plus `SMTP_HOST/USER/PASS` and `MAIL_FROM`, or password resets go to
+   the logs where no officer sees them;
+3. `DOCS_ENABLED` stays `false`;
+4. the recorded, revocable approval `docs/DEPLOYMENT.md` §Production requires.
 
 ## What this is not
 
-Measured against `docs/ENVIRONMENTS.md`'s requirements on a provider:
+Against `docs/ENVIRONMENTS.md`'s requirements on a provider:
 
 | Requirement | Here |
 |---|---|
-| Private networking for DB and store | ✅ neither is published; only Caddy's 80/443 are |
-| Encryption at rest | ⚠️ only if the Linode's disk is — enable at provisioning |
-| Point-in-time recovery | ❌ daily `pg_dump` above; PITR needs a managed database |
-| Secret manager | ❌ `deploy/.env` on disk, mode 600 |
-| Two availability zones | ❌ one host; a documented, accepted single-zone risk |
-| Data residency in the Philippines | depends on the Linode region chosen — Singapore is the nearest; none is in-country |
+| Private networking for DB and store | ✅ loopback-only ports; only Caddy's 80/443 and the API's legacy :3000 are public |
+| Encryption at rest | ⚠️ only if the Linode's disk is |
+| Point-in-time recovery | ❌ `pg_dump` above |
+| Secret manager | ❌ `/opt/ebpco/*.env` on disk, mode 600 |
+| Two availability zones | ❌ one host, shared with unrelated services |
+| Data residency in the Philippines | ❌ Singapore — the nearest region; a fact for the NPC filing |
 
-Each ❌ is a reason this runs `staging` today and a line item for E-1's hosting half.
+Each ❌ is a reason this runs `staging` and a line item for E-1's hosting half.

@@ -75,8 +75,18 @@ export async function applySecurity(
   // `@fastify/cors` but says the config was not thought through. (Local
   // development's own defaults are two different ports, 4200 and 4201, so
   // this is a real possibility to guard, not a hypothetical one.)
+  //
+  // `methods` is spelled out because `@fastify/cors` defaults to
+  // `GET,HEAD,POST` and nothing else. Every route here is one of those or
+  // PUT/PATCH/DELETE, and the Admin Portal uses PUT and DELETE — so under
+  // the default, the first cross-origin deployment (2026-09-19, the Netlify
+  // portal against the Linode API) would have signed in fine and then failed
+  // every save that was not a POST, with a preflight rejection only the
+  // browser console reports. Local development never saw it because the dev
+  // server proxies same-origin and no preflight is ever sent.
   await app.register(cors, {
     origin: [...new Set([config.PORTAL_BASE_URL, config.USER_PORTAL_BASE_URL])],
+    methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: false,
     exposedHeaders: [CORRELATION_HEADER],
   });
