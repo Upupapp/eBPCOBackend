@@ -134,6 +134,28 @@ describe('creating a staff account', () => {
     expect(attempt.statusCode).not.toBe(200);
   });
 
+  it('records the actual acting role in the audit trail, not a hardcoded guess', async () => {
+    // staff:administer is held by both administrator and super-admin (this
+    // controller's own doc comment) -- an audit entry that always said
+    // "administrator" was wrong every time the acting caller was actually
+    // the super-admin, silently, because nothing re-read what the caller
+    // held.
+    const superAdmin = await staffAccount('super-admin');
+
+    const response = await send('POST', '/staff/users', superAdmin.token, {
+      email: 'created.by.super.admin@lgu.gov.ph', roles: [],
+    });
+    expect(response.statusCode).toBe(201);
+    const created = response.json<{ id: string }>();
+
+    const audit = await db.query<{ actor_role: string }>(
+      `select actor_role from audit_events
+        where action = 'staff.account.created' and subject_id = $1`,
+      [created.id],
+    );
+    expect(audit.rows[0]?.actor_role).toBe('super-admin');
+  });
+
   it('refuses an address that already exists', async () => {
     await send('POST', '/staff/users', adminToken, { email: 'twice@lgu.gov.ph', roles: [] });
     const again = await send('POST', '/staff/users', adminToken, { email: 'TWICE@lgu.gov.ph', roles: [] });

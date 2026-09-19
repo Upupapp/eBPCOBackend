@@ -69,12 +69,28 @@ function refuse(refusal: DirectoryRefusal): never {
   throw new ProblemException(ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, refusal.detail);
 }
 
-function actorOf(request: AuthenticatedRequest): { accountId: string; role: string } {
+/**
+ * The caller's own real role(s), for the audit entry -- not the claim's
+ * `kind` ('staff'), which every route in this controller already requires
+ * and so records nothing an entry here didn't already imply, and not a
+ * hardcoded guess. `staff:administer` is held by both `administrator` and
+ * `super-admin` (this controller's own doc comment), so "an administrator
+ * did this" was wrong on every audit entry a super-admin ever produced --
+ * silent, since nothing here re-read what the caller actually held.
+ */
+async function actorOf(
+  request: AuthenticatedRequest, directory: StaffDirectoryService,
+): Promise<{ accountId: string; role: string }> {
   const claims = request.caller;
   if (claims === undefined) {
     throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED);
   }
-  return { accountId: claims.sub, role: 'administrator' };
+  const self = await directory.byId(claims.sub);
+  // Not expected to be null (the caller has a valid, just-verified access
+  // token), but a stale token surviving a deletion race is not a reason to
+  // fail the request open OR closed here -- the audit entry just records
+  // what it could confirm.
+  return { accountId: claims.sub, role: self ? self.roles.join(', ') : claims.kind };
 }
 
 @Controller('staff/users')
@@ -106,7 +122,7 @@ export class StaffDirectoryController {
   async reissueMfa(
     @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
   ): Promise<Record<string, unknown>> {
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.totp.reissue({
       accountId: userId, actorAccountId: actor.accountId, actorRole: actor.role,
     });
@@ -163,7 +179,7 @@ export class StaffDirectoryController {
     @Req() request: AuthenticatedRequest, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(createShape, body);
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.directory.create({
       email: input.email,
       roles: input.roles as StaffRole[],
@@ -209,7 +225,7 @@ export class StaffDirectoryController {
     @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(rolesShape, body);
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.directory.setRoles({
       id: userId, roles: input.roles as StaffRole[],
       actor: actor.accountId, actorRole: actor.role,
@@ -225,7 +241,7 @@ export class StaffDirectoryController {
     @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(disableShape, body ?? {});
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.directory.setDisabled({
       id: userId, disabled: true, actor: actor.accountId, actorRole: actor.role,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
@@ -241,7 +257,7 @@ export class StaffDirectoryController {
     @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const input = parse(disableShape, body ?? {});
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.directory.setDisabled({
       id: userId, disabled: false, actor: actor.accountId, actorRole: actor.role,
       ...(input.reason === undefined ? {} : { reason: input.reason }),
@@ -266,7 +282,7 @@ export class StaffDirectoryController {
     @Param('userId') userId: string,
     @Param('sessionId') sessionId: string,
   ): Promise<void> {
-    const actor = actorOf(request);
+    const actor = await actorOf(request, this.directory);
     const result = await this.directory.revokeSession({
       id: userId, sessionId, actor: actor.accountId, actorRole: actor.role,
     });
