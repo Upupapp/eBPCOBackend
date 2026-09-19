@@ -366,8 +366,13 @@ export class StaffQueueService {
     const calendar = await this.calendars.load();
     const [account, business, documents, evaluations, payments, oop, permit, release, instructions, timeline] =
       await Promise.all([
-        this.db.query<{ email: string; mobile_number: string | null }>(
-          `select acc.email, acc.mobile_number from applications a
+        this.db.query<{
+          email: string; mobile_number: string | null;
+          street: string | null; barangay: string | null; city: string | null;
+          province: string | null; postal_code: string | null;
+        }>(
+          `select acc.email, acc.mobile_number, ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
+             from applications a
              join applicants ap on ap.id = a.applicant_id
              join accounts acc on acc.id = ap.account_id
             where a.id = $1`, [applicationId]),
@@ -459,6 +464,19 @@ export class StaffQueueService {
       summary: this.toQueueRow(row, calendar),
       applicantEmail: account.rows[0]?.email ?? '',
       applicantMobile: account.rows[0]?.mobile_number ?? null,
+      // Migration 036's own reason for existing: "the office writes to about
+      // a permit... a citizen who moves currently has to telephone the
+      // Municipal Engineer". The columns have carried this since 3 Sep 2026;
+      // nothing staff-facing ever read them until now. Every field nullable,
+      // same as the column -- an applicant who registered before this
+      // existed, or who has simply never been asked, has none of it on file.
+      applicantAddress: {
+        street: account.rows[0]?.street ?? null,
+        barangay: account.rows[0]?.barangay ?? null,
+        city: account.rows[0]?.city ?? null,
+        province: account.rows[0]?.province ?? null,
+        postalCode: account.rows[0]?.postal_code ?? null,
+      },
       form: (row['form'] as Record<string, unknown> | null) ?? {},
       formValidatedAgainst: (row['form_validated_against'] as string | null) ?? null,
       business: one(business),
@@ -790,6 +808,20 @@ export interface StaffApplicationDetail {
   readonly applicantEmail: string;
   /** From the applicant's account (`accounts.mobile_number`), the same source `applicantEmail` reads — `null` when the account has none on file, never fabricated. */
   readonly applicantMobile: string | null;
+  /**
+   * Where to send correspondence ABOUT THIS APPLICATION — migration 036's
+   * `applicants` columns, not `summary`'s `location` (the site the work
+   * happens on) or `business`'s own address (where the business operates).
+   * Every field independently nullable: most applicants have never been
+   * asked, and there is nothing to fabricate a default from.
+   */
+  readonly applicantAddress: {
+    readonly street: string | null;
+    readonly barangay: string | null;
+    readonly city: string | null;
+    readonly province: string | null;
+    readonly postalCode: string | null;
+  };
   /**
    * The applicant's own answers, and what checked them.
    *

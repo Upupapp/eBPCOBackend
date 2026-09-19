@@ -545,6 +545,38 @@ describe('opening one application', () => {
     expect(body).toHaveProperty('timeline');
   });
 
+  it('surfaces the applicant\'s own real address, not just their email and mobile', async () => {
+    // Migration 036 added applicants.street/barangay/city/province/
+    // postal_code so the office has somewhere to send correspondence -- "a
+    // citizen who moves currently has to telephone the Municipal Engineer"
+    // is that migration's own stated reason. Nothing staff-facing read the
+    // columns until now: this is the whole reason they were added, checked.
+    await db.query(
+      `update applicants set street = $1, barangay = $2, city = $3, province = $4, postal_code = $5
+        where id = $6`,
+      ['123 Rizal Street', 'Poblacion', 'Castilla', 'Sorsogon', '4713', applicantId],
+    );
+    const id = await file('BP-1', 'Under Evaluation');
+
+    const response = await get(`/staff/applications/${id}`, await staffToken('evaluator'));
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json().applicantAddress).toEqual({
+      street: '123 Rizal Street', barangay: 'Poblacion', city: 'Castilla',
+      province: 'Sorsogon', postalCode: '4713',
+    });
+  });
+
+  it('answers null fields, not a missing object, for an applicant who has never given an address', async () => {
+    const id = await file('BP-1', 'Under Evaluation');
+
+    const response = await get(`/staff/applications/${id}`, await staffToken('evaluator'));
+
+    expect(response.json().applicantAddress).toEqual({
+      street: null, barangay: null, city: null, province: null, postalCode: null,
+    });
+  });
+
   it('spells its fields the way the rest of the API does', async () => {
     // Postgres answers in snake_case and every other response here is
     // camelCase. Letting raw rows through made this the one endpoint a client
