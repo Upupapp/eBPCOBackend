@@ -1,5 +1,5 @@
 import {
-  Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, Post, Query, Req,
+  Body, Controller, Get, Headers, HttpCode, HttpStatus, Inject, Param, Patch, Post, Query, Req,
 } from '@nestjs/common';
 import { z } from 'zod';
 
@@ -10,6 +10,7 @@ import { Caller } from '../applications/domain/application';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import { StaffBusinessRegistrationService } from './staff-business-registration.service';
+import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 
 /**
  * The LGU's business directory, as an officer sees it.
@@ -124,6 +125,26 @@ function callerOf(request: AuthenticatedRequest): Caller {
   }
   return { accountId: claims.sub, kind: claims.kind, scopes: claims.scopes };
 }
+
+/**
+ * What an officer may correct on the LGU's own copy of a business record.
+ *
+ * Same subset as `businesses.controller.ts`'s own `businessUpdateShape` and
+ * for the same reason: `registrationNumber`/`dateRegistered` are the
+ * government's own record, not a value this endpoint rewrites, and `status`
+ * is its own action below rather than a field here.
+ */
+const businessUpdateShape = z.object({
+  name: z.string().min(1).max(200),
+  category: z.enum([
+    'Retail', 'Food Service', 'Services', 'Manufacturing',
+    'Construction', 'Transport', 'Agriculture', 'Other',
+  ]),
+  street: z.string().min(1).max(200),
+  barangay: z.string().min(1).max(120),
+  city: z.string().min(1).max(120),
+  province: z.string().min(1).max(120),
+}).strict();
 
 const registrationShape = z.object({
   owner: z.object({
@@ -323,5 +344,108 @@ export class StaffBusinessesController {
         submittedAt: row.submitted_at === null ? null : row.submitted_at.toISOString(),
       })),
     };
+  }
+
+  /**
+   * Correcting a business's own details on the LGU's behalf — the same
+   * owner-editable fields `businesses.controller.ts`'s citizen-facing
+   * `update()` changes, reached here without an ownership check because a
+   * staff caller may act on any business, not just their own. Same
+   * `applications:write` scope `create()` above and `register-business`
+   * already use for writing to this table.
+   */
+  @Patch(':businessId')
+  @RequireScopes('applications:write')
+  async update(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    if (callerOf(request).kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.',
+      );
+    }
+    const result = businessUpdateShape.safeParse(body);
+    if (!result.success) {
+      throw ProblemException.validation(
+        result.error.issues.map((issue) => ({ pointer: `/${issue.path.join('/')}`, message: issue.message })),
+      );
+    }
+    const input = result.data;
+
+    const existing = await this.db.query<{ id: string }>('select id from businesses where id = $1', [businessId]);
+    if (existing.rows[0] === undefined) throw ProblemException.notFound('No such business.');
+
+    const updated = await this.db.query<BusinessRow>(
+      `update businesses
+          set name = $2, category = $3, street = $4, barangay = $5, city = $6, province = $7,
+              updated_at = now()
+        where id = $1
+        returning id`,
+      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province],
+    );
+    const savedId = updated.rows[0]?.id;
+    // The columns this endpoint needs to answer with (owner name/email, application
+    // count) live only in SELECT's own join, not in a plain `update ... returning`.
+    const full = await this.db.query<BusinessRow>(`${SELECT} where b.id = $1`, [savedId]);
+    return onTheWire(full.rows[0]!);
+  }
+
+  /**
+   * Marks a business Inactive on the LGU's behalf. Same reasoning as
+   * `businesses.controller.ts`'s own `deactivate`: a hard delete is never
+   * possible once any application references the row (`on delete restrict`,
+   * migration 003), and deactivating one with an application still in
+   * progress is refused rather than silently accepted.
+   */
+  @Post(':businessId/deactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async deactivate(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.setStatus(request, businessId, 'Inactive');
+  }
+
+  /** Reverses `deactivate`. */
+  @Post(':businessId/reactivate')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async reactivate(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+  ): Promise<Record<string, unknown>> {
+    return this.setStatus(request, businessId, 'Active');
+  }
+
+  private async setStatus(
+    request: AuthenticatedRequest, businessId: string, status: 'Active' | 'Inactive',
+  ): Promise<Record<string, unknown>> {
+    if (callerOf(request).kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.',
+      );
+    }
+    const existing = await this.db.query<{ id: string }>('select id from businesses where id = $1', [businessId]);
+    if (existing.rows[0] === undefined) throw ProblemException.notFound('No such business.');
+
+    if (status === 'Inactive') {
+      const inProgress = await this.db.query<{ id: string }>(
+        `select id from applications where business_id = $1 and lifecycle_status = any($2)`,
+        [businessId, IN_PROGRESS_STATUSES],
+      );
+      if (inProgress.rows[0] !== undefined) {
+        throw new ProblemException(
+          ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+          'This business has an application still in progress. Deactivate once it is decided.',
+        );
+      }
+    }
+
+    await this.db.query('update businesses set status = $2, updated_at = now() where id = $1', [businessId, status]);
+    const full = await this.db.query<BusinessRow>(`${SELECT} where b.id = $1`, [businessId]);
+    return onTheWire(full.rows[0]!);
   }
 }

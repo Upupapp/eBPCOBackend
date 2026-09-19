@@ -6,10 +6,7 @@ import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
-import { LIFECYCLE_STATUSES, isTerminal } from '../applications/domain/lifecycle';
-
-/** Every status that means the LGU still has work in progress against a business — the set deactivate() refuses to leave stranded. */
-const IN_PROGRESS_STATUSES = LIFECYCLE_STATUSES.filter((status) => !isTerminal(status));
+import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 
 /**
  * The businesses an applicant has registered with the LGU.

@@ -445,3 +445,107 @@ describe('registering a business at the counter', () => {
     expect(response.statusCode).toBe(400);
   });
 });
+
+describe('staff editing and deactivating a business', () => {
+  // Own fixtures per test, rather than the shared mariaBusiness/joseBusiness
+  // from beforeAll — those rows' current names/statuses are asserted against
+  // by other tests in this file, and this describe mutates the rows it acts on.
+  async function freshBusiness(status: 'Active' | 'Inactive' = 'Active') {
+    const suffix = randomUUID().slice(0, 8);
+    return applicantWithBusiness({
+      first: 'Ana', last: 'Reyes', email: `ana-${suffix}@example.ph`, mobile: null,
+      business: `Reyes Bakery ${suffix}`, category: 'Retail', registration: `BN-${suffix}`, status,
+    });
+  }
+
+  const edit = (businessId: string, body: Record<string, unknown>, token = recordsOfficerToken) =>
+    app.inject({
+      method: 'PATCH', url: `/staff/businesses/${businessId}`,
+      headers: { authorization: `Bearer ${token}` }, payload: body,
+    });
+
+  const setStatus = (businessId: string, action: 'deactivate' | 'reactivate', token = recordsOfficerToken) =>
+    app.inject({
+      method: 'POST', url: `/staff/businesses/${businessId}/${action}`,
+      headers: { authorization: `Bearer ${token}` },
+    });
+
+  it('corrects the owner-editable fields, on any business (not just the officer\'s own)', async () => {
+    const { businessId } = await freshBusiness();
+
+    const response = await edit(businessId, {
+      name: 'Reyes Bakery and Cafe', category: 'Food Service',
+      street: '9 Bonifacio Street', barangay: 'Mayon', city: 'Castilla', province: 'Sorsogon',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ name: string; category: string }>()).toMatchObject({
+      name: 'Reyes Bakery and Cafe', category: 'Food Service',
+    });
+  });
+
+  it('never lets the government-assigned facts be rewritten through this route', async () => {
+    const { businessId } = await freshBusiness();
+
+    const response = await edit(businessId, {
+      name: 'X', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+      registrationNumber: 'FORGED-0001',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
+  it('refuses without applications:write', async () => {
+    const { businessId } = await freshBusiness();
+
+    const response = await edit(businessId, {
+      name: 'X', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+    }, officerToken);
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('answers 404 for a business id that does not exist', async () => {
+    const response = await edit(randomUUID(), {
+      name: 'X', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+    });
+
+    expect(response.statusCode).toBe(404);
+  });
+
+  it('deactivates a business, marking it Inactive rather than deleting it', async () => {
+    const { businessId } = await freshBusiness();
+
+    const response = await setStatus(businessId, 'deactivate');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string }>().status).toBe('Inactive');
+    const row = await db.query<{ id: string }>('select id from businesses where id = $1', [businessId]);
+    expect(row.rows.length).toBe(1);
+  });
+
+  it('is reversible', async () => {
+    const { businessId } = await freshBusiness();
+    await setStatus(businessId, 'deactivate');
+
+    const response = await setStatus(businessId, 'reactivate');
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string }>().status).toBe('Active');
+  });
+
+  it('refuses to deactivate while an application against it is still in progress', async () => {
+    const { businessId, applicantId, accountId } = await freshBusiness();
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
+                                 application_action, lifecycle_status, submitted_at, created_by)
+       values ($1,$2,$3,$4,'Fencing Permit','New','Submitted', now(), $5)`,
+      [randomUUID(), `BP-${randomUUID().slice(0, 8)}`, applicantId, businessId, accountId],
+    );
+
+    const response = await setStatus(businessId, 'deactivate');
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/still in progress/i);
+  });
+});
