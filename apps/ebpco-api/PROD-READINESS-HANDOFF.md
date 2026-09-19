@@ -105,19 +105,39 @@ process's own defaults, and a non-power-of-two N is refused outright (real
    committed row, and returns that — mirroring the sequential-replay branch
    each one already has.
 
-3. **`origin/prod-readiness` (this repo, and both frontend repos) could not be
+3. **No account-specific lockout/backoff on repeated failed sign-ins.**
+   `IdentityService.authenticate()` is otherwise carefully built against
+   enumeration — a decoy scrypt hash so an unknown email takes the same wall
+   time as a wrong password, one unified `'rejected'` reason for
+   no-account/wrong-password/disabled, MFA failures only distinguishable
+   because the password was already proven. All of that is real and correct.
+   What is missing is any per-account or per-IP counter: `recordRefusal()`
+   writes an audit entry for visibility, not a lockout. The only throttle on
+   repeated guesses against ONE account is the GLOBAL HTTP rate limiter
+   (`security.ts`, shared across all traffic to all routes) plus scrypt's own
+   per-attempt cost — neither stops a distributed attempt (many source IPs,
+   each under the global budget, guessing the same account in aggregate).
+   Not implemented this session, deliberately: unlike everything else in this
+   document, this is a genuine new feature with real product trade-offs
+   (threshold, backoff curve or hard lockout, and critically how to avoid
+   the lockout itself becoming a DoS vector — an attacker who cannot guess a
+   password can still fail it deliberately to lock out the real owner), not
+   a narrow fix to an existing, documented invariant. A human should decide
+   the shape before it gets built.
+
+4. **`origin/prod-readiness` (this repo, and both frontend repos) could not be
    deleted.** `git push origin --delete prod-readiness` hangs indefinitely on a
    Git Credential Manager prompt in this environment — no interactive terminal
    to complete it, and no `gh` CLI installed. Delete via the GitHub web UI, or
    leave it; nothing targets it going forward.
 
-4. **The real environment (`139.162.51.165` / `139-162-51-165.sslip.io`) is
+5. **The real environment (`139.162.51.165` / `139-162-51-165.sslip.io`) is
    already live** and predates this pass (see `deploy/`, `docs/DEPLOYMENT.md`).
    Not touched or tested against during this pass, per the ground rule that set
    it out of scope — the fixes above were verified against PGlite only, the
    same as every other test in this suite.
 
-5. **Sign-out and session-expiry were not touched**, per the explicit
+6. **Sign-out and session-expiry were not touched**, per the explicit
    constraint. The refresh-token fix changes WHEN a family gets revoked (a
    losing concurrent request now revokes it, same as an outright replay would)
    but not the revocation mechanism itself, token TTLs, or storage.
