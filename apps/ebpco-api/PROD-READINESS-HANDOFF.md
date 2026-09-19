@@ -71,21 +71,39 @@ process's own defaults, and a non-power-of-two N is refused outright (real
    these). Each entry needs someone who knows whether the register is stale or
    the reachability genuinely changed — not something to bulk-edit blind.
 
-2. **Payment-submission idempotency-insert race.** `PaymentService.submitPayment`
-   does check-then-insert on `idempotency_keys` the same shape the refresh-token
-   bug had, but the outcome is different: the primary key on
-   `(account_id, key)` means a losing concurrent request's transaction rolls
-   back entirely (confirmed — `SqlClient.transaction()` rolls back on any
-   thrown error), so **no duplicate payment is ever persisted**. What it does
-   produce is an uncaught Postgres unique-violation error surfacing as a raw
-   500 to a legitimate double-submit or network-retry, instead of the graceful
-   idempotent replay this function already handles for the sequential case.
-   Not fixed this session: doing it cleanly means catching Postgres error code
-   `23505`, a pattern this codebase does not use anywhere else yet, and it's a
-   reliability gap, not a security or data-integrity one. Fix shape: catch
-   `23505` on the `idempotency_keys` insert, re-`SELECT` the row the winner
-   wrote, and return that — mirroring the existing sequential-replay branch a
-   few lines above it.
+2. **Idempotency-insert race is systemic, not payment-specific.**
+   `PaymentService.submitPayment` does its own inline check-then-insert on
+   `idempotency_keys`, the same shape the refresh-token bug had. Checked
+   further this session: the SAME shape is shared, via
+   `persistence/idempotency.ts`'s `lookup()`/`remember()`, by
+   `lifecycle.service.ts`, `submission.service.ts`,
+   `staff-business-registration.service.ts` and `document.service.ts` — every
+   idempotent write in the backend. In every case the outcome is the same:
+   the primary key on `(account_id, key)` means a losing concurrent request's
+   transaction rolls back ENTIRELY (confirmed — `SqlClient.transaction()`
+   rolls back on any thrown error), so **no duplicate write is ever
+   persisted** anywhere this pattern is used. What it produces instead is an
+   uncaught Postgres unique-violation error surfacing as a raw 500 to a
+   legitimate double-submit or network-retry, instead of the graceful
+   idempotent replay each of these already handles for the SEQUENTIAL case
+   (an already-consumed key, read before the write).
+
+   **Deliberately not fixed this session**, and not a small change: a naive
+   fix — make `remember()` use `ON CONFLICT DO NOTHING` and return a boolean
+   instead of throwing — would REMOVE the rollback that currently makes this
+   safe, unless every one of the 7 call sites is also changed to explicitly
+   re-throw (or otherwise abort the transaction) on a lost race. Get that
+   wrong at even one call site and a losing request's own domain write
+   (an application submission, a business registration, a document
+   operation) commits ALONGSIDE the winner's — turning a reliability papercut
+   into the first actual duplicate-write bug in this system. Doing it
+   correctly means auditing all 7 call sites' domain semantics individually,
+   not a mechanical find-and-replace. Fix shape, once someone has done that
+   audit: `remember()` keeps throwing (preserving the rollback) but with a
+   typed, catchable error; each call site catches it OUTSIDE its own
+   transaction and re-runs `lookup()`, which will now find the winner's
+   committed row, and returns that — mirroring the sequential-replay branch
+   each one already has.
 
 3. **`origin/prod-readiness` (this repo, and both frontend repos) could not be
    deleted.** `git push origin --delete prod-readiness` hangs indefinitely on a
