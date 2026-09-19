@@ -70,6 +70,25 @@ ENV NODE_ENV=production
 # Node's own defaults assume a machine, not a container's memory limit.
 ENV NODE_OPTIONS="--max-old-space-size=384"
 
+# Which build this is, baked into the image so `/version` can say so.
+#
+# docs/DEPLOYMENT.md has always passed `--build-arg BUILD_COMMIT=...` and
+# `--build-arg BUILD_TIME=...`, but until 2026-09-19 nothing here declared
+# either ARG, so Docker discarded both with a warning and every image reported
+# `commit: unknown`. Step 4 of that runbook -- "confirm /version reports the
+# commit that was just deployed" -- could therefore never pass or fail; it
+# always said unknown. Declared in THIS stage, not at the top: an ARG declared
+# before the first FROM is out of scope inside every stage.
+#
+# The `:-` defaults matter. `BUILD_TIME` is validated as `min(1).optional()`
+# (app-config.ts): absent is fine, EMPTY is a config error and the service
+# exits 78 at boot. A plain `docker build` with no build args must still
+# produce an image that starts.
+ARG BUILD_COMMIT
+ARG BUILD_TIME
+ENV BUILD_COMMIT=${BUILD_COMMIT:-unknown}
+ENV BUILD_TIME=${BUILD_TIME:-1970-01-01T00:00:00Z}
+
 COPY --from=pruned --chown=node:node /app/node_modules ./node_modules
 COPY --from=build --chown=node:node /app/dist ./dist
 COPY --from=build --chown=node:node /app/package.json ./package.json

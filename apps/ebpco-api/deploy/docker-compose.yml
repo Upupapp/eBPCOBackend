@@ -1,0 +1,157 @@
+# Single-host deployment of the eBPCO API: Caddy → API → Postgres, on one
+# machine, with Docker Compose. Read deploy/README.md before running anything.
+#
+# This is docs/ENVIRONMENTS.md's resource graph collapsed onto one host:
+#
+#   public ── TLS ──► caddy (terminates TLS, sets X-Forwarded-For)
+#                       │
+#                       ▼
+#                     api   (read-only rootfs, non-root, memory-capped)
+#                       │
+#                       ├──► postgres  (private network only, never published)
+#                       └──► clamav    (production profile only, see below)
+#
+# What it deliberately does NOT give you, so nobody mistakes it for the
+# production graph: point-in-time recovery, a second availability zone, a
+# secret manager, or an object store that survives this host. Those are E-1's
+# hosting half (docs/ENVIRONMENTS.md); this is the first real environment, and
+# it is honest about being a single box.
+#
+# Run every command from THIS directory. Compose reads `./.env` for the
+# `${...}` substitutions below, and the `api`/`migrate` services read the same
+# file as their environment — one file, so the two cannot drift.
+
+name: ebpco
+
+services:
+  # ── database ────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ebpco
+      POSTGRES_USER: ebpco
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in deploy/.env}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    # No `ports:`. The database is reachable only on the compose network; the
+    # only way in from outside is `docker compose exec postgres psql`.
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ebpco -d ebpco"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ── the service ─────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: runtime
+      args:
+        # Exported by deploy.sh. Absent, the image reports `unknown`, which is
+        # the Dockerfile's own default — never an empty string, which the
+        # config validator rejects at boot.
+        BUILD_COMMIT: ${BUILD_COMMIT:-}
+        BUILD_TIME: ${BUILD_TIME:-}
+    image: ebpco-api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    # Values that describe THIS compose network rather than the deployment,
+    # so they live here and not in .env. `environment` wins over `env_file`.
+    environment:
+      DATABASE_URL: postgres://ebpco:${POSTGRES_PASSWORD}@postgres:5432/ebpco
+      PORT: "3000"
+      # Caddy is the only thing that can reach this port, and it sets
+      # X-Forwarded-For. This is the one place TRUST_PROXY is safe to enable.
+      TRUST_PROXY: "true"
+      # The filesystem store writes here; it is the one writable mount on an
+      # otherwise read-only root, and a named volume so documents survive a
+      # `docker compose up`. They still live on this one host — see README.
+      OBJECT_STORE_LOCAL_PATH: /app/.data/objects
+      # clamd's address on this network. Ignored while the scanner driver is
+      # `local`; used the moment it is `clamav` (production profile).
+      MALWARE_SCANNER_URL: tcp://clamav:3310
+    # No `ports:` either. Caddy proxies to api:3000 over the compose network;
+    # publishing 3000 would let a caller bypass TLS and forge X-Forwarded-For.
+    read_only: true
+    tmpfs:
+      - /tmp
+    volumes:
+      - documents:/app/.data
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    # NODE_OPTIONS caps the heap at 384 MB (Dockerfile); this caps the
+    # container above it so a leak is a restart, not a host out of memory.
+    mem_limit: 512m
+
+  # ── TLS termination ─────────────────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      API_HOST: ${API_HOST:?set API_HOST in deploy/.env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account. Losing this volume means re-issuing
+      # against Let's Encrypt's rate limits, so it is named, not anonymous.
+      - caddy_data:/data
+      - caddy_config:/config
+
+  # ── malware scanner (production only) ──────────────────────────────────
+  # `docker compose --profile production up -d` starts it. Needs roughly 1 GB
+  # of RAM for its signature database, which is why it is opt-in: a 2 GB
+  # Linode runs api + postgres + caddy comfortably and this one uncomfortably.
+  # Non-critical by design (docs/ENVIRONMENTS.md): if it is down, uploads are
+  # held, and the service stays up — hence no depends_on from `api`.
+  clamav:
+    image: clamav/clamav:stable
+    profiles: ["production"]
+    restart: unless-stopped
+    volumes:
+      - clamav_db:/var/lib/clamav
+
+  # ── one-off operations ─────────────────────────────────────────────────
+  # Never started by `up`. Run explicitly:
+  #
+  #   docker compose run --rm migrate                          # apply migrations
+  #   docker compose run --rm -e EBPCO_SUPERADMIN_PASSWORD='…' \
+  #     migrate npm run seed:super-admin                      # first account
+  #
+  # Same source, same Dockerfile, the `migrate` target: the only image allowed
+  # to still carry ts-node and scripts/. It loads the FULL config through the
+  # same loadConfig the service uses, so it reads the same .env — a hand-built
+  # subset would drift (docs/DEPLOYMENT.md, step 1).
+  migrate:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+      target: migrate
+    image: ebpco-api-migrate
+    profiles: ["ops"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      DATABASE_URL: postgres://ebpco:${POSTGRES_PASSWORD}@postgres:5432/ebpco
+      OBJECT_STORE_LOCAL_PATH: /app/.data/objects
+      MALWARE_SCANNER_URL: tcp://clamav:3310
+
+volumes:
+  pgdata:
+  documents:
+  caddy_data:
+  caddy_config:
+  clamav_db:

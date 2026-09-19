@@ -171,8 +171,12 @@ describe('a refused authorisation is recorded, and bounded', () => {
     );
     expect(entries.rows).toHaveLength(1);
     // The guard refuses on the ROUTE, before any record is read. An id here
-    // would suggest a target was checked when none was.
-    expect(entries.rows[0]!.after_state.route).toBe('/staff/applications/:id');
+    // would suggest a target was checked when none was. Named for the real
+    // Fastify param (`:applicationId`, from the controller's own
+    // `@Get(':applicationId')`) since the guard now records the matched route
+    // pattern itself rather than a UUID-shaped substring of the raw request
+    // URL guessed at by `maskIds`.
+    expect(entries.rows[0]!.after_state.route).toBe('/staff/applications/:applicationId');
     expect(entries.rows[0]!.after_state.route).not.toContain(target);
   });
 

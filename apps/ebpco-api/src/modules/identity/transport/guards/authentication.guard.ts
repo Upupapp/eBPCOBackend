@@ -130,7 +130,16 @@ export class AuthenticationGuard implements CanActivate {
     // The prefix is already the convention the route table and the contract are
     // written against, so this makes the convention load-bearing instead of
     // documentary.
-    const path = request.url?.split('?')[0] ?? '';
+    //
+    // Read from `request.routeOptions.url` -- the registered route PATTERN
+    // Fastify actually matched -- rather than `request.url`, which is the raw
+    // request line exactly as the caller sent it. find-my-way decodes
+    // unreserved percent-escapes before matching a route, so a request for
+    // `/%73taff/businesses` is routed to the same staff-only controller as
+    // `/staff/businesses` while the RAW url string still does not start with
+    // `/staff/`. A guard reading the raw string let that request straight
+    // through; the matched route pattern cannot be spelled any other way.
+    const path = request.routeOptions.url?.split('?')[0] ?? '';
     if (path.startsWith('/staff/') && claims.kind !== 'staff') {
       // An applicant reaching for a staff route is the clearest probe this
       // guard can see: no ordinary client does it by accident.

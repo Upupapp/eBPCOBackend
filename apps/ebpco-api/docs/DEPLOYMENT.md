@@ -5,7 +5,9 @@
 would run, written as a runbook so it is at least repeatable by hand, and so porting it
 to a workflow later is transcription rather than design.
 
-Nothing here has been executed against a real environment. No environment exists yet.
+The first real environment is a single Linode running the Compose stack in
+[`deploy/`](../deploy/README.md) — `deploy/deploy.sh` is this runbook's §Deploy as one
+command. What follows is still the reference sequence it implements.
 
 ## Before anything is committed
 
@@ -88,8 +90,8 @@ applicant data to a new build.
 
 | Gap | Owner |
 |---|---|
-| No environment exists; nothing has been deployed | E-1 hosting half |
-| No IaC — see `docs/ENVIRONMENTS.md` for the graph it must implement | E-1 hosting half |
+| One single-host environment (`deploy/`); no PITR, one zone, secrets on disk | E-1 hosting half |
+| No IaC — see `docs/ENVIRONMENTS.md` for the graph it must implement; `deploy/` is that graph on one box, not IaC | E-1 hosting half |
 | No container or dependency scanning in the loop | TAB 14 |
 | No automated rollback — step 5 is manual | TAB 15 + a runner |
 | No alerting, so a failed deploy is noticed by a human | TAB 15 |

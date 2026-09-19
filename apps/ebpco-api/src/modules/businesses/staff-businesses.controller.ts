@@ -228,7 +228,20 @@ export class StaffBusinessesController {
 
   @Get()
   @RequireScopes('applications:read')
-  async list(@Query() query: unknown): Promise<Record<string, unknown>> {
+  async list(
+    @Req() request: AuthenticatedRequest,
+    @Query() query: unknown,
+  ): Promise<Record<string, unknown>> {
+    // Defense in depth: the guard already refuses a non-staff caller on any
+    // `/staff/*` path, structurally. This is the second, independent check
+    // the guard's own doc comment describes -- the one that would have caught
+    // the leak this route already caused once even if the guard's path check
+    // had a gap, rather than this being the only thing standing in the way.
+    if (callerOf(request).kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.',
+      );
+    }
     const result = filtersShape.safeParse(query ?? {});
     if (!result.success) {
       throw ProblemException.validation(
@@ -271,7 +284,16 @@ export class StaffBusinessesController {
 
   @Get(':businessId')
   @RequireScopes('applications:read')
-  async detail(@Param('businessId') businessId: string): Promise<Record<string, unknown>> {
+  async detail(
+    @Req() request: AuthenticatedRequest,
+    @Param('businessId') businessId: string,
+  ): Promise<Record<string, unknown>> {
+    // See `list()`: the same second, independent check.
+    if (callerOf(request).kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.',
+      );
+    }
     if (!/^[0-9a-fA-F-]{36}$/.test(businessId)) {
       throw ProblemException.notFound('No such business.');
     }

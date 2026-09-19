@@ -361,6 +361,40 @@ describe('the role table and the route table agree', () => {
     expect(reached).toEqual([]);
   });
 
+  it('refuses a percent-encoded /staff path exactly as it refuses the plain one', async () => {
+    // %73 is 's'. Fastify's router (find-my-way) decodes unreserved
+    // percent-escapes before matching, so this still resolves to the exact
+    // same staff-only controller as `/staff/businesses` -- but a guard that
+    // reads the raw `request.url` sees a string that does not start with
+    // `/staff/` and would let a non-staff caller straight through it.
+    // `/staff/businesses` specifically: the guard's own doc comment names it
+    // as the route that already leaked once, for exactly this reason, before
+    // the prefix check existed at all.
+    const account = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant','encoded-probe@example.ph','encoded-probe@example.ph','scrypt$1$1$1$a$b')`,
+      [account],
+    );
+    const issued = await tokens.issueAccessToken({
+      sub: account, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    });
+
+    const encoded = await app.inject({
+      method: 'GET',
+      url: '/%73taff/businesses',
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+    const doubleEncoded = await app.inject({
+      method: 'GET',
+      url: '/%2573taff/businesses',
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+
+    expect(encoded.statusCode).toBe(403);
+    expect(doubleEncoded.statusCode).not.toBe(200);
+  });
+
   it('grants the super-admin the four acting scopes, by the owner\'s own 2026-09-13 reversal', () => {
     // Was "refuses ... deliberately" — the separation-of-duty argument that
     // used to keep these off Super Admin (the officer who assesses a fee must
