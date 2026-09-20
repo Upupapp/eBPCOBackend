@@ -590,6 +590,30 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     attempts: none('account-lifetime'),
   },
 
+  /**
+   * The pre-account twin of `contact_verification_challenges` — migration
+   * 048's `RegistrationVerificationService`. Keyed by `email` directly
+   * rather than `account_id`: this challenge exists specifically for the
+   * window BEFORE an account is created, so there is no account row yet to
+   * link to. `email` is therefore `direct` personal data here, not
+   * `linkable` — it is not a foreign key into `accounts`, it is the
+   * identifier itself, held only for the life of one registration attempt.
+   * `code_digest` is a credential in transit, the same reasoning as its
+   * twin above. `confirmed_at` and `consumed_at` are two distinct
+   * timestamps by design (see the service's own doc comment) but neither
+   * carries anything about the person beyond process state.
+   */
+  registration_email_challenges: {
+    id: structural,
+    email: direct('operational', SERVICE_DELIVERY),
+    code_digest: secret('authentication'),
+    issued_at: none('operational'),
+    expires_at: none('operational'),
+    confirmed_at: none('operational'),
+    consumed_at: none('operational'),
+    attempts: none('operational'),
+  },
+
   payment_methods: {
     method: none('statutory'),
     label: none('statutory'),

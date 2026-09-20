@@ -141,8 +141,10 @@ export class ErasureService {
     let photoKeyToDelete: string | null = null;
 
     const outcome = await this.db.transaction<ErasureResult>(async (tx) => {
-      const account = await tx.query<{ kind: string; erased_at: Date | null; photo_key: string | null }>(
-        'select kind, erased_at, photo_key from accounts where id = $1 for update',
+      const account = await tx.query<{
+        kind: string; erased_at: Date | null; photo_key: string | null; email: string;
+      }>(
+        'select kind, erased_at, photo_key, email from accounts where id = $1 for update',
         [accountId],
       );
       const row = account.rows[0];
@@ -199,6 +201,18 @@ export class ErasureService {
         const result = await tx.query(`delete from ${table} where ${column} = $1`, [accountId]);
         erased[table] = result.rowCount;
       }
+
+      // `registration_email_challenges` is keyed by EMAIL, not `account_id`
+      // — it exists for the window before an account is created, so it has
+      // no account_id column to join ERASE_IN_ORDER's uniform shape at all.
+      // Matched on the account's OWN current email, read above, before the
+      // UPDATE below overwrites it with the erased placeholder — any live
+      // or spent registration challenge for the address this citizen used
+      // to sign up goes with the rest of their sign-in material.
+      const registrationChallenges = await tx.query(
+        'delete from registration_email_challenges where email = $1', [row.email],
+      );
+      erased.registration_email_challenges = registrationChallenges.rowCount;
 
       const erasedAt = this.clock();
 
