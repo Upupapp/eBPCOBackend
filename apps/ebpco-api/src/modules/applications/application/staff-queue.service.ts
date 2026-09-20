@@ -367,11 +367,12 @@ export class StaffQueueService {
     const [account, business, documents, evaluations, payments, oop, permit, release, instructions, timeline] =
       await Promise.all([
         this.db.query<{
-          email: string; mobile_number: string | null;
+          email: string; mobile_number: string | null; email_verified_at: Date | null;
           street: string | null; barangay: string | null; city: string | null;
           province: string | null; postal_code: string | null;
         }>(
-          `select acc.email, acc.mobile_number, ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
+          `select acc.email, acc.mobile_number, acc.email_verified_at,
+                  ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
              from applications a
              join applicants ap on ap.id = a.applicant_id
              join accounts acc on acc.id = ap.account_id
@@ -463,6 +464,7 @@ export class StaffQueueService {
     return {
       summary: this.toQueueRow(row, calendar),
       applicantEmail: account.rows[0]?.email ?? '',
+      applicantEmailVerifiedAt: account.rows[0]?.email_verified_at?.toISOString() ?? null,
       applicantMobile: account.rows[0]?.mobile_number ?? null,
       // Migration 036's own reason for existing: "the office writes to about
       // a permit... a citizen who moves currently has to telephone the
@@ -806,6 +808,16 @@ function decodeCursor(cursor: string): { updatedAt: Date; id: string } | null {
 export interface StaffApplicationDetail {
   readonly summary: QueueRow;
   readonly applicantEmail: string;
+  /**
+   * When the applicant confirmed the code sent to that address — at sign-up
+   * (`registration-verification.service.ts`) or later (`contact-verification
+   * .service.ts`) — or `null` if they never have. The Admin Portal used to
+   * show a "verified" state from its own local mock, with Confirm / Mark
+   * Failed buttons that wrote nowhere; this is the account's own answer.
+   * Mobile numbers are deliberately not covered: the LGU records them but
+   * does not verify them (no SMS provider, and no intention to add one).
+   */
+  readonly applicantEmailVerifiedAt: string | null;
   /** From the applicant's account (`accounts.mobile_number`), the same source `applicantEmail` reads — `null` when the account has none on file, never fabricated. */
   readonly applicantMobile: string | null;
   /**
