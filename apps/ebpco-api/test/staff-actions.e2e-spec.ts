@@ -312,10 +312,13 @@ describe('recording an evaluation', () => {
     expect(complete).toBe(true);
 
     await approvedAssessment(id);
-    await post(`/staff/applications/${id}/order-of-payment`, assessor);
+    const order = await post(`/staff/applications/${id}/order-of-payment`, assessor);
 
-    const assessed = await post(`/staff/applications/${id}/transitions`, assessor, { to: 'Assessed' });
-    expect(assessed.statusCode).toBe(200);
+    // Issuing the Order is what moves it to Assessed now (2026-09-20) — the
+    // route makes the move and says so. The corrected evaluation is what
+    // let that move's `evaluations-complete` precondition hold.
+    expect(order.statusCode).toBe(201);
+    expect(order.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Assessed');
   });
 
   it('names only the incomplete evaluation, not a downstream Order of Payment the officer cannot act on yet', async () => {
@@ -352,14 +355,18 @@ describe('the permit precondition that was missing', () => {
     expect(response.json().detail).toMatch(/no permit has been generated/i);
   });
 
-  it('allows it once a permit really has been generated', async () => {
+  it('makes the move itself once a permit really has been generated', async () => {
     const id = await file('BP-1', 'Approved');
     const token = await staffToken('building-official');
-    await post(`/staff/applications/${id}/permit`, token, { scope: SCOPE });
+    const permit = await post(`/staff/applications/${id}/permit`, token, { scope: SCOPE });
 
-    const response = await post(`/staff/applications/${id}/transitions`, token, { to: 'Permit Generated' });
-
-    expect(response.statusCode).toBe(200);
+    // The precondition holds the instant the permit exists, and generating
+    // it is the act that means "Permit Generated" — so the route carries the
+    // application there rather than leaving a status click owed.
+    expect(permit.statusCode).toBe(201);
+    expect(permit.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Permit Generated');
+    const repeated = await post(`/staff/applications/${id}/transitions`, token, { to: 'Permit Generated' });
+    expect(repeated.statusCode).toBe(409);
   });
 });
 
@@ -386,19 +393,22 @@ describe('the release precondition that was missing', () => {
     const id = await file('BP-1', 'Approved');
     const official = await staffToken('building-official');
     const releasing = await staffToken('releasing-officer');
+    // Each act carries the application to the status it means (2026-09-20):
+    // permit -> Permit Generated, preparation -> Ready for Release, release
+    // -> Released and on to Completed. No status clicks in between.
     await post(`/staff/applications/${id}/permit`, official, { scope: SCOPE });
-    await post(`/staff/applications/${id}/transitions`, official, { to: 'Permit Generated' });
     await post(`/staff/applications/${id}/release-preparation`, releasing, {
       claimLocation: 'OBO, 2/F Cabuyao City Hall', officeHours: 'Mon-Fri 8:00-17:00',
       bringWithYou: ['One valid government ID'],
     });
-    await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Ready for Release' });
-    await post(`/staff/applications/${id}/release`, releasing,
+    const release = await post(`/staff/applications/${id}/release`, releasing,
       { claimantName: 'Maria Santos', method: 'Physical Claim' });
 
-    const response = await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Released' });
-
-    expect(response.statusCode).toBe(200);
+    expect(release.statusCode).toBe(201);
+    expect(release.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Completed');
+    const row = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [id]);
+    expect(row.rows[0]?.lifecycle_status).toBe('Completed');
   });
 });
 
@@ -828,19 +838,20 @@ describe('the whole path, five officers, one application', () => {
     });
     expect(permit.statusCode).toBe(201);
 
-    await post(`/staff/applications/${id}/transitions`, official, { to: 'Permit Generated' });
-    await post(`/staff/applications/${id}/release-preparation`, releasing, {
+    expect(permit.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Permit Generated');
+    const prepared = await post(`/staff/applications/${id}/release-preparation`, releasing, {
       claimLocation: 'OBO, 2/F Cabuyao City Hall', officeHours: 'Mon-Fri 8:00-17:00',
       bringWithYou: ['One valid government ID'],
     });
-    await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Ready for Release' });
-    await post(`/staff/applications/${id}/release`, releasing, {
+    expect(prepared.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Ready for Release');
+    const released = await post(`/staff/applications/${id}/release`, releasing, {
       claimantName: 'Maria Santos', method: 'Physical Claim',
     });
-    const released = await post(`/staff/applications/${id}/transitions`, releasing, { to: 'Released' });
 
-    expect(released.statusCode).toBe(200);
-    expect(released.json<{ status: string }>().status).toBe('Released');
+    expect(released.statusCode).toBe(201);
+    // Released, then Completed, in the one call — nothing further happens to
+    // a permit in the claimant's hands.
+    expect(released.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Completed');
 
     const detail = (await get(`/staff/applications/${id}`, official)).json<{
       summary: { lifecycleStatus: string };
@@ -849,7 +860,7 @@ describe('the whole path, five officers, one application', () => {
       evaluations: unknown[];
       timeline: Array<{ toStatus: string; actorName: string | null }>;
     }>();
-    expect(detail.summary.lifecycleStatus).toBe('Released');
+    expect(detail.summary.lifecycleStatus).toBe('Completed');
     expect(detail.permit.permitNumber).toMatch(/^FP-2026-\d{6}$/);
     expect(detail.release.claimantName).toBe('Maria Santos');
     expect(detail.evaluations).toHaveLength(5);

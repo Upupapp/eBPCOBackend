@@ -5,7 +5,7 @@ import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../domain/application';
-import { LifecycleService } from '../application/lifecycle.service';
+import { FollowOnResult, LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { EVALUATION_RESULTS, EVALUATION_STAGES, EvaluationService } from '../application/evaluation.service';
 import { AssessmentService } from '../../payments/application/assessment.service';
@@ -176,6 +176,20 @@ export class StaffActionsController {
     }
   }
 
+  /**
+   * The one place a stopped follow-on chain is written down. Logged rather
+   * than thrown, for the reason `LifecycleService.followOn` gives; logged AT
+   * ALL because the silent version of this pattern took real diagnostic
+   * effort to notice was failing — nothing about a swallowed refusal was
+   * visible anywhere until the data was read back by hand.
+   */
+  private noteFollowOn(what: string, applicationId: string, chain: FollowOnResult): void {
+    if (chain.stoppedAt === null) return;
+    this.logger.warn(`${what} recorded but the application did not advance to ${chain.stoppedAt.to}`, {
+      applicationId, status: chain.status, refusal: chain.stoppedAt.refusal,
+    });
+  }
+
   @Post('evaluations')
   @HttpCode(HttpStatus.CREATED)
   @RequireScopes('staff:evaluate')
@@ -341,7 +355,25 @@ export class StaffActionsController {
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
-    return { orderId: result.orderId, number: result.number, totalCentavos: result.total };
+
+    // Issuing the Order IS the assessment: `Under Evaluation -> Assessed`
+    // requires exactly `evaluations-complete` (which `issue()` just
+    // re-checked) and `order-of-payment-issued` (which is now true), under
+    // the `staff:assess` scope this route already demands. Until now nothing
+    // made that move, so an application with every stage passed and a real
+    // Order in force still read "Under Evaluation" to every officer and
+    // citizen, and the citizen could not pay — `Assessed -> Payment
+    // Submitted` only starts from Assessed. The notification the transition
+    // carries (`order-of-payment-issued`) is what tells the applicant a fee
+    // is due, which is the other half of why this belongs here.
+    const chain = await this.lifecycle.followOn({
+      applicationId, hops: [{ caller, to: 'Assessed' }],
+    });
+    this.noteFollowOn('order of payment', applicationId, chain);
+    return {
+      orderId: result.orderId, number: result.number, totalCentavos: result.total,
+      lifecycleStatus: chain.status,
+    };
   }
 
   /**
@@ -388,49 +420,29 @@ export class StaffActionsController {
       //
       // Skipped on a replay, same reasoning as the citizen controller: the
       // moves already happened on the original call.
+      let lifecycleStatus: string | null = null;
       if (!result.replayed) {
         const asApplicant: Caller = {
           accountId: result.applicantAccountId, kind: 'applicant', scopes: ['payments:write'],
         };
-        // Best-effort and never thrown on refusal, in that order: the payment
-        // row above is already committed, so a refused status move must not
-        // turn a receipted payment into an error response the cashier reads
-        // as "that failed." Each hop only proceeds if the one before it
-        // actually landed.
-        const submitted = await this.lifecycle.transition({
-          applicationId, caller: asApplicant, to: 'Payment Submitted',
+        // Best-effort and never thrown on refusal (see `followOn`): the
+        // payment row above is already committed. The last hop is new: a
+        // verified payment has nothing left to wait for before the building
+        // official's queue, and leaving it at Payment Verified meant a
+        // "Send to Approval" click nobody knew they owed.
+        const chain = await this.lifecycle.followOn({
+          applicationId,
+          hops: [
+            { caller: asApplicant, to: 'Payment Submitted' },
+            { caller: cashier, to: 'Payment Under Verification' },
+            { caller: cashier, to: 'Payment Verified' },
+            { caller: cashier, to: 'For Approval' },
+          ],
         });
-        if (submitted.ok) {
-          const underVerification = await this.lifecycle.transition({
-            applicationId, caller: cashier, to: 'Payment Under Verification',
-          });
-          if (underVerification.ok) {
-            const verified = await this.lifecycle.transition({
-              applicationId, caller: cashier, to: 'Payment Verified',
-            });
-            if (!verified.ok) {
-              this.logger.warn('onsite payment recorded but the application did not advance to Payment Verified', {
-                applicationId, paymentId: result.paymentId,
-                refusal: 'refusal' in verified ? verified.refusal : { kind: 'reused' },
-              });
-            }
-          } else {
-            this.logger.warn(
-              'onsite payment recorded but the application did not advance to Payment Under Verification',
-              {
-                applicationId, paymentId: result.paymentId,
-                refusal: 'refusal' in underVerification ? underVerification.refusal : { kind: 'reused' },
-              },
-            );
-          }
-        } else {
-          this.logger.warn('onsite payment recorded but the application did not advance to Payment Submitted', {
-            applicationId, paymentId: result.paymentId,
-            refusal: 'refusal' in submitted ? submitted.refusal : { kind: 'reused' },
-          });
-        }
+        this.noteFollowOn('onsite payment', applicationId, chain);
+        lifecycleStatus = chain.status;
       }
-      return { paymentId: result.paymentId, replayed: result.replayed };
+      return { paymentId: result.paymentId, replayed: result.replayed, lifecycleStatus };
     }
 
     if (result.reason === 'self-receipt') {
@@ -469,7 +481,15 @@ export class StaffActionsController {
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
-    return { permitNumber: result.permitNumber, issuedDate: result.issuedDate };
+    // `Approved -> Permit Generated` has exactly one precondition,
+    // `permit-generated`, which the call above just made true — and the
+    // transition is what notifies the applicant. Made here so every client
+    // sees the same status, rather than each remembering to make the move.
+    const chain = await this.lifecycle.followOn({
+      applicationId, hops: [{ caller, to: 'Permit Generated' }],
+    });
+    this.noteFollowOn('permit', applicationId, chain);
+    return { permitNumber: result.permitNumber, issuedDate: result.issuedDate, lifecycleStatus: chain.status };
   }
 
   @Post('release-preparation')
@@ -491,7 +511,13 @@ export class StaffActionsController {
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
-    return { prepared: true };
+    // Preparing the release is what "Ready for Release" means; the transition
+    // is what sends the applicant the claim instructions just recorded.
+    const chain = await this.lifecycle.followOn({
+      applicationId, hops: [{ caller, to: 'Ready for Release' }],
+    });
+    this.noteFollowOn('release preparation', applicationId, chain);
+    return { prepared: true, lifecycleStatus: chain.status };
   }
 
   @Post('release')
@@ -511,6 +537,14 @@ export class StaffActionsController {
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
-    return { releasedAt: result.releasedAt };
+    // The release just recorded satisfies `permit-released`; nothing further
+    // happens to an application after its permit is in the claimant's hands,
+    // so it is also Completed — the same two hops the portal used to make
+    // itself, now made once, here, for every client.
+    const chain = await this.lifecycle.followOn({
+      applicationId, hops: [{ caller, to: 'Released' }, { caller, to: 'Completed' }],
+    });
+    this.noteFollowOn('release', applicationId, chain);
+    return { releasedAt: result.releasedAt, lifecycleStatus: chain.status };
   }
 }

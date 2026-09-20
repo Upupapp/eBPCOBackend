@@ -35,6 +35,19 @@ export type TransitionResult =
   /** The same idempotency key was used for a different request. */
   | { readonly ok: false; readonly reused: true };
 
+/** One move in a `followOn` chain: who makes it, and to where. */
+export interface FollowOnHop {
+  readonly caller: Caller;
+  readonly to: LifecycleStatus;
+}
+
+export interface FollowOnResult {
+  /** Where the application stands after the chain, whether or not every hop landed. `null` only if it does not exist. */
+  readonly status: LifecycleStatus | null;
+  /** The first hop that was refused, if any. Hops before it landed; hops after it were not attempted. */
+  readonly stoppedAt: { readonly to: LifecycleStatus; readonly refusal: Refusal | { readonly kind: 'reused' } } | null;
+}
+
 interface SnapshotRow {
   id: string;
   applicant_account_id: string;
@@ -311,6 +324,56 @@ export class LifecycleService {
 
       return { ok: true, ...result };
     });
+  }
+
+  /**
+   * The moves an act IMPLIES, made right after it.
+   *
+   * Issuing an Order of Payment is what "Assessed" means; verifying a payment
+   * is what "Payment Verified" means; generating a permit is what "Permit
+   * Generated" means. Until 2026-09-20 each of those acts wrote its own row
+   * and left `lifecycle_status` where it was, so an officer had to find the
+   * matching entry in a status menu and click it — and when they did not,
+   * the application sat one invisible step behind what had actually
+   * happened to it. Found live: every evaluation stage passed and the Order
+   * of Payment issued, and the application still read "Under Evaluation".
+   *
+   * Semantics, so every route uses this the same way:
+   *
+   * - Best-effort, never thrown. The act itself is already committed by the
+   *   time this runs; a refused status move must not turn a receipted
+   *   payment or an issued permit into an error the officer reads as "that
+   *   failed". The caller logs `stoppedAt` and reports `status`.
+   * - Tolerant of a move already made. If the application is already AT one
+   *   of the hops — an officer clicked "Send to Payment Verification" by
+   *   hand a moment earlier — the chain resumes from the hop after it
+   *   rather than being refused for repeating it.
+   * - In order, stopping at the first refusal. Every hop after a refused one
+   *   depends on it, so attempting them would only produce more refusals.
+   * - No idempotency key: the act that triggered this carries its own, and
+   *   a replay of that act does not call this (see each route).
+   */
+  async followOn(options: {
+    applicationId: string;
+    hops: readonly FollowOnHop[];
+  }): Promise<FollowOnResult> {
+    const { applicationId, hops } = options;
+    let current = (await this.snapshot(applicationId))?.status ?? null;
+    if (current === null) return { status: null, stoppedAt: null };
+
+    // Resume after the hop the application already stands at, if any.
+    const alreadyAt = hops.findIndex((hop) => hop.to === current);
+    for (const hop of hops.slice(alreadyAt + 1)) {
+      const moved = await this.transition({ applicationId, caller: hop.caller, to: hop.to });
+      if (!moved.ok) {
+        return {
+          status: current,
+          stoppedAt: { to: hop.to, refusal: 'refusal' in moved ? moved.refusal : { kind: 'reused' } },
+        };
+      }
+      current = moved.status;
+    }
+    return { status: current, stoppedAt: null };
   }
 
   /**

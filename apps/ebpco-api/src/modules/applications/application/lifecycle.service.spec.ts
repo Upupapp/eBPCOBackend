@@ -307,3 +307,60 @@ describe('optimistic concurrency', () => {
     expect(audits.rows[0]?.count).toBe(1);
   });
 });
+
+describe('follow-on moves', () => {
+  // Submitted -> Received -> Document Verification are all staff moves with
+  // no preconditions, which makes them the plainest chain to exercise.
+  it('makes every hop in order and reports where the application stands', async () => {
+    const chain = await service.followOn({
+      applicationId: APPLICATION,
+      hops: [{ caller: officer, to: 'Received' }, { caller: officer, to: 'Document Verification' }],
+    });
+
+    expect(chain).toEqual({ status: 'Document Verification', stoppedAt: null });
+    const row = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [APPLICATION]);
+    expect(row.rows[0]?.lifecycle_status).toBe('Document Verification');
+  });
+
+  it('resumes after a hop an officer already made by hand, rather than refusing to repeat it', async () => {
+    await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+
+    const chain = await service.followOn({
+      applicationId: APPLICATION,
+      hops: [{ caller: officer, to: 'Received' }, { caller: officer, to: 'Document Verification' }],
+    });
+
+    expect(chain).toEqual({ status: 'Document Verification', stoppedAt: null });
+    // One transition row per move actually made — the repeated one was skipped, not re-recorded.
+    const moves = await db.query<{ count: number }>(
+      'select count(*)::int as count from application_transitions where application_id = $1 and from_status is not null',
+      [APPLICATION]);
+    expect(moves.rows[0]?.count).toBe(2);
+  });
+
+  it('stops at the first refused hop, keeps what landed, and names the refusal', async () => {
+    // Document Verification -> Under Evaluation needs a verified identity
+    // document and every required document present; this application has
+    // neither, so the third hop is refused on its preconditions.
+    const chain = await service.followOn({
+      applicationId: APPLICATION,
+      hops: [
+        { caller: officer, to: 'Received' },
+        { caller: officer, to: 'Document Verification' },
+        { caller: officer, to: 'Under Evaluation' },
+      ],
+    });
+
+    expect(chain.status).toBe('Document Verification');
+    expect(chain.stoppedAt?.to).toBe('Under Evaluation');
+    expect(chain.stoppedAt?.refusal.kind).toBe('precondition-unmet');
+  });
+
+  it('answers null for an application that does not exist, without throwing', async () => {
+    const chain = await service.followOn({
+      applicationId: randomUUID(), hops: [{ caller: officer, to: 'Received' }],
+    });
+    expect(chain).toEqual({ status: null, stoppedAt: null });
+  });
+});

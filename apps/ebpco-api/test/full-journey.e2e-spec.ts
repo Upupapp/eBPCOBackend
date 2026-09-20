@@ -219,8 +219,16 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     expect(order.statusCode).toBe(201);
     expect(order.json<{ totalCentavos: number }>().totalCentavos).toBe(682_000);
 
+    // Issuing the Order IS the assessment (2026-09-20): the route makes the
+    // `Under Evaluation -> Assessed` move itself and says where the
+    // application now stands. Before this a separate "Send to Assessed"
+    // click was owed here, and an application with every stage passed and a
+    // real Order in force read "Under Evaluation" to everyone until someone
+    // made it — found live. Making that move again by hand is now illegal,
+    // because it already happened.
+    expect(order.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Assessed');
     expect((await post(`/staff/applications/${applicationId}/transitions`, preparer, { to: 'Assessed' }))
-      .statusCode).toBe(200);
+      .statusCode).toBe(409);
 
     // ---- The citizen pays, for real — the exact gap this whole pass exists to close ----
 
@@ -257,10 +265,14 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     });
     expect(verify.statusCode).toBe(200);
 
-    expect((await post(`/staff/applications/${applicationId}/transitions`, cashier, { to: 'Payment Verified' }))
-      .statusCode).toBe(200);
-    expect((await post(`/staff/applications/${applicationId}/transitions`, cashier, { to: 'For Approval' }))
-      .statusCode).toBe(200);
+    // Verifying is what "Payment Verified" means, and a verified payment has
+    // nothing left to wait for before the building official's queue — so the
+    // route carries the application to For Approval itself. The cashier
+    // above had ALREADY moved it to Payment Under Verification by hand, and
+    // the chain resumes from there rather than being refused for repeating
+    // a move (the old nested version stopped dead on exactly that, leaving a
+    // verified payment at Payment Under Verification).
+    expect(verify.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('For Approval');
     expect((await post(`/staff/applications/${applicationId}/transitions`, official, { to: 'Approved' }))
       .statusCode).toBe(200);
 
@@ -269,22 +281,27 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
       conditions: ['Maintain a 1.5m setback from the property line.'],
     });
     expect(permit.statusCode).toBe(201);
+    expect(permit.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Permit Generated');
 
-    expect((await post(`/staff/applications/${applicationId}/transitions`, official, { to: 'Permit Generated' }))
-      .statusCode).toBe(200);
-
-    expect((await post(`/staff/applications/${applicationId}/release-preparation`, releasing, {
+    const prepared = await post(`/staff/applications/${applicationId}/release-preparation`, releasing, {
       claimLocation: 'OBO, 2/F Castilla Municipal Hall', officeHours: 'Mon-Fri 8:00-17:00',
       bringWithYou: ['One valid government ID'],
-    })).statusCode).toBe(200);
-    expect((await post(`/staff/applications/${applicationId}/transitions`, releasing, { to: 'Ready for Release' }))
-      .statusCode).toBe(200);
-    expect((await post(`/staff/applications/${applicationId}/release`, releasing, {
+    });
+    expect(prepared.statusCode).toBe(200);
+    expect(prepared.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Ready for Release');
+
+    const release = await post(`/staff/applications/${applicationId}/release`, releasing, {
       claimantName: 'Juan Dela Cruz', method: 'Physical Claim',
-    })).statusCode).toBe(201);
-    const released = await post(`/staff/applications/${applicationId}/transitions`, releasing, { to: 'Released' });
-    expect(released.statusCode).toBe(200);
-    expect(released.json<{ status: string }>().status).toBe('Released');
+    });
+    expect(release.statusCode).toBe(201);
+    // Released, and — nothing further happening to a claimed permit —
+    // Completed, in the one call. The same two hops the portal used to make
+    // itself after this route returned.
+    expect(release.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Completed');
+    const finalStatus = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    expect(finalStatus.rows[0]?.lifecycle_status).toBe('Completed');
 
     // ---- The citizen sees it, for real — the exact moment that proves the loop ----
 

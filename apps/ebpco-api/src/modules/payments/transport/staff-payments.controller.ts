@@ -143,42 +143,38 @@ export class StaffPaymentsController {
     });
 
     if (result.ok) {
-      // The move this route exists to cause, same gap and same reasoning as
+      // The moves this route exists to cause, same gap and same reasoning as
       // `StaffActionsController.recordOnsite`'s own follow-on: confirming a
       // payment only ever wrote the `payments` row, so a verified payment
       // left the application sitting at `Payment Submitted` (or earlier)
       // forever — no queue, board or timeline ever showed it moving, even
-      // though the money was confirmed. Both remaining hops are staff-actor
-      // moves, so `officer` (not a synthetic caller) drives both.
+      // though the money was confirmed. All three hops are staff-actor moves
+      // under `staff:verify-payment`, so `officer` drives them.
       //
-      // Best-effort and logged, not thrown: the payment above is already
-      // committed, so a refused status move must not turn a real
-      // verification into an error response the cashier reads as "that
-      // failed." Logged specifically because the silent version of this
-      // exact pattern (recordOnsite/pay's own follow-ons) took real
-      // diagnostic effort to notice was ever failing at all — nothing about
-      // a swallowed refusal was visible anywhere until the data was read back
-      // by hand.
-      const underVerification = await this.lifecycle.transition({
-        applicationId: result.applicationId, caller: officer, to: 'Payment Under Verification',
+      // `followOn` is tolerant of an officer having already clicked "Send to
+      // Payment Verification" by hand before verifying — the old nested
+      // version was refused on that first hop and then never made the
+      // second, so the application stayed at Payment Under Verification
+      // with a verified payment. The third hop is new: nothing happens
+      // between Payment Verified and the building official's queue, and
+      // leaving it there meant a "Send to Approval" click nobody knew they
+      // owed. Best-effort and logged, not thrown — the payment is already
+      // committed, and a refused status move must not read as "that failed."
+      const chain = await this.lifecycle.followOn({
+        applicationId: result.applicationId,
+        hops: [
+          { caller: officer, to: 'Payment Under Verification' },
+          { caller: officer, to: 'Payment Verified' },
+          { caller: officer, to: 'For Approval' },
+        ],
       });
-      if (underVerification.ok) {
-        const verified = await this.lifecycle.transition({
-          applicationId: result.applicationId, caller: officer, to: 'Payment Verified',
-        });
-        if (!verified.ok) {
-          this.logger.warn('payment verified but the application did not advance to Payment Verified', {
-            applicationId: result.applicationId, paymentId: result.paymentId,
-            refusal: 'refusal' in verified ? verified.refusal : { kind: 'reused' },
-          });
-        }
-      } else {
-        this.logger.warn('payment verified but the application did not advance to Payment Under Verification', {
+      if (chain.stoppedAt !== null) {
+        this.logger.warn(`payment verified but the application did not advance to ${chain.stoppedAt.to}`, {
           applicationId: result.applicationId, paymentId: result.paymentId,
-          refusal: 'refusal' in underVerification ? underVerification.refusal : { kind: 'reused' },
+          status: chain.status, refusal: chain.stoppedAt.refusal,
         });
       }
-      return { paymentId: result.paymentId, verified: true };
+      return { paymentId: result.paymentId, verified: true, lifecycleStatus: chain.status };
     }
 
     // Self-verification is 403 and not 409: the caller is not permitted, and
