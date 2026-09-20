@@ -321,7 +321,7 @@ describe('deleting a reusable copy', () => {
     expect(audit.rows).toEqual([{ subject_id: result.documentId, actor_account_id: OWNER_ACCOUNT }]);
   });
 
-  it('refuses a document attached to an application, and leaves it untouched', async () => {
+  it('hides an attached document from the library instead of deleting it', async () => {
     // The default `upload()` helper attaches to APPLICATION.
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
@@ -329,22 +329,50 @@ describe('deleting a reusable copy', () => {
       'select storage_key from documents where id = $1', [result.documentId],
     )).rows[0]!.storage_key;
 
-    const outcome = await service().deleteMine(result.documentId, owner);
+    expect((await service().deleteMine(result.documentId, owner)).ok).toBe(true);
 
-    expect(outcome.ok).toBe(false);
-    if (outcome.ok) return;
-    expect(outcome.reason).toBe('attached');
-    // Refused, not detached-then-deleted: still there, exactly as filed.
+    // Untouched everywhere except the library listing: still there, still
+    // servable, exactly as filed.
     expect(await store.get(key)).not.toBeNull();
-    const row = await db.query<{ deleted_at: Date | null }>(
-      'select deleted_at from documents where id = $1', [result.documentId],
+    const row = await db.query<{ deleted_at: Date | null; removed_from_library_at: Date | null }>(
+      'select deleted_at, removed_from_library_at from documents where id = $1', [result.documentId],
     );
     expect(row.rows[0]?.deleted_at).toBeNull();
+    expect(row.rows[0]?.removed_from_library_at).not.toBeNull();
+    expect((await service().contentUrl(result.documentId, owner)).ok).toBe(true);
   });
 
-  it('answers not-found, not attached, for another applicant’s unattached document', async () => {
-    // Same disclosure reasoning as contentUrl above: telling a stranger
-    // "that one's attached" would confirm it exists at all.
+  it('drops an attached document from historyFor once removed, without touching an unattached one', async () => {
+    const attached = await upload(makePdf(), 'tct.pdf');
+    const unattached = await uploadUnattached();
+    if (!attached.ok || !unattached.ok) return;
+
+    await service().deleteMine(attached.documentId, owner);
+
+    const ids = (await service().historyFor(OWNER_ACCOUNT)).map((d) => (d as { id: string }).id);
+    expect(ids).not.toContain(attached.documentId);
+    expect(ids).toContain(unattached.documentId);
+  });
+
+  it('records a distinct audit action for hiding an attached document, not the deletion one', async () => {
+    const result = await upload(makePdf(), 'tct.pdf');
+    if (!result.ok) return;
+
+    await service().deleteMine(result.documentId, owner);
+
+    const audit = await db.query<{ subject_id: string }>(
+      "select subject_id from audit_events where action = 'document.removed-from-library'",
+    );
+    expect(audit.rows).toEqual([{ subject_id: result.documentId }]);
+    const deleted = await db.query<{ count: number }>(
+      "select count(*)::int as count from audit_events where action = 'document.deleted-by-citizen'",
+    );
+    expect(deleted.rows[0]?.count).toBe(0);
+  });
+
+  it('answers not-found for another applicant’s document', async () => {
+    // Same disclosure reasoning as contentUrl above: a different answer for
+    // "yours" vs "someone else's" would itself confirm the document exists.
     const result = await uploadUnattached();
     if (!result.ok) return;
 

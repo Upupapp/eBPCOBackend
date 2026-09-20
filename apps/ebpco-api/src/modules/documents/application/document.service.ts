@@ -258,7 +258,7 @@ export class DocumentService {
               d.review_status
          from documents d
          left join applications a on a.id = d.application_id
-        where d.uploaded_by = $1 and d.deleted_at is null
+        where d.uploaded_by = $1 and d.deleted_at is null and d.removed_from_library_at is null
         order by d.uploaded_at desc, d.id`,
       [accountId],
     );
@@ -493,22 +493,32 @@ export class DocumentService {
   }
 
   /**
-   * A citizen removing their own copy from "My Documents" — never a document
-   * currently doing duty on a filed application.
+   * A citizen removing their own copy from "My Documents".
    *
-   * `application_id is not null` is refused outright, not just discouraged:
-   * an attached document is evidence on a real permit record (RA 8792), and
-   * the officer's own view of that application (`GET /applications/:id/
-   * documents`) must keep showing it exactly as filed. A citizen who wants
-   * it gone from a filing has to withdraw or resubmit on the application
-   * itself — this only ever touches the reusable-library copy.
+   * Two different things happen underneath the one action, depending on
+   * whether the document is currently attached:
    *
-   * Same soft delete `runRetention` already uses (`deleted_at`, object
-   * bytes actually removed from the store) — not a new mechanism, the
-   * citizen-initiated case of the one that already exists.
+   * UNATTACHED: a real deletion. Nothing else references it, so the object
+   * bytes are purged from the store and `deleted_at` is set — the same soft
+   * delete `runRetention` already uses, the citizen-initiated case of the
+   * one mechanism that already exists.
+   *
+   * ATTACHED: only `removed_from_library_at` is set (migration 052). The
+   * bytes, the row, and everything an officer sees on that application are
+   * untouched — an attached document is evidence on a real permit record
+   * (RA 8792), and `GET /applications/:id/documents` must keep showing it
+   * exactly as filed. This only stops it being OFFERED again: excluded from
+   * `historyFor` (the library listing "My Documents" and document-reuse are
+   * both built from), so there is nothing left for the citizen to pick it
+   * back up from. A citizen who wants it gone from the filing itself has to
+   * withdraw or resubmit on the application, not here.
+   *
+   * Both branches always succeed once ownership is confirmed — there used
+   * to be a third, 'attached', refusal here; an attached document is no
+   * longer refused, it takes the softer path instead.
    */
   async deleteMine(documentId: string, caller: Caller): Promise<
-    { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' | 'attached' }
+    { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' }
   > {
     const document = await this.load(documentId);
 
@@ -517,19 +527,32 @@ export class DocumentService {
     if (document === null || !ownedBy(document, caller.accountId)) {
       return { ok: false, reason: 'not-found' };
     }
-    if (document.application_id !== null) return { ok: false, reason: 'attached' };
 
-    await this.store.delete(document.storage_key);
-    await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
+    if (document.application_id === null) {
+      await this.store.delete(document.storage_key);
+      await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
+      await this.audit.append({
+        action: 'document.deleted-by-citizen',
+        subjectType: 'document',
+        subjectId: document.id,
+        outcome: 'allowed',
+        actorAccountId: caller.accountId,
+        actorRole: caller.kind,
+      });
+      return { ok: true };
+    }
+
+    await this.db.query(
+      'update documents set removed_from_library_at = $1 where id = $2', [this.clock(), document.id],
+    );
     await this.audit.append({
-      action: 'document.deleted-by-citizen',
+      action: 'document.removed-from-library',
       subjectType: 'document',
       subjectId: document.id,
       outcome: 'allowed',
       actorAccountId: caller.accountId,
       actorRole: caller.kind,
     });
-
     return { ok: true };
   }
 

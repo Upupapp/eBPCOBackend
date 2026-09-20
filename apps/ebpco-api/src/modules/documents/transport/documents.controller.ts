@@ -290,9 +290,9 @@ export class DocumentsController {
 
   /**
    * Removes a citizen's own copy from "My Documents" — the reusable
-   * library, never a filing. See `DocumentService.deleteMine`'s own doc
-   * comment for why an attached document is refused outright rather than
-   * detached-then-deleted.
+   * library. For an attached document this is not a deletion at all; see
+   * `DocumentService.deleteMine`'s own doc comment for what actually
+   * happens to each.
    */
   @Delete(':documentId')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -303,12 +303,6 @@ export class DocumentsController {
   ): Promise<void> {
     const outcome = await this.documents.deleteMine(documentId, callerOf(request));
     if (outcome.ok) return;
-    if (outcome.reason === 'attached') {
-      throw new ProblemException(
-        ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
-        'This document is attached to an application and can only be changed from that application, not deleted here.',
-      );
-    }
     throw ProblemException.notFound('No such document.');
   }
 }
