@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common';
+import { IdentityModule } from '../identity/identity.module';
 
 import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
@@ -45,7 +46,7 @@ export { CALENDAR_REPOSITORY };
  * met a statutory deadline.
  */
 @Module({
-  imports: [PaymentsModule, PermitsModule, NotificationsModule, DocumentsModule, LifecycleModule],
+  imports: [PaymentsModule, PermitsModule, NotificationsModule, DocumentsModule, LifecycleModule, IdentityModule],
   providers: [
     {
       provide: CALENDAR_REPOSITORY,

@@ -1,6 +1,7 @@
 import {
-  Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req,
+  Body, Controller, Get, Headers, HttpCode, HttpStatus, Param, Patch, Post, Query, Req, Res,
 } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -14,6 +15,7 @@ import { StaffQueueService } from '../application/staff-queue.service';
 import { SubmissionService } from '../application/submission.service';
 import { EditableFields, RecordsService } from '../application/records.service';
 import { NotesService } from '../application/notes.service';
+import { ProfilePhotoService } from '../../identity/application/profile-photo.service';
 
 /**
  * The officer's surface.
@@ -153,6 +155,7 @@ export class StaffApplicationsController {
     private readonly submissions: SubmissionService,
     private readonly records: RecordsService,
     private readonly notes: NotesService,
+    private readonly photos: ProfilePhotoService,
   ) {}
 
   @Get()
@@ -319,6 +322,40 @@ export class StaffApplicationsController {
   async metrics(@Req() request: AuthenticatedRequest): Promise<Record<string, unknown>> {
     const metrics = await this.queue.metrics(callerOf(request));
     return { ...metrics };
+  }
+
+  /**
+   * The applicant's own profile photo, for the officer looking at their
+   * application. Until now the only reader was the citizen themself
+   * (`GET /me/photo`), so a photo a citizen set was invisible to every staff
+   * screen — the Admin Portal drew initials for everyone. Same bytes, same
+   * headers as the citizen's own route: `inline`, `nosniff`, never cached.
+   *
+   * Gated by the same visibility check as the detail route, and by
+   * `applications:read` — an officer who may open the application may see
+   * who filed it. 404 both when the application is not visible and when the
+   * account has no photo, so the response does not distinguish the two.
+   */
+  @Get(':applicationId/applicant-photo')
+  @RequireScopes('applications:read')
+  async applicantPhoto(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<Buffer> {
+    if (await this.queue.detail(callerOf(request), applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+    const accountId = await this.queue.applicantAccountId(applicationId);
+    const stored = accountId === null ? null : await this.photos.photoFor(accountId);
+    if (stored === null) throw ProblemException.notFound('No photo on file.');
+
+    void reply
+      .header('content-disposition', 'inline')
+      .header('content-type', stored.contentType)
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store');
+    return stored.bytes;
   }
 
   @Get(':applicationId')

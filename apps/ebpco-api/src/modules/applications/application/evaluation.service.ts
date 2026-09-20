@@ -49,6 +49,8 @@ export interface EvaluationQueueRow {
   readonly permitType: string;
   readonly lifecycleStatus: string;
   readonly applicantName: string;
+  /** Whether the applicant's account has a profile photo — the flag only; see `QueueRow.applicantHasPhoto`. */
+  readonly applicantHasPhoto: boolean;
   readonly businessId: string | null;
   readonly businessName: string | null;
   readonly submittedAt: string | null;
@@ -206,7 +208,7 @@ export class EvaluationService {
 
     const result = await this.db.query<{
       id: string; reference_number: string; permit_type: string; lifecycle_status: string;
-      submitted_at: Date | null; updated_at: Date; applicant_name: string;
+      submitted_at: Date | null; updated_at: Date; applicant_name: string; applicant_has_photo: boolean;
       business_id: string | null; business_name: string | null;
       required_documents: { code: string; required: boolean }[] | null;
       attached_documents: number;
@@ -214,12 +216,14 @@ export class EvaluationService {
       `select a.id, a.reference_number, a.permit_type, a.lifecycle_status,
               a.submitted_at, a.updated_at,
               ap.first_name || ' ' || ap.last_name as applicant_name,
+              (acc.photo_key is not null) as applicant_has_photo,
               a.business_id, b.name as business_name,
               a.required_documents,
               (select count(*)::int from documents d
                 where d.application_id = a.id and d.deleted_at is null) as attached_documents
          from applications a
          join applicants ap on ap.id = a.applicant_id
+         join accounts acc on acc.id = ap.account_id
     left join businesses b on b.id = a.business_id
         where ${where.join(' and ')}
      order by a.updated_at desc, a.id desc
@@ -246,6 +250,7 @@ export class EvaluationService {
         permitType: row.permit_type,
         lifecycleStatus: row.lifecycle_status,
         applicantName: row.applicant_name,
+        applicantHasPhoto: row.applicant_has_photo === true,
         businessId: row.business_id,
         businessName: row.business_name,
         submittedAt: row.submitted_at === null ? null : row.submitted_at.toISOString(),

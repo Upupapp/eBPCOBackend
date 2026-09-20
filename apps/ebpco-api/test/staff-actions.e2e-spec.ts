@@ -12,6 +12,8 @@ import { StructuredLogger } from '../src/common/logging/logger';
 import { TokenService } from '../src/modules/identity/application/token.service';
 import { StaffRole, scopesFor } from '../src/modules/identity/domain/account';
 import { LifecycleStatus } from '../src/modules/applications/domain/lifecycle';
+import { APPLICANT_SCOPES } from '../src/modules/identity/domain/account';
+import { makePng } from '../src/modules/documents/domain/__fixtures__';
 
 /**
  * One application walked from filing to release, over HTTP, by five different
@@ -886,5 +888,61 @@ describe('the whole path, five officers, one application', () => {
     // Decided in order, and reported in it.
     expect((detail.evaluations as Array<{ stage: string }>).map((e) => e.stage))
       .toEqual(['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']);
+  });
+});
+
+describe("the applicant's profile photo, seen by staff", () => {
+  // Until 2026-09-20 the only reader of a profile photo was the citizen who
+  // set it (`GET /me/photo`), so every staff screen drew initials for an
+  // applicant who had a photo on file. The queue row now says whether one
+  // exists and a staff route serves it, gated exactly like the detail route.
+  async function applicantToken(): Promise<string> {
+    return (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+  }
+
+  it('reports applicantHasPhoto false and 404s the bytes while there is no photo', async () => {
+    const id = await file('BP-PHOTO-0', 'Submitted');
+    const officer = await staffToken('records-officer');
+    const row = (await get(`/staff/applications/${id}`, officer)).json<{ summary: { applicantHasPhoto: boolean } }>();
+    expect(row.summary.applicantHasPhoto).toBe(false);
+    expect((await get(`/staff/applications/${id}/applicant-photo`, officer)).statusCode).toBe(404);
+  });
+
+  it("serves the citizen's own bytes to an officer who can see the application, and flags the row", async () => {
+    const id = await file('BP-PHOTO-1', 'Submitted');
+    const png = makePng({ width: 64, height: 64 });
+    const uploaded = await app.inject({
+      method: 'PUT', url: '/me/photo',
+      headers: { authorization: `Bearer ${await applicantToken()}` },
+      payload: { fileName: 'me.png', contentBase64: png.toString('base64') },
+    });
+    expect(uploaded.statusCode).toBe(200);
+
+    const officer = await staffToken('records-officer');
+    const served = await get(`/staff/applications/${id}/applicant-photo`, officer);
+    expect(served.statusCode).toBe(200);
+    expect(served.headers['content-type']).toBe('image/png');
+    expect(served.headers['x-content-type-options']).toBe('nosniff');
+    expect(served.rawPayload.length).toBeGreaterThan(0);
+
+    const row = (await get(`/staff/applications/${id}`, officer)).json<{ summary: { applicantHasPhoto: boolean } }>();
+    expect(row.summary.applicantHasPhoto).toBe(true);
+    const queue = (await get('/staff/applications', officer)).json<{ items: Array<{ id: string; applicantHasPhoto: boolean }> }>();
+    expect(queue.items.find((r) => r.id === id)?.applicantHasPhoto).toBe(true);
+  });
+
+  it('answers 404, not the photo, for an application the caller cannot see', async () => {
+    const id = await file('BP-PHOTO-2', 'Submitted');
+    const stranger = (await tokens.issueAccessToken({
+      sub: randomUUID(), sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+    // The authentication guard turns any citizen away from /staff/* structurally (401) before
+    // the route's own visibility check could answer; either way, no bytes.
+    const refused = await get(`/staff/applications/${id}/applicant-photo`, stranger);
+    expect([401, 403]).toContain(refused.statusCode);
+    expect(refused.headers['content-type']).not.toBe('image/png');
+    expect((await get(`/staff/applications/${randomUUID()}/applicant-photo`, await staffToken('records-officer'))).statusCode).toBe(404);
   });
 });

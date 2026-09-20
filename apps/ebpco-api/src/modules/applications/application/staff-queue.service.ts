@@ -62,6 +62,13 @@ export interface QueueRow {
   readonly classification: string | null;
   readonly businessName: string | null;
   readonly applicantName: string;
+  /**
+   * Whether the applicant's account has a profile photo on file. The FLAG,
+   * never the bytes or a URL: the Admin Portal fetches the photo through
+   * `GET /staff/applications/:id/applicant-photo` only when this is true,
+   * instead of trying every row and reading 404s for the ones without.
+   */
+  readonly applicantHasPhoto: boolean;
   readonly location: string | null;
   readonly submittedAt: string | null;
   readonly updatedAt: string;
@@ -189,6 +196,7 @@ const QUEUE_SQL = `
     a.classification,
     b.name as business_name,
     ap.first_name || ' ' || ap.last_name as applicant_name,
+    (acc.photo_key is not null) as applicant_has_photo,
     a.location,
     a.submitted_at,
     a.updated_at,
@@ -216,6 +224,7 @@ const QUEUE_SQL = `
         and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at
   from applications a
   join applicants ap on ap.id = a.applicant_id
+  join accounts acc on acc.id = ap.account_id
   join permit_types pt on pt.permit_type = a.permit_type
   left join businesses b on b.id = a.business_id
   left join charter_entries ce on ce.id = a.charter_entry_id
@@ -343,6 +352,21 @@ export class StaffQueueService {
    * BP-2026-000412 exists but is not theirs to open confirms a neighbour has
    * applied for a permit, which is precisely what the row filter is for.
    */
+  /**
+   * The account behind an application's applicant — what the profile-photo
+   * store is keyed by. Visibility is the caller's business (see the route):
+   * this answers only "whose photo", for an application the caller may see.
+   */
+  async applicantAccountId(applicationId: string): Promise<string | null> {
+    // Same malformed-id guard as detail(): a non-uuid must answer null, not throw.
+    if (!/^[0-9a-fA-F-]{36}$/.test(applicationId)) return null;
+    const result = await this.db.query<{ account_id: string }>(
+      `select ap.account_id from applications a join applicants ap on ap.id = a.applicant_id where a.id = $1`,
+      [applicationId],
+    );
+    return result.rows[0]?.account_id ?? null;
+  }
+
   async detail(caller: Caller, applicationId: string): Promise<StaffApplicationDetail | null> {
     if (!/^[0-9a-fA-F-]{36}$/.test(applicationId)) return null;
     const visible = visibleStatusesFor(caller);
@@ -705,6 +729,7 @@ export class StaffQueueService {
       classification: (row['classification'] as string | null) ?? null,
       businessName: (row['business_name'] as string | null) ?? null,
       applicantName: row['applicant_name'] as string,
+      applicantHasPhoto: row['applicant_has_photo'] === true,
       location: (row['location'] as string | null) ?? null,
       submittedAt: submitted === null || submitted === undefined ? null : new Date(submitted as string).toISOString(),
       updatedAt: new Date(row['updated_at'] as string).toISOString(),
