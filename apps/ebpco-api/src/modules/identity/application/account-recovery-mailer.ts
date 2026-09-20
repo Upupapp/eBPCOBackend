@@ -41,6 +41,17 @@ export class AccountRecoveryMailer {
     private readonly userPortalBaseUrl: string,
   ) {}
 
+  /**
+   * A passthrough, the same shape as `ContactVerificationMailer`'s own `real`:
+   * a caller that wants to report `sent`/`not-sent` honestly (the Citizens
+   * module's staff-triggered reset link, unlike `POST /auth/password/forgot`,
+   * is not anti-enumeration — the officer already knows the account exists —
+   * so it can and should say which one happened) needs to ask before it sends.
+   */
+  get real(): boolean {
+    return this.mailer.real;
+  }
+
   async sendPasswordSetupLink(to: string, ticket: PasswordResetTicket): Promise<void> {
     const branding: Branding = ticket.kind === 'staff'
       ? { portalName: 'E-BPCO Admin Portal', baseUrl: this.adminPortalBaseUrl }

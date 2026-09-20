@@ -701,6 +701,48 @@ async function main(): Promise<void> {
   await record('staff.evaluations.queue', 'GET', '/staff/evaluations', evaluatorToken);
   await record('staff.users.list', 'GET', '/staff/users', adminToken);
   await record('staff.audit.stream', 'GET', '/staff/audit?limit=5', adminToken);
+
+  // ── The Citizens module ──────────────────────────────────────────────
+  //
+  // Read samples come from the SAME seeded applicant every other sample in
+  // this file depends on (`seeded.applicantAccount`) — reads change nothing.
+  // Mutating samples (disable/sessions/rectify/erase) use a SEPARATE,
+  // dedicated citizen created here, so this section cannot disable, sign
+  // out or erase the account `me.export`/`me.erase` below still need alive.
+  await record('staff.citizens.list', 'GET', '/staff/citizens?pageSize=5', receivingToken);
+  await record('staff.citizens.metrics', 'GET', '/staff/citizens/metrics', receivingToken);
+  await record('staff.citizens.detail', 'GET', `/staff/citizens/${seeded.applicantAccount}`, receivingToken);
+  await record('staff.citizens.sessions', 'GET', `/staff/citizens/${seeded.applicantAccount}/sessions`, adminToken);
+  await record('problem.citizens.staffAccountId', 'GET', `/staff/citizens/${seeded.official}`, receivingToken);
+  await record('problem.citizens.forbidden', 'GET', '/staff/citizens', applicantToken);
+
+  const citizenForAdmin = randomUUID();
+  await db.query(
+    `insert into accounts (id, kind, email, email_normalised, mobile_number, password_hash)
+     values ($1,'applicant','sample.citizen@example.ph','sample.citizen@example.ph','09170000000','erased')`,
+    [citizenForAdmin],
+  );
+  await db.query(
+    `insert into applicants (id, account_id, first_name, last_name) values (gen_random_uuid(),$1,'Sample','Citizen')`,
+    [citizenForAdmin],
+  );
+  const citizenKey = () => randomUUID();
+  await record('staff.citizens.rectify', 'POST', `/staff/citizens/${citizenForAdmin}/rectification`, adminToken, {
+    reason: 'front-desk correction: surname misspelled at intake', changes: { lastName: 'Citizen-Corrected' },
+  }, citizenKey());
+  await record('staff.citizens.passwordResetLink', 'POST',
+    `/staff/citizens/${citizenForAdmin}/password-reset-link`, adminToken,
+    { reason: 'citizen forgot their password at the counter' }, citizenKey());
+  await record('staff.citizens.sessions.revoke', 'DELETE', `/staff/citizens/${citizenForAdmin}/sessions`, adminToken,
+    { reason: 'citizen reported a lost phone' }, citizenKey());
+  await record('staff.citizens.disable', 'POST', `/staff/citizens/${citizenForAdmin}/disable`, adminToken,
+    { reason: 'records dispute pending Municipal Engineer review' }, citizenKey());
+  await record('staff.citizens.enable', 'POST', `/staff/citizens/${citizenForAdmin}/enable`, adminToken,
+    { reason: 'dispute resolved in the citizen’s favour' }, citizenKey());
+  await record('problem.citizens.missingReason', 'POST', `/staff/citizens/${citizenForAdmin}/disable`, adminToken,
+    {}, citizenKey());
+  await record('staff.citizens.erase', 'POST', `/staff/citizens/${citizenForAdmin}/erasure`, adminToken,
+    { reason: 'citizen requested erasure at the counter', requestReference: 'SAMPLE-2026-0001' }, citizenKey());
   // The officer's worklist. Recorded from the RECEIVING officer, because the
   // routing is the feature and a sample taken from an account nothing routes to
   // documents an empty envelope. It was the evaluator until `staff:receive`

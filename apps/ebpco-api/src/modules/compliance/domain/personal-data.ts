@@ -206,6 +206,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     mobile_verified_at: none('account-lifetime'),
     totp_secret_encrypted: secret('authentication'),
     disabled_at: none('account-lifetime'),
+    // Free text an officer writes about WHY this account was disabled
+    // (migration 049, the Citizens module). Content, like
+    // `documents.review_remark`, not `none` like `payments.rejection_reason`
+    // beside it in this same register: a payment's rejection reason is a note
+    // about a transaction, this is a note an officer wrote about a specific
+    // PERSON's account, on a specific occasion, and may readily name them, a
+    // document, or an incident.
+    disabled_reason: content('account-lifetime', ACCOUNTABILITY),
     // When this account last authenticated. A bare timestamp identifies nobody
     // on its own -- the linkage is `id`, classified above -- so it is scored
     // the way `created_at` and the verification stamps are. It exists so the
@@ -586,6 +594,30 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     expires_at: none('account-lifetime'),
     consumed_at: none('account-lifetime'),
     attempts: none('account-lifetime'),
+  },
+
+  /**
+   * The pre-account twin of `contact_verification_challenges` — migration
+   * 048's `RegistrationVerificationService`. Keyed by `email` directly
+   * rather than `account_id`: this challenge exists specifically for the
+   * window BEFORE an account is created, so there is no account row yet to
+   * link to. `email` is therefore `direct` personal data here, not
+   * `linkable` — it is not a foreign key into `accounts`, it is the
+   * identifier itself, held only for the life of one registration attempt.
+   * `code_digest` is a credential in transit, the same reasoning as its
+   * twin above. `confirmed_at` and `consumed_at` are two distinct
+   * timestamps by design (see the service's own doc comment) but neither
+   * carries anything about the person beyond process state.
+   */
+  registration_email_challenges: {
+    id: structural,
+    email: direct('operational', SERVICE_DELIVERY),
+    code_digest: secret('authentication'),
+    issued_at: none('operational'),
+    expires_at: none('operational'),
+    confirmed_at: none('operational'),
+    consumed_at: none('operational'),
+    attempts: none('operational'),
   },
 
   payment_methods: {

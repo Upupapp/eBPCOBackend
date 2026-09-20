@@ -68,6 +68,14 @@ beforeEach(async () => {
      values ($1,$2,$3,'digest',$4,$5)`,
     [randomUUID(), randomUUID(), ACCOUNT, NOW, new Date(NOW.getTime() + 30 * 86_400_000)],
   );
+  // A spent registration challenge for the SAME address ACCOUNT actually
+  // signed up with — the case erase() has to reach even though this table
+  // has no account_id to key on (see erase()'s own comment on why).
+  await db.query(
+    `insert into registration_email_challenges (id, email, code_digest, issued_at, expires_at, confirmed_at, consumed_at)
+     values ($1,'maria.santos@example.ph','digest',$2,$3,$2,$2)`,
+    [randomUUID(), NOW, new Date(NOW.getTime() + 15 * 60_000)],
+  );
   // One audit entry BEFORE the erasure, so the chain has something to break.
   await new AuditService(db, () => NOW).append({
     action: 'application.submitted',
@@ -96,6 +104,22 @@ describe('what goes', () => {
     expect(await count('select count(*) as n from notifications where account_id = $1', [ACCOUNT])).toBe(0);
     expect(await count('select count(*) as n from devices where account_id = $1', [ACCOUNT])).toBe(0);
     expect(await count('select count(*) as n from refresh_tokens where account_id = $1', [ACCOUNT])).toBe(0);
+  });
+
+  it('removes a spent registration challenge for the address this account signed up with', async () => {
+    // registration_email_challenges has no account_id — it exists for the
+    // window BEFORE an account exists — so this is the one deletion in
+    // erase() keyed on the account's own email instead. Read the email
+    // BEFORE erasing: the row itself is about to be overwritten with the
+    // erased placeholder.
+    const before = await db.query<{ email: string }>('select email from accounts where id = $1', [ACCOUNT]);
+    const email = before.rows[0]!.email;
+
+    await erasure.erase(ACCOUNT);
+
+    expect(await count(
+      'select count(*) as n from registration_email_challenges where email = $1', [email],
+    )).toBe(0);
   });
 
   it('leaves no contact detail anywhere on the account', async () => {
@@ -288,6 +312,12 @@ describe('the deletion list and the register agree', () => {
     // `accounts` is pseudonymised rather than deleted, and `notifications` is
     // covered through its deliveries; both are handled explicitly.
     erasedTables.add('accounts');
+    // `registration_email_challenges` is keyed by EMAIL, not `account_id` —
+    // it exists for the window before an account is created, so it cannot
+    // join ERASE_IN_ORDER's uniform "delete where account_id = $1" shape at
+    // all. `erase()` deletes it explicitly, matched on the account's own
+    // current email, in its own step — see that method's own comment.
+    erasedTables.add('registration_email_challenges');
 
     const missing = [...new Set(accountLifetimeColumns().map((column) => column.table))]
       .filter((table) => !erasedTables.has(table));
