@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 
 import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
+import { ComplianceModule } from '../compliance/compliance.module';
 import { StaffBusinessesController } from './staff-businesses.controller';
 import { StaffBusinessRegistrationService } from './staff-business-registration.service';
 import { BusinessesController } from './businesses.controller';
@@ -18,6 +19,7 @@ import { BusinessesController } from './businesses.controller';
  * why that one gets a real provider.
  */
 @Module({
+  imports: [ComplianceModule],
   controllers: [BusinessesController, StaffBusinessesController],
   providers: [
     {

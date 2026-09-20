@@ -9,6 +9,7 @@ import { SqlClient } from '../../persistence/sql-client';
 import { Caller } from '../applications/domain/application';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
+import { AuditService } from '../compliance/application/audit.service';
 import { StaffBusinessRegistrationService } from './staff-business-registration.service';
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 
@@ -146,6 +147,19 @@ const businessUpdateShape = z.object({
   province: z.string().min(1).max(120),
 }).strict();
 
+/**
+ * The Admin Portal's Communication Center. `message` is free text with no
+ * template, unlike everything else `notifications` carries — every other
+ * row's title/body come from the closed catalogue an application lifecycle
+ * event fills in (catalog.ts, notifications module). This is the one path
+ * where an officer writes the words a citizen will read directly, so the
+ * cap is generous but not unbounded.
+ */
+const announcementShape = z.object({
+  message: z.string().min(1).max(2000),
+  audience: z.enum(['all', 'active']),
+}).strict();
+
 const registrationShape = z.object({
   owner: z.object({
     firstName: z.string().min(1).max(80),
@@ -176,7 +190,72 @@ export class StaffBusinessesController {
   constructor(
     @Inject(SQL_CLIENT) private readonly db: SqlClient,
     private readonly registration: StaffBusinessRegistrationService,
+    private readonly audit: AuditService,
   ) {}
+
+  /**
+   * The Communication Center's real backing route.
+   *
+   * Reuses the existing `account-update` notification type rather than
+   * inventing a new one. `notifications.type` is a mirror of the MOBILE
+   * CLIENT's own closed enum (catalog.ts's own doc comment) — a type this
+   * endpoint invented would be one the shipped mobile app has never seen,
+   * and every reader of that enum (mobile's switch, this API's own
+   * `notification.service.ts::feed`) would have to guess how to render it.
+   * `account-update` is already a known, handled type on every reader; only
+   * `title`/`body` are free text here, which the schema already allows —
+   * they are stored per-row, never derived from the catalogue at read time.
+   *
+   * A single INSERT ... SELECT, not one round trip per business owner: a
+   * few hundred businesses is a few hundred rows in one statement, not a
+   * few hundred statements.
+   */
+  @Post('announcements')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:administer')
+  async broadcastAnnouncement(
+    @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = callerOf(request);
+    if (caller.kind !== 'staff') {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.',
+      );
+    }
+    const result = announcementShape.safeParse(body);
+    if (!result.success) {
+      throw ProblemException.validation(
+        result.error.issues.map((issue) => ({ pointer: `/${issue.path.join('/')}`, message: issue.message })),
+      );
+    }
+    const { message, audience } = result.data;
+
+    // `distinct` because one owner can hold more than one business — without
+    // it, an owner of three businesses would get the same notice three times
+    // for a single broadcast.
+    const inserted = await this.db.query<{ account_id: string }>(
+      `insert into notifications (account_id, type, title, body)
+       select distinct ap.account_id, 'account-update', $1, $2
+         from businesses b
+         join applicants ap on ap.id = b.owner_applicant_id
+         ${audience === 'active' ? "where b.status = 'Active'" : ''}
+       returning account_id`,
+      ['Announcement from the LGU', message],
+    );
+
+    await this.audit.append({
+      action: 'announcement.broadcast',
+      subjectType: 'business',
+      subjectId: null,
+      outcome: 'allowed',
+      actorAccountId: caller.accountId,
+      actorRole: caller.kind,
+      afterState: { audience, recipientCount: inserted.rows.length, message },
+    });
+
+    return { recipientCount: inserted.rows.length };
+  }
 
   /**
    * Registering a business at the counter -- the "+ Business" wizard's real
