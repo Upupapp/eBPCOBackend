@@ -395,6 +395,40 @@ describe('the role table and the route table agree', () => {
     expect(doubleEncoded.statusCode).not.toBe(200);
   });
 
+  it('refuses a percent-encoded AND a case-variant /staff/citizens path exactly as it refuses the plain one', async () => {
+    // The Citizens module's own probe of the same guard behaviour —
+    // `/staff/businesses` above is what already leaked once; this is a
+    // second, newer route proving the fix generalises rather than having
+    // been special-cased for the one route that broke.
+    const account = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant','citizens-encoded-probe@example.ph','citizens-encoded-probe@example.ph','scrypt$1$1$1$a$b')`,
+      [account],
+    );
+    const issued = await tokens.issueAccessToken({
+      sub: account, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    });
+
+    // %63 is 'c'.
+    const encoded = await app.inject({
+      method: 'GET',
+      url: '/staff/%63itizens',
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+    // find-my-way lower-cases nothing on its own; a case-varied path is a
+    // different string, and the guard's `path.startsWith('/staff/')` check
+    // must not be fooled by a router that happens to match it case-insensitively.
+    const upperCase = await app.inject({
+      method: 'GET',
+      url: '/STAFF/citizens',
+      headers: { authorization: `Bearer ${issued.token}` },
+    });
+
+    expect(encoded.statusCode).toBe(403);
+    expect(upperCase.statusCode).not.toBe(200);
+  });
+
   it('grants the super-admin the four acting scopes, by the owner\'s own 2026-09-13 reversal', () => {
     // Was "refuses ... deliberately" — the separation-of-duty argument that
     // used to keep these off Super Admin (the officer who assesses a fee must
