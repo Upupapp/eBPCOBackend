@@ -260,6 +260,9 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
   ],
   exports: [
     AccountStatusReader, IdentityService, TokenService, ACCOUNT_REPOSITORY, SESSION_REPOSITORY,
+    // Read-only use by the applications module: staff seeing an applicant's
+    // own profile photo beside their application (staff-applications.controller.ts).
+    ProfilePhotoService,
   ],
 })
 export class IdentityModule {}
