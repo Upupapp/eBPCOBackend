@@ -95,6 +95,14 @@ const onBehalfShape = z.object({
     // filed for until that constraint changes — which is a schema decision.
     email: z.string().email().max(320),
     mobileNumber: z.string().min(7).max(20).optional(),
+    /**
+     * The applicant's OWN address (migration 036) — where the office writes
+     * to them, distinct from the business's address below. The intake form
+     * asked for it and then dropped it; now it is kept on a NEW applicant
+     * record. An existing applicant's address is theirs to change.
+     */
+    street: z.string().max(200).optional(),
+    barangay: z.string().max(120).optional(),
   }).strict(),
   // One or the other, never both: `business` registers a new one, `businessId`
   // names an existing one already owned by this applicant.
@@ -208,6 +216,8 @@ export class StaffApplicationsController {
         lastName: input.applicant.lastName,
         email: input.applicant.email,
         mobileNumber: input.applicant.mobileNumber ?? null,
+        street: input.applicant.street?.trim() || null,
+        barangay: input.applicant.barangay?.trim() || null,
       },
       business: input.business ?? null,
       businessId: input.businessId ?? null,
@@ -228,6 +238,16 @@ export class StaffApplicationsController {
           HttpStatus.CONFLICT, result.detail,
         );
       }
+      if (result.reason === 'name-mismatch') {
+        // 409, not 422: the request is well-formed and the applicant may well
+        // be real — the state that conflicts is an EXISTING account under
+        // that address with a different name on it, and the officer has to
+        // decide which of the two facts is wrong before anything is filed.
+        throw new ProblemException(
+          ProblemType.conflict, 'That email address belongs to a different applicant',
+          HttpStatus.CONFLICT, result.detail,
+        );
+      }
       throw new ProblemException(
         ProblemType.unprocessable, 'The filing could not be accepted',
         HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
@@ -238,6 +258,14 @@ export class StaffApplicationsController {
       applicationId: result.applicationId,
       referenceNumber: result.referenceNumber,
       applicantId: result.applicantId,
+      /**
+       * Whether the address already had an account, so the officer is told
+       * the application was filed under the existing record (same name —
+       * a different name is refused above) rather than a new one.
+       */
+      returningApplicant: result.returningApplicant,
+      /** Whether the address is now confirmed — by a code the applicant just read back at the counter, or previously. */
+      emailVerified: result.emailVerified,
       // Said plainly, because the officer is standing in front of the person it
       // concerns: nothing has been emailed, and the applicant cannot sign in
       // until they set a password through account recovery.

@@ -263,6 +263,9 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
     // Read-only use by the applications module: staff seeing an applicant's
     // own profile photo beside their application (staff-applications.controller.ts).
     ProfilePhotoService,
+    // The walk-in intake consumes the same pre-registration email proof the
+    // citizen sign-up does (submission.service.ts fileOnBehalf).
+    RegistrationVerificationService,
   ],
 })
 export class IdentityModule {}

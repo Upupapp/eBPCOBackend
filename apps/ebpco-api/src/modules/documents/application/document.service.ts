@@ -98,6 +98,10 @@ export class DocumentService {
      * told it succeeded.
      */
     supersedes?: string | null;
+    /** Provenance as printed on the document (migration 051). All optional; see the upload route's shape. */
+    issuingOffice?: string | null;
+    issuedOn?: string | null;
+    expiresOn?: string | null;
     /** Which checklist entry this answers (C-6). Null means not attributed. */
     requirementCode?: string | null;
   }): Promise<UploadOutcome> {
@@ -119,11 +123,13 @@ export class DocumentService {
     const inserted = await this.db.query<{ id: string }>(
       `insert into documents (application_id, uploaded_by, label, file_name, content_type,
                               byte_size, sha256, storage_key, status, scan_cleared,
-                              supersedes_document_id, requirement_code)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false, $9, $10)
+                              supersedes_document_id, requirement_code,
+                              issuing_office, issued_on, expires_on)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, 'Pending', false, $9, $10, $11, $12, $13)
        returning id`,
       [applicationId, caller.accountId, label, fileName, inspection.inspection.format,
-       scrubbed.bytes.length, digest, key, supersedes, requirementCode],
+       scrubbed.bytes.length, digest, key, supersedes, requirementCode,
+       options.issuingOffice ?? null, options.issuedOn ?? null, options.expiresOn ?? null],
     );
     const documentId = inserted.rows[0]?.id ?? '';
 

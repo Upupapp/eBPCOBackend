@@ -7,6 +7,7 @@ import { randomUUID } from 'node:crypto';
 import { normaliseEmail } from '../../identity/application/account.repository';
 import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
 import { RequirementDocument, RequirementsService } from './requirements.service';
+import { RegistrationVerificationService } from '../../identity/application/registration-verification.service';
 
 /**
  * Filing an application, exactly once.
@@ -73,8 +74,19 @@ export interface NewBusiness {
 
 export type OnBehalfResult =
   | { readonly ok: true; readonly applicationId: string; readonly referenceNumber: string;
-      readonly applicantId: string; readonly replayed: boolean }
+      readonly applicantId: string; readonly replayed: boolean;
+      /** The address already had an account, and the filing went under its existing applicant record. */
+      readonly returningApplicant: boolean;
+      /** The address is confirmed — by a code just read back at the counter, or before. */
+      readonly emailVerified: boolean }
   | { readonly ok: false; readonly reason: string; readonly detail: string };
+
+/** Names compared as people compare them: case, spacing and stray punctuation aside. */
+function sameName(a: { firstName: string; lastName: string }, b: { firstName: string; lastName: string }): boolean {
+  const key = (n: { firstName: string; lastName: string }): string =>
+    `${n.firstName} ${n.lastName}`.toLowerCase().replace(/[^\p{L}\p{N} ]/gu, '').replace(/\s+/g, ' ').trim();
+  return key(a) === key(b);
+}
 
 export class SubmissionService {
   private readonly audit: AuditService;
@@ -86,6 +98,12 @@ export class SubmissionService {
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
     requirements?: RequirementsService,
+    /**
+     * Optional so tests and the self-service path can construct this without
+     * it; when absent, a walk-in filing simply never marks the address
+     * verified. The module wires the real one.
+     */
+    private readonly registrationVerification?: RegistrationVerificationService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
     this.requirements = requirements ?? new RequirementsService(db, clock, this.audit);
@@ -298,7 +316,11 @@ export class SubmissionService {
    */
   async fileOnBehalf(options: {
     caller: Caller;
-    applicant: { firstName: string; lastName: string; email: string; mobileNumber: string | null };
+    applicant: {
+      firstName: string; lastName: string; email: string; mobileNumber: string | null;
+      /** The applicant's own address (migration 036), kept on a NEW applicant record only. */
+      street?: string | null; barangay?: string | null;
+    };
     business: NewBusiness | null;
     businessId: string | null;
     submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'form'>;
@@ -312,7 +334,10 @@ export class SubmissionService {
     });
 
     return this.db.transaction(async (tx) => {
-      const replay = await lookup<{ applicationId: string; referenceNumber: string; applicantId: string }>(
+      const replay = await lookup<{
+        applicationId: string; referenceNumber: string; applicantId: string;
+        returningApplicant: boolean; emailVerified: boolean;
+      }>(
         tx, { accountId: caller.accountId, key: idempotencyKey, operation: 'application.on-behalf', digest },
       );
       if (replay.kind === 'mismatch') {
@@ -324,8 +349,8 @@ export class SubmissionService {
       if (replay.kind === 'replay') return { ok: true, ...replay.previous.body, replayed: true };
 
       const normalised = normaliseEmail(applicant.email);
-      const existing = await tx.query<{ id: string; kind: string }>(
-        'select id, kind from accounts where email_normalised = $1', [normalised],
+      const existing = await tx.query<{ id: string; kind: string; email_verified_at: Date | null }>(
+        'select id, kind, email_verified_at from accounts where email_normalised = $1', [normalised],
       );
       const account = existing.rows[0] ?? null;
 
@@ -340,16 +365,47 @@ export class SubmissionService {
         };
       }
 
+      // A RETURNING address must carry the same person. Filing "Dylan Ecow"
+      // under an address registered to "John Doe" put Dylan's application on
+      // John's account with no warning to the officer — found live. Either the
+      // address was mistyped or the name was; both are the officer's to sort
+      // out before anything is filed, not after.
+      if (account !== null) {
+        const onRecord = await tx.query<{ first_name: string; last_name: string }>(
+          'select first_name, last_name from applicants where account_id = $1', [account.id],
+        );
+        const recorded = onRecord.rows[0];
+        if (recorded !== undefined
+          && !sameName({ firstName: recorded.first_name, lastName: recorded.last_name }, applicant)) {
+          return {
+            ok: false, reason: 'name-mismatch',
+            detail: `${applicant.email.trim()} is already registered to ${recorded.first_name} ${recorded.last_name}. `
+              + 'Check the address — or, if this is the same person, file under the name on their account.',
+          };
+        }
+      }
+
+      // A code the applicant read back at the counter (the same pre-registration
+      // proof the citizen portal's own sign-up uses) confirms the address on
+      // the account being created — or on an existing one that never was.
+      const proven = this.registrationVerification === undefined
+        ? false
+        : await this.registrationVerification.consumeConfirmedProof(applicant.email, tx);
+
       let accountId = account?.id ?? null;
       if (accountId === null) {
         accountId = randomUUID();
         await tx.query(
-          `insert into accounts (id, kind, email, email_normalised, password_hash, mobile_number, created_at, created_by)
-           values ($1,'applicant',$2,$3,$4,$5,$6,$7)`,
+          `insert into accounts (id, kind, email, email_normalised, password_hash, mobile_number,
+                                 email_verified_at, created_at, created_by)
+           values ($1,'applicant',$2,$3,$4,$5,$6,$7,$8)`,
           [accountId, applicant.email.trim(), normalised, unusablePasswordHash(),
-           applicant.mobileNumber, this.clock(), caller.accountId],
+           applicant.mobileNumber, proven ? this.clock() : null, this.clock(), caller.accountId],
         );
+      } else if (proven && account?.email_verified_at === null) {
+        await tx.query('update accounts set email_verified_at = $1 where id = $2', [this.clock(), accountId]);
       }
+      const emailVerified = proven || (account?.email_verified_at ?? null) !== null;
 
       // A RETURNING walk-in keeps their existing applicant record. Creating a
       // second one would split their history across two identities, and the
@@ -362,8 +418,12 @@ export class SubmissionService {
       if (applicantId === null) {
         applicantId = randomUUID();
         await tx.query(
-          'insert into applicants (id, account_id, first_name, last_name) values ($1,$2,$3,$4)',
-          [applicantId, accountId, applicant.firstName.trim(), applicant.lastName.trim()],
+          `insert into applicants (id, account_id, first_name, last_name, street, barangay, city, province)
+           values ($1,$2,$3,$4,$5,$6,$7,$8)`,
+          [applicantId, accountId, applicant.firstName.trim(), applicant.lastName.trim(),
+           applicant.street ?? null, applicant.barangay ?? null,
+           applicant.street || applicant.barangay ? 'Castilla' : null,
+           applicant.street || applicant.barangay ? 'Sorsogon' : null],
         );
       }
 
@@ -439,7 +499,7 @@ export class SubmissionService {
         },
       }, tx);
 
-      const body = { ...filed, applicantId };
+      const body = { ...filed, applicantId, returningApplicant: account !== null, emailVerified };
       await remember(tx, {
         accountId: caller.accountId, key: idempotencyKey,
         operation: 'application.on-behalf', digest, status: 201, body,

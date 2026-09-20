@@ -394,6 +394,12 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // 2026-09-03 requires the officer to be shown it when deciding, so it is
     // part of the permit record and outlives an erasure request the same way.
     certified_on: content('statutory', PERMIT_RECORD),
+    // ── Added by migration 051 (document provenance) ──────────────────
+    // Issue date, same reasoning as `certified_on`: a date read off the face
+    // of a named citizen's document. The issuing office is the name of a
+    // government office, not a fact about the person — none.
+    issued_on: content('statutory', PERMIT_RECORD),
+    issuing_office: none('statutory'),
     uploaded_at: none('statutory'),
     deleted_at: none('statutory'),
     // ── Added by migration 027 (document review) ──────────────────────

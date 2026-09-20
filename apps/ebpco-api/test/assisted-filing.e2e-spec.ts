@@ -1,7 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { join } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHmac, randomUUID } from 'node:crypto';
 
 import { createApp } from '../src/bootstrap';
 import { PgliteClient } from '../src/persistence/pglite-client';
@@ -198,6 +198,53 @@ describe('a returning walk-in', () => {
     expect(Number(accounts.rows[0]?.n)).toBe(1);
   });
 
+  it('tells the officer the filing went under the applicant’s existing record', async () => {
+    await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email: 'known.face@example.ph' } });
+
+    const again = await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email: 'known.face@example.ph' } });
+
+    expect(again.statusCode).toBe(201);
+    expect(again.json<{ returningApplicant: boolean }>().returningApplicant).toBe(true);
+  });
+
+  it('REFUSES the address when the name on its account is somebody else’s', async () => {
+    // Found live: "Dylan Ecow" typed over an address registered to "John
+    // Doe" filed Dylan's permit on John's account, and the officer saw John's
+    // name only after the fact. One of the two facts is wrong and the officer
+    // has to say which before anything is filed.
+    await file({
+      ...WALK_IN,
+      applicant: { firstName: 'John', lastName: 'Doe', email: 'john.doe@example.ph' },
+    });
+
+    const response = await file({
+      ...WALK_IN,
+      applicant: { firstName: 'Dylan', lastName: 'Ecow', email: 'john.doe@example.ph' },
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json<{ detail: string }>().detail).toMatch(/registered to John Doe/);
+    const filed = await db.query<{ n: string }>(
+      `select count(*) as n from applications a join applicants ap on ap.id = a.applicant_id
+         join accounts acc on acc.id = ap.account_id where acc.email_normalised = 'john.doe@example.ph'`,
+    );
+    expect(Number(filed.rows[0]?.n)).toBe(1);
+  });
+
+  it('does not mistake spelling for a different person', async () => {
+    await file({
+      ...WALK_IN,
+      applicant: { firstName: 'Maria Clara', lastName: 'Dela Cruz', email: 'spelling@example.ph' },
+    });
+
+    const response = await file({
+      ...WALK_IN,
+      applicant: { firstName: '  maria  clara', lastName: 'DELA CRUZ ', email: 'spelling@example.ph' },
+    });
+
+    expect(response.statusCode).toBe(201);
+  });
+
   it('files against a business they already own', async () => {
     const first = await file({
       ...WALK_IN,
@@ -247,6 +294,114 @@ describe('a returning walk-in', () => {
 
     expect(response.statusCode).toBe(422);
     expect(response.json<{ detail: string }>().detail).toMatch(/not registered to this applicant/i);
+  });
+});
+
+describe('the applicant’s own address', () => {
+  it('is kept on a new applicant record — the form asked for it, so it must land somewhere', async () => {
+    const response = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'with.address@example.ph', street: 'Purok 3', barangay: 'Bagalayag' },
+    });
+
+    expect(response.statusCode).toBe(201);
+    const stored = await db.query<{ street: string; barangay: string; city: string; province: string }>(
+      'select street, barangay, city, province from applicants where id = $1',
+      [response.json<{ applicantId: string }>().applicantId],
+    );
+    expect(stored.rows[0]).toEqual({ street: 'Purok 3', barangay: 'Bagalayag', city: 'Castilla', province: 'Sorsogon' });
+  });
+
+  it('never overwrites what a returning applicant already has on file', async () => {
+    const first = await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'settled@example.ph', street: 'Sitio Uno', barangay: 'Amomonting' },
+    });
+    await file({
+      ...WALK_IN,
+      applicant: { ...WALK_IN.applicant, email: 'settled@example.ph', street: 'Somewhere Else', barangay: 'Bonga' },
+    });
+
+    const stored = await db.query<{ street: string; barangay: string }>(
+      'select street, barangay from applicants where id = $1', [first.json<{ applicantId: string }>().applicantId],
+    );
+    expect(stored.rows[0]).toEqual({ street: 'Sitio Uno', barangay: 'Amomonting' });
+  });
+});
+
+describe('the email the applicant reads back at the counter', () => {
+  const requestCode = (email: string) =>
+    app.inject({ method: 'POST', url: '/auth/register/email/request', payload: { email } });
+  const confirmCode = (email: string, code: string) =>
+    app.inject({ method: 'POST', url: '/auth/register/email/confirm', payload: { email, code } });
+  /** Same technique identity.e2e-spec.ts uses: swap the peppered digest for one of a KNOWN code. */
+  const plantCode = async (email: string, code = '424242'): Promise<string> => {
+    const result = await db.query(
+      `update registration_email_challenges set code_digest = $1
+        where email = $2 and confirmed_at is null and consumed_at is null`,
+      [createHmac('sha256', 'a-test-pepper-of-at-least-32-characters').update(code, 'utf8').digest('hex'),
+       email.trim().toLowerCase()],
+    );
+    if (result.rowCount === 0) throw new Error(`no live registration challenge for ${email}`);
+    return code;
+  };
+  const verifiedAt = async (email: string): Promise<Date | null> => {
+    const row = await db.query<{ email_verified_at: Date | null }>(
+      'select email_verified_at from accounts where email_normalised = $1', [email],
+    );
+    return row.rows[0]?.email_verified_at ?? null;
+  };
+
+  it('starts the new account already Verified when the code was confirmed first', async () => {
+    // The SAME proof the citizen portal's own sign-up spends — the officer
+    // sends the code, the applicant reads it off their phone, the officer
+    // types it in. No separate machinery, no separate rules.
+    const email = 'counter.verified@example.ph';
+    await requestCode(email);
+    expect((await confirmCode(email, await plantCode(email))).statusCode).toBe(200);
+
+    const response = await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json<{ emailVerified: boolean }>().emailVerified).toBe(true);
+    expect(await verifiedAt(email)).not.toBeNull();
+  });
+
+  it('leaves the account Unverified — and says so — when no code was confirmed', async () => {
+    const email = 'counter.unverified@example.ph';
+
+    const response = await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+
+    expect(response.statusCode).toBe(201);
+    expect(response.json<{ emailVerified: boolean }>().emailVerified).toBe(false);
+    expect(await verifiedAt(email)).toBeNull();
+  });
+
+  it('confirms a returning applicant’s address that was never confirmed before', async () => {
+    const email = 'late.proof@example.ph';
+    await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+    expect(await verifiedAt(email)).toBeNull();
+
+    await requestCode(email);
+    await confirmCode(email, await plantCode(email));
+    const response = await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+
+    expect(response.json<{ emailVerified: boolean; returningApplicant: boolean }>())
+      .toMatchObject({ emailVerified: true, returningApplicant: true });
+    expect(await verifiedAt(email)).not.toBeNull();
+  });
+
+  it('spends the proof, so a second filing cannot ride on it', async () => {
+    const email = 'spent.proof@example.ph';
+    await requestCode(email);
+    await confirmCode(email, await plantCode(email));
+    await file({ ...WALK_IN, applicant: { ...WALK_IN.applicant, email } });
+
+    const left = await db.query<{ n: string }>(
+      `select count(*) as n from registration_email_challenges
+        where email = $1 and confirmed_at is not null and consumed_at is null`, [email],
+    );
+    expect(Number(left.rows[0]?.n)).toBe(0);
   });
 });
 

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { IdentityModule } from '../identity/identity.module';
+import { RegistrationVerificationService } from '../identity/application/registration-verification.service';
 
 import { SQL_CLIENT } from '../../persistence/persistence.module';
 import { SqlClient } from '../../persistence/sql-client';
@@ -88,8 +89,9 @@ export { CALENDAR_REPOSITORY };
     },
     {
       provide: SubmissionService,
-      inject: [SQL_CLIENT],
-      useFactory: (db: SqlClient) => new SubmissionService(db),
+      inject: [SQL_CLIENT, RegistrationVerificationService],
+      useFactory: (db: SqlClient, verification: RegistrationVerificationService) =>
+        new SubmissionService(db, undefined, undefined, undefined, verification),
     },
     {
       provide: StaffQueueService,

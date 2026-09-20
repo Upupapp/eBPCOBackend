@@ -425,7 +425,9 @@ export class StaffQueueService {
           `select id, label, file_name, content_type, byte_size, status, scan_cleared,
                   requirement_code, review_status, review_remark,
                   to_char(expires_on, 'YYYY-MM-DD') as expires_on,
-                  to_char(certified_on, 'YYYY-MM-DD') as certified_on, uploaded_at, reviewed_at
+                  to_char(certified_on, 'YYYY-MM-DD') as certified_on,
+                  to_char(issued_on, 'YYYY-MM-DD') as issued_on, issuing_office,
+                  uploaded_at, reviewed_at
              from documents where application_id = $1 and deleted_at is null
             order by uploaded_at`, [applicationId]),
         // Not a query of its own. Reading evaluations belongs to the

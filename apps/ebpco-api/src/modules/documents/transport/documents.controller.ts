@@ -39,11 +39,31 @@ const uploadShape = z.object({
    * read as "not attributed" rather than as a missing requirement.
    */
   requirementCode: z.string().min(1).max(100).nullable().optional(),
+  /**
+   * What the document itself says about its origin (migration 051): the
+   * office that issued it and the dates printed on it. The Admin Portal's
+   * walk-in intake asks the officer for these; the citizen's own wizard does
+   * not, so all three are optional here. Dates are calendar dates as printed,
+   * `YYYY-MM-DD`, never instants.
+   */
+  issuingOffice: z.string().min(1).max(200).nullable().optional(),
+  issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').nullable().optional(),
+  expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').nullable().optional(),
   // The cap is on decoded bytes; this bound only stops an absurd body reaching
   // the decoder. The real limit is BODY_LIMIT_BYTES at the adapter and the
   // service's own inspection.
   contentBase64: z.string().min(1).max(40_000_000),
-}).strict();
+}).strict().superRefine((input, context) => {
+  // The database refuses this too (documents_expiry_after_issue), but a
+  // constraint violation surfaces as a 500; the officer typing the two dates
+  // deserves to be told which field is wrong.
+  if (input.issuedOn && input.expiresOn && input.expiresOn < input.issuedOn) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom, path: ['expiresOn'],
+      message: 'must not be earlier than the issue date',
+    });
+  }
+});
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
   const result = schema.safeParse(value);
@@ -159,6 +179,9 @@ export class DocumentsController {
       label: input.label,
       applicationId: input.applicationId ?? null,
       requirementCode: input.requirementCode ?? null,
+      issuingOffice: input.issuingOffice ?? null,
+      issuedOn: input.issuedOn ?? null,
+      expiresOn: input.expiresOn ?? null,
       caller,
     });
 

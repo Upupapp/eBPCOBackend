@@ -222,6 +222,46 @@ describe('uploading a document', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it('keeps what the document says about its own origin (migration 051)', async () => {
+    // The Admin Portal's intake asks the officer for these three and, until
+    // now, sent none of them because two had no column. A form that collects
+    // what it cannot keep is a form that lies to whoever fills it in.
+    const response = await post('/documents', maria, {
+      fileName: 'barangay-clearance.pdf', label: 'Barangay Clearance', contentBase64: PDF.toString('base64'),
+      issuingOffice: 'Barangay Bagalayag', issuedOn: '2026-08-01', expiresOn: '2027-08-01',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const stored = await db.query<{ issuing_office: string; issued_on: string; expires_on: string }>(
+      `select issuing_office, to_char(issued_on, 'YYYY-MM-DD') as issued_on,
+              to_char(expires_on, 'YYYY-MM-DD') as expires_on
+         from documents where id = $1`,
+      [response.json<{ documentId: string }>().documentId],
+    );
+    expect(stored.rows[0]).toEqual({
+      issuing_office: 'Barangay Bagalayag', issued_on: '2026-08-01', expires_on: '2027-08-01',
+    });
+  });
+
+  it('refuses a document that expires before it was issued', async () => {
+    const response = await post('/documents', maria, {
+      fileName: 'backwards.pdf', label: 'Barangay Clearance', contentBase64: PDF.toString('base64'),
+      issuedOn: '2026-08-01', expiresOn: '2026-07-01',
+    });
+
+    expect(response.statusCode).toBe(400);
+    expect(JSON.stringify(response.json())).toContain('/expiresOn');
+  });
+
+  it('refuses a date that is not a calendar date', async () => {
+    const response = await post('/documents', maria, {
+      fileName: 'x.pdf', label: 'Barangay Clearance', contentBase64: PDF.toString('base64'),
+      issuedOn: '08/01/2026',
+    });
+
+    expect(response.statusCode).toBe(400);
+  });
+
   it('attaches an uploaded document to a filing', async () => {
     const upload = await post('/documents', maria, {
       fileName: 'lot-plan.pdf', label: 'Lot plan', contentBase64: PDF.toString('base64'),
