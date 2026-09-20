@@ -23,6 +23,8 @@ import { AuthenticationGuard } from './transport/guards/authentication.guard';
 import { AuditService } from '../compliance/application/audit.service';
 import { StaffDirectoryService } from './application/staff-directory.service';
 import { StaffDirectoryController } from './transport/staff-directory.controller';
+import { CitizenDirectoryService } from './application/citizen-directory.service';
+import { StaffCitizensController } from './transport/staff-citizens.controller';
 import { AccessRequestService } from './application/access-request.service';
 import { StaffAccessService } from './application/staff-access.service';
 import { RectificationService } from './application/rectification.service';
@@ -45,6 +47,7 @@ import { ProfilePhotoService } from './application/profile-photo.service';
 import { OBJECT_STORE, MALWARE_SCANNER } from '../documents/documents.module';
 import { ObjectStore } from '../documents/domain/object-store';
 import { MalwareScanner } from '../documents/domain/malware-scanner';
+import { ErasureService } from '../compliance/application/erasure.service';
 
 /**
  * Identity, wired.
@@ -57,8 +60,8 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
 @Global()
 @Module({
   imports: [ComplianceModule],
-  controllers: [AuthController, MeController, StaffDirectoryController, ContactsController,
-    MfaController, AccessRequestController, StaffAccessRequestsController,
+  controllers: [AuthController, MeController, StaffDirectoryController, StaffCitizensController,
+    ContactsController, MfaController, AccessRequestController, StaffAccessRequestsController,
     StaffAccessController],
   providers: [
     {
@@ -120,6 +123,21 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
       inject: [SQL_CLIENT, AuditService],
       useFactory: (db: SqlClient, audit: AuditService) =>
         new RectificationService(db, () => new Date(), audit),
+    },
+    {
+      // Constructed AFTER IdentityService below in this array only by
+      // reading order — Nest resolves the dependency graph, not array
+      // position, so IdentityService (declared further down) is available
+      // here regardless.
+      provide: CitizenDirectoryService,
+      inject: [
+        SQL_CLIENT, AuditService, TokenService, IdentityService,
+        RectificationService, ErasureService, AccountRecoveryMailer,
+      ],
+      useFactory: (
+        db: SqlClient, audit: AuditService, tokens: TokenService, identity: IdentityService,
+        rectification: RectificationService, erasure: ErasureService, recoveryMailer: AccountRecoveryMailer,
+      ) => new CitizenDirectoryService(db, audit, tokens, identity, rectification, erasure, recoveryMailer),
     },
     {
       provide: AccountStatusReader,

@@ -72,7 +72,17 @@ export type Scope =
    * application (every one but `auditor`) should be able to leave one.
    */
   | 'staff:annotate'
-  | 'audit:read';
+  | 'audit:read'
+  /**
+   * Looking up a citizen account (the Citizens module, migration 049) —
+   * distinct from `audit:read`: front-desk lookup is a records-administration
+   * question ("who is this account, is it in good standing"), not an
+   * oversight one, so it is held by the officers who actually staff a
+   * counter, not by `auditor`. Held with `staff:administer` by
+   * `administrator`; mutating a citizen's account (disable, rectify, erase)
+   * stays behind `staff:administer` alone, same as the staff directory.
+   */
+  | 'citizens:read';
 
 /**
  * The union, at runtime. Needed since D-5: the workflow editor accepts a scope
@@ -88,7 +98,7 @@ export const ALL_SCOPES = [
   'profile:read', 'profile:write',
   'staff:receive', 'staff:evaluate', 'staff:assess', 'staff:verify-payment',
   'staff:approve', 'staff:release', 'staff:administer', 'staff:annotate',
-  'audit:read',
+  'audit:read', 'citizens:read',
 ] as const satisfies readonly Scope[];
 
 /**
@@ -131,7 +141,9 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  * keys while it is still being built.
  */
 const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, readonly Scope[]>> = {
-  'receiving-officer': ['applications:read', 'documents:read', 'staff:receive', 'staff:annotate'],
+  'receiving-officer': [
+    'applications:read', 'documents:read', 'staff:receive', 'staff:annotate', 'citizens:read',
+  ],
   // `applications:write` because withdrawing an application on the applicant's
   // behalf, or expiring one after inaction, is maintenance of the record --
   // which is what this role exists to do. Its absence made three staff
@@ -146,7 +158,7 @@ const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, rea
   // receive applications.
   'records-officer': [
     'applications:read', 'applications:write', 'documents:read', 'documents:write',
-    'staff:receive', 'staff:annotate',
+    'staff:receive', 'staff:annotate', 'citizens:read',
   ],
   evaluator: ['applications:read', 'documents:read', 'staff:evaluate', 'staff:annotate'],
   assessor: ['applications:read', 'payments:read', 'staff:assess', 'staff:annotate'],
@@ -155,7 +167,7 @@ const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, rea
     'applications:read', 'documents:read', 'payments:read', 'staff:approve', 'staff:annotate',
   ],
   'releasing-officer': ['applications:read', 'staff:release', 'staff:annotate'],
-  administrator: ['staff:administer'],
+  administrator: ['staff:administer', 'citizens:read'],
 
   // ── added by the web-portal reconciliation (WP-01) ───────────────────
   //
