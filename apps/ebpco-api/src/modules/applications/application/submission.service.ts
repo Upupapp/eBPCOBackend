@@ -318,8 +318,8 @@ export class SubmissionService {
     caller: Caller;
     applicant: {
       firstName: string; lastName: string; email: string; mobileNumber: string | null;
-      /** The applicant's own address (migration 036), kept on a NEW applicant record only. */
-      street?: string | null; barangay?: string | null;
+      /** Middle name and the applicant's own address (migration 036), kept on a NEW applicant record only. */
+      middleName?: string | null; street?: string | null; barangay?: string | null;
     };
     business: NewBusiness | null;
     businessId: string | null;
@@ -418,10 +418,10 @@ export class SubmissionService {
       if (applicantId === null) {
         applicantId = randomUUID();
         await tx.query(
-          `insert into applicants (id, account_id, first_name, last_name, street, barangay, city, province)
-           values ($1,$2,$3,$4,$5,$6,$7,$8)`,
-          [applicantId, accountId, applicant.firstName.trim(), applicant.lastName.trim(),
-           applicant.street ?? null, applicant.barangay ?? null,
+          `insert into applicants (id, account_id, first_name, middle_name, last_name, street, barangay, city, province)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+          [applicantId, accountId, applicant.firstName.trim(), applicant.middleName?.trim() || null,
+           applicant.lastName.trim(), applicant.street ?? null, applicant.barangay ?? null,
            applicant.street || applicant.barangay ? 'Castilla' : null,
            applicant.street || applicant.barangay ? 'Sorsogon' : null],
         );

@@ -89,6 +89,8 @@ function callerOf(request: AuthenticatedRequest): Caller {
 const onBehalfShape = z.object({
   applicant: z.object({
     firstName: z.string().min(1).max(80),
+    /** Kept on a new applicant record (migration 036), same as self-service sign-up; not part of the returning-name check. */
+    middleName: z.string().max(80).optional(),
     lastName: z.string().min(1).max(80),
     // Required, and the schema is why: `applicants.account_id` is NOT NULL and
     // an account needs a unique address. A walk-in with no email cannot be
@@ -213,6 +215,7 @@ export class StaffApplicationsController {
       caller: callerOf(request),
       applicant: {
         firstName: input.applicant.firstName,
+        middleName: input.applicant.middleName?.trim() || null,
         lastName: input.applicant.lastName,
         email: input.applicant.email,
         mobileNumber: input.applicant.mobileNumber ?? null,

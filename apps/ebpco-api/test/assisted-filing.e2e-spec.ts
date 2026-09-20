@@ -301,15 +301,22 @@ describe('the applicant’s own address', () => {
   it('is kept on a new applicant record — the form asked for it, so it must land somewhere', async () => {
     const response = await file({
       ...WALK_IN,
-      applicant: { ...WALK_IN.applicant, email: 'with.address@example.ph', street: 'Purok 3', barangay: 'Bagalayag' },
+      applicant: {
+        ...WALK_IN.applicant, middleName: 'Reyes', email: 'with.address@example.ph',
+        street: 'Purok 3', barangay: 'Bagalayag',
+      },
     });
 
     expect(response.statusCode).toBe(201);
-    const stored = await db.query<{ street: string; barangay: string; city: string; province: string }>(
-      'select street, barangay, city, province from applicants where id = $1',
+    const stored = await db.query<{
+      middle_name: string; street: string; barangay: string; city: string; province: string;
+    }>(
+      'select middle_name, street, barangay, city, province from applicants where id = $1',
       [response.json<{ applicantId: string }>().applicantId],
     );
-    expect(stored.rows[0]).toEqual({ street: 'Purok 3', barangay: 'Bagalayag', city: 'Castilla', province: 'Sorsogon' });
+    expect(stored.rows[0]).toEqual({
+      middle_name: 'Reyes', street: 'Purok 3', barangay: 'Bagalayag', city: 'Castilla', province: 'Sorsogon',
+    });
   });
 
   it('never overwrites what a returning applicant already has on file', async () => {
