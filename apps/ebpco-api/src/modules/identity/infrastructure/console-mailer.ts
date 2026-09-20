@@ -12,6 +12,8 @@ import { Mailer, OutboundEmail } from './mailer';
  * for that reason: the redaction only inspects `fields`.
  */
 export class ConsoleMailer implements Mailer {
+  readonly real = false;
+
   constructor(private readonly logger: StructuredLogger) {}
 
   send(message: OutboundEmail): Promise<void> {

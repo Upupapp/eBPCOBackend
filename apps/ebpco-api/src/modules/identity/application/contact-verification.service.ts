@@ -131,12 +131,13 @@ export class ContactVerificationService {
    * Issues a challenge and queues the notice carrying it.
    *
    * Returns the code to the CALLER, not to the applicant — the transport
-   * discards it. It exists on this boundary so that a delivery adapter, when
-   * one is built, has something to send; today nothing consumes it, which is
-   * exactly what "no provider" means.
+   * discards it from the response. It exists on this boundary so a delivery
+   * adapter has something to send — `code` is only present on the `ok: true`
+   * branch, never on a refusal, since there is nothing to deliver there.
    */
   async request(options: { accountId: string; channel: Channel }): Promise<
-    VerificationResult & { code?: string }
+    | { readonly ok: true; readonly state: ContactState; readonly code: string }
+    | { readonly ok: false; readonly reason: string; readonly detail: string }
   > {
     const { accountId, channel } = options;
     const now = this.clock();

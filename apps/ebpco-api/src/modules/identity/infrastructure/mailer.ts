@@ -14,6 +14,14 @@ export interface OutboundEmail {
 }
 
 export interface Mailer {
+  /**
+   * True for a driver that actually delivers (`SmtpMailer`), false for one
+   * that only logs (`ConsoleMailer`). A caller that wants to tell someone
+   * whether a message was really sent — not just that `send()` resolved,
+   * which `ConsoleMailer` also does — reads this rather than re-deriving it
+   * from `MAIL_DRIVER` a second place.
+   */
+  readonly real: boolean;
   send(message: OutboundEmail): Promise<void>;
 }
 

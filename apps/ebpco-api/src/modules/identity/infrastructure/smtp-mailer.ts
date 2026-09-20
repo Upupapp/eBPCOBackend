@@ -18,6 +18,8 @@ export interface SmtpMailerOptions {
  * per call, which would reopen a connection for every password-reset request.
  */
 export class SmtpMailer implements Mailer {
+  readonly real = true;
+
   private readonly transport: Transporter;
   private readonly from: string;
 

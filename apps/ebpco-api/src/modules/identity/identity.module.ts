@@ -39,6 +39,7 @@ import { RefusalRecorder } from './application/refusal-recorder';
 import { MAILER, Mailer } from './infrastructure/mailer';
 import { mailerFor } from './infrastructure/mailer-factory';
 import { AccountRecoveryMailer } from './application/account-recovery-mailer';
+import { ContactVerificationMailer } from './application/contact-verification-mailer';
 import { ProfilePhotoService } from './application/profile-photo.service';
 import { OBJECT_STORE, MALWARE_SCANNER } from '../documents/documents.module';
 import { ObjectStore } from '../documents/domain/object-store';
@@ -128,6 +129,11 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
       inject: [MAILER, CONFIG],
       useFactory: (mailer: Mailer, config: AppConfig) =>
         new AccountRecoveryMailer(mailer, config.PORTAL_BASE_URL, config.USER_PORTAL_BASE_URL),
+    },
+    {
+      provide: ContactVerificationMailer,
+      inject: [MAILER],
+      useFactory: (mailer: Mailer) => new ContactVerificationMailer(mailer),
     },
 
     // Bound here and nowhere else. The in-memory implementations still exist,
