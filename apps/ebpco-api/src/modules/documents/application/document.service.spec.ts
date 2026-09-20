@@ -279,6 +279,90 @@ describe('retrieval', () => {
   });
 });
 
+describe('deleting a reusable copy', () => {
+  const uploadUnattached = (caller: Caller = owner) =>
+    service().upload({
+      bytes: makePdf(), fileName: 'valid-id.pdf', label: 'Valid Government ID',
+      applicationId: null, caller,
+    });
+
+  it('lets the owner delete their own unattached copy', async () => {
+    const result = await uploadUnattached();
+    if (!result.ok) return;
+
+    expect((await service().deleteMine(result.documentId, owner)).ok).toBe(true);
+  });
+
+  it('deletes the object and marks the row, the same way retention does', async () => {
+    const result = await uploadUnattached();
+    if (!result.ok) return;
+    const key = (await db.query<{ storage_key: string }>(
+      'select storage_key from documents where id = $1', [result.documentId],
+    )).rows[0]!.storage_key;
+
+    await service().deleteMine(result.documentId, owner);
+
+    expect(await store.get(key)).toBeNull();
+    const row = await db.query<{ deleted_at: Date | null }>(
+      'select deleted_at from documents where id = $1', [result.documentId],
+    );
+    expect(row.rows[0]?.deleted_at).not.toBeNull();
+  });
+
+  it('records an audit event naming the citizen who deleted it', async () => {
+    const result = await uploadUnattached();
+    if (!result.ok) return;
+
+    await service().deleteMine(result.documentId, owner);
+
+    const audit = await db.query<{ subject_id: string; actor_account_id: string }>(
+      "select subject_id, actor_account_id from audit_events where action = 'document.deleted-by-citizen'",
+    );
+    expect(audit.rows).toEqual([{ subject_id: result.documentId, actor_account_id: OWNER_ACCOUNT }]);
+  });
+
+  it('refuses a document attached to an application, and leaves it untouched', async () => {
+    // The default `upload()` helper attaches to APPLICATION.
+    const result = await upload(makePdf(), 'tct.pdf');
+    if (!result.ok) return;
+    const key = (await db.query<{ storage_key: string }>(
+      'select storage_key from documents where id = $1', [result.documentId],
+    )).rows[0]!.storage_key;
+
+    const outcome = await service().deleteMine(result.documentId, owner);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('attached');
+    // Refused, not detached-then-deleted: still there, exactly as filed.
+    expect(await store.get(key)).not.toBeNull();
+    const row = await db.query<{ deleted_at: Date | null }>(
+      'select deleted_at from documents where id = $1', [result.documentId],
+    );
+    expect(row.rows[0]?.deleted_at).toBeNull();
+  });
+
+  it('answers not-found, not attached, for another applicant’s unattached document', async () => {
+    // Same disclosure reasoning as contentUrl above: telling a stranger
+    // "that one's attached" would confirm it exists at all.
+    const result = await uploadUnattached();
+    if (!result.ok) return;
+
+    const outcome = await service().deleteMine(result.documentId, stranger);
+
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('not-found');
+  });
+
+  it('answers not-found for a document that does not exist', async () => {
+    const outcome = await service().deleteMine(randomUUID(), owner);
+    expect(outcome.ok).toBe(false);
+    if (outcome.ok) return;
+    expect(outcome.reason).toBe('not-found');
+  });
+});
+
 describe('signed URLs expire', () => {
   it('accepts one inside its window and refuses it after', async () => {
     let now = new Date('2026-08-19T12:00:00Z');

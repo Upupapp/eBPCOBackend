@@ -493,6 +493,47 @@ export class DocumentService {
   }
 
   /**
+   * A citizen removing their own copy from "My Documents" — never a document
+   * currently doing duty on a filed application.
+   *
+   * `application_id is not null` is refused outright, not just discouraged:
+   * an attached document is evidence on a real permit record (RA 8792), and
+   * the officer's own view of that application (`GET /applications/:id/
+   * documents`) must keep showing it exactly as filed. A citizen who wants
+   * it gone from a filing has to withdraw or resubmit on the application
+   * itself — this only ever touches the reusable-library copy.
+   *
+   * Same soft delete `runRetention` already uses (`deleted_at`, object
+   * bytes actually removed from the store) — not a new mechanism, the
+   * citizen-initiated case of the one that already exists.
+   */
+  async deleteMine(documentId: string, caller: Caller): Promise<
+    { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' | 'attached' }
+  > {
+    const document = await this.load(documentId);
+
+    // 404, not 403, for the same reason contentUrl above gives one — telling
+    // an applicant "that belongs to someone else" is itself a disclosure.
+    if (document === null || !ownedBy(document, caller.accountId)) {
+      return { ok: false, reason: 'not-found' };
+    }
+    if (document.application_id !== null) return { ok: false, reason: 'attached' };
+
+    await this.store.delete(document.storage_key);
+    await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
+    await this.audit.append({
+      action: 'document.deleted-by-citizen',
+      subjectType: 'document',
+      subjectId: document.id,
+      outcome: 'allowed',
+      actorAccountId: caller.accountId,
+      actorRole: caller.kind,
+    });
+
+    return { ok: true };
+  }
+
+  /**
    * Fetches bytes and verifies they are the bytes that were stored.
    *
    * A mismatch means the object was altered after upload, which is the exact

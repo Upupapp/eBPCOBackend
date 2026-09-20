@@ -1,4 +1,4 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpCode, HttpStatus, Inject, Param, Post, Query, Req, Res } from '@nestjs/common';
 import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
@@ -286,6 +286,30 @@ export class DocumentsController {
     // Not-yours and not-there answer alike, as everywhere else.
     if (!access.ok) throw ProblemException.notFound('No such document.');
     return { url: access.url };
+  }
+
+  /**
+   * Removes a citizen's own copy from "My Documents" — the reusable
+   * library, never a filing. See `DocumentService.deleteMine`'s own doc
+   * comment for why an attached document is refused outright rather than
+   * detached-then-deleted.
+   */
+  @Delete(':documentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireScopes('documents:write')
+  async remove(
+    @Req() request: AuthenticatedRequest,
+    @Param('documentId') documentId: string,
+  ): Promise<void> {
+    const outcome = await this.documents.deleteMine(documentId, callerOf(request));
+    if (outcome.ok) return;
+    if (outcome.reason === 'attached') {
+      throw new ProblemException(
+        ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
+        'This document is attached to an application and can only be changed from that application, not deleted here.',
+      );
+    }
+    throw ProblemException.notFound('No such document.');
   }
 }
 
