@@ -216,6 +216,17 @@ export class IdentityService {
     city?: string | null | undefined;
     province?: string | null | undefined;
     postalCode?: string | null | undefined;
+    /**
+     * True only when the CALLER (the controller) has already spent a
+     * confirmed `RegistrationVerificationService` proof for this exact
+     * email, moments ago, in the same request. This service does not check
+     * that itself — it has no dependency on that service at all, by
+     * design, the same reason `totp`/`audit` above are optional
+     * collaborators rather than required ones: the mobile client's
+     * registration request has no OTP step and must keep registering
+     * accounts with an unverified email exactly as it always has.
+     */
+    emailPreVerified?: boolean;
   }): Promise<{ accepted: boolean; rejections: readonly PasswordRejection[] }> {
     // The password is checked before the address is looked up, because a weak
     // password must be reported to the person choosing it -- that is not an
@@ -236,7 +247,7 @@ export class IdentityService {
         email: normaliseEmail(input.email),
         passwordHash: await this.hasher.hash(input.password),
         roles: [],
-        emailVerifiedAt: null,
+        emailVerifiedAt: input.emailPreVerified === true ? now : null,
       // Applicants carry their name on the applicant profile, split into first
       // and last. This column is the staff member's own name (migration 034).
       fullName: null,

@@ -30,6 +30,7 @@ import {
   AccessRequestController, StaffAccessController, StaffAccessRequestsController,
 } from './transport/access-request.controller';
 import { ContactVerificationService } from './application/contact-verification.service';
+import { RegistrationVerificationService } from './application/registration-verification.service';
 import { ContactsController } from './transport/contacts.controller';
 import { MfaController } from './transport/mfa.controller';
 import { SecretBox } from './domain/secret-box';
@@ -88,6 +89,12 @@ import { MalwareScanner } from '../documents/domain/malware-scanner';
       // chars) outside development.
       useFactory: (db: SqlClient, config: AppConfig) =>
         new ContactVerificationService(db, undefined, undefined, config.PASSWORD_PEPPER),
+    },
+    {
+      provide: RegistrationVerificationService,
+      inject: [SQL_CLIENT, CONFIG],
+      useFactory: (db: SqlClient, config: AppConfig) =>
+        new RegistrationVerificationService(db, undefined, config.PASSWORD_PEPPER),
     },
     {
       provide: StaffDirectoryService,

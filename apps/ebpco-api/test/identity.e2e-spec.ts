@@ -1,6 +1,7 @@
 import type { NestFastifyApplication } from '@nestjs/platform-fastify';
 
 import { join } from 'node:path';
+import { createHmac } from 'node:crypto';
 
 import { createApp } from '../src/bootstrap';
 import { PgliteClient } from '../src/persistence/pglite-client';
@@ -83,6 +84,23 @@ const PUBLIC_ROUTES = new Set([
   'POST /auth/token',
   'POST /auth/token/refresh',
   'POST /auth/register',
+
+  // Verifying an email BEFORE the account it will belong to exists — Step 2
+  // of the web portal's registration wizard. Public for the same reason
+  // /auth/register itself is: there is no account yet to hold a bearer
+  // token for. Safe for the same reason: it cannot create an account by
+  // itself (only /auth/register does that, and only once it has spent a
+  // confirmed proof — see RegistrationVerificationService
+  // .consumeConfirmedProof), and it works identically whether or not the
+  // address already has one. Protected the same way /auth/register and
+  // /auth/password/forgot already are — the global rate limiter, plus its
+  // own 60-second resend floor per address — not the extra per-address/
+  // per-IP limiter /auth/access-request carries, which exists there
+  // because that endpoint puts a request in front of a super admin rather
+  // than sending an email the requester themselves receives.
+  'POST /auth/register/email/request',
+  'POST /auth/register/email/confirm',
+
   'POST /auth/password/forgot',
   'POST /auth/password/reset',
 
@@ -311,6 +329,148 @@ describe('registration over HTTP', () => {
 
     expect(response.statusCode).toBe(400);
     expect(JSON.stringify(response.json())).toContain('/postalCode');
+  });
+});
+
+describe('verifying an email before it has an account', () => {
+  let app: NestFastifyApplication;
+  let db: SqlClient;
+
+  beforeAll(async () => {
+    ({ app, db } = await build());
+  });
+  afterAll(async () => {
+    await app.close();
+  });
+
+  const requestCode = (email: string) =>
+    app.inject({ method: 'POST', url: '/auth/register/email/request', payload: { email } });
+  const confirmCode = (email: string, code: string) =>
+    app.inject({ method: 'POST', url: '/auth/register/email/confirm', payload: { email, code } });
+
+  /**
+   * Same technique contact-verification.e2e-spec.ts's own plantCode() uses:
+   * the code is peppered before storage (see
+   * RegistrationVerificationService's own digestOf), so a test — same as a
+   * real applicant — cannot read it back out. This replaces the digest with
+   * one for a KNOWN code instead, which is closer to the truth: what a real
+   * applicant has is the code, delivered by the mailer this suite does not
+   * configure.
+   */
+  const plantCode = async (email: string, code = '424242'): Promise<string> => {
+    const result = await db.query(
+      `update registration_email_challenges set code_digest = $1
+        where email = $2 and confirmed_at is null and consumed_at is null`,
+      [createHmac('sha256', 'a-test-pepper-of-at-least-32-characters').update(code, 'utf8').digest('hex'),
+       email.trim().toLowerCase()],
+    );
+    if (result.rowCount === 0) throw new Error(`no live registration challenge for ${email}`);
+    return code;
+  };
+
+  it('records a request and, with no mail provider configured, says so honestly', async () => {
+    const response = await requestCode('otp-web@example.ph');
+
+    expect(response.statusCode).toBe(202);
+    expect(response.json<{ delivery: string }>().delivery).toBe('not-sent');
+  });
+
+  it('refuses a confirm with no outstanding request', async () => {
+    const response = await confirmCode('never-requested@example.ph', '123456');
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('refuses the wrong code without spending the challenge', async () => {
+    await requestCode('wrong-code@example.ph');
+    const real = await plantCode('wrong-code@example.ph');
+    const wrong = real === '000000' ? '111111' : '000000';
+
+    expect((await confirmCode('wrong-code@example.ph', wrong)).statusCode).toBe(409);
+    // Still usable: one mistyped digit must not cost the applicant the code.
+    expect((await confirmCode('wrong-code@example.ph', real)).statusCode).toBe(200);
+  });
+
+  it('refuses a second request within a minute', async () => {
+    await requestCode('resend@example.ph');
+
+    const response = await requestCode('resend@example.ph');
+
+    expect(response.statusCode).toBe(409);
+  });
+
+  it('confirming alone does not create an account — only register() does that', async () => {
+    await requestCode('confirmed-only@example.ph');
+    await confirmCode('confirmed-only@example.ph', await plantCode('confirmed-only@example.ph'));
+
+    const found = await db.query('select 1 from accounts where email = $1', ['confirmed-only@example.ph']);
+    expect(found.rows.length).toBe(0);
+  });
+
+  it('a real registration for the confirmed email starts already Verified', async () => {
+    const email = 'verified-at-signup@example.ph';
+    await requestCode(email);
+    await confirmCode(email, await plantCode(email));
+
+    const registered = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { firstName: 'Ana', lastName: 'Reyes', email, mobileNumber: '09171234567', password: GOOD_PASSWORD },
+    });
+    expect(registered.statusCode).toBe(202);
+
+    const signedIn = await signIn(app, email);
+    const { accessToken } = signedIn.json<{ accessToken: string }>();
+    const contacts = await app.inject({
+      method: 'GET', url: '/me/contacts', headers: { authorization: `Bearer ${accessToken}` },
+    });
+    const emailState = contacts.json<{ data: { channel: string; status: string }[] }>()
+      .data.find((c) => c.channel === 'email');
+    // Both facts, not just the account's own column — GET /me/contacts reads
+    // contact_verifications, a DIFFERENT table register() must also write or
+    // this reads Unverified regardless of what accounts.email_verified_at says.
+    expect(emailState?.status).toBe('Verified');
+
+    const row = await db.query<{ email_verified_at: Date | null }>(
+      'select email_verified_at from accounts where email_normalised = $1', [email],
+    );
+    expect(row.rows[0]?.email_verified_at).not.toBeNull();
+  });
+
+  it('an ordinary registration — no OTP step at all — still starts Unverified, exactly as before', async () => {
+    // The mobile client's own registration request, unaffected: it never
+    // calls register/email/request, and must keep registering cleanly.
+    const email = 'no-otp-step@example.ph';
+    const registered = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { firstName: 'Jose', lastName: 'Cruz', email, mobileNumber: '09171234567', password: GOOD_PASSWORD },
+    });
+    expect(registered.statusCode).toBe(202);
+
+    const row = await db.query<{ email_verified_at: Date | null }>(
+      'select email_verified_at from accounts where email_normalised = $1', [email],
+    );
+    expect(row.rows[0]?.email_verified_at).toBeNull();
+  });
+
+  it('a confirmed code cannot be replayed to verify a SECOND, different registration', async () => {
+    const email = 'replay@example.ph';
+    await requestCode(email);
+    await confirmCode(email, await plantCode(email));
+
+    // First registration spends the confirmed proof.
+    await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { firstName: 'A', lastName: 'B', email, mobileNumber: '09171234567', password: GOOD_PASSWORD },
+    });
+    // Second "registration" for the same email is the anti-enumeration
+    // no-op register() already gives any already-registered address — this
+    // just confirms the proof itself was consumed, not left standing.
+    const proofRow = await db.query<{ consumed_at: Date | null }>(
+      `select consumed_at from registration_email_challenges
+        where email = $1 and confirmed_at is not null order by issued_at desc limit 1`,
+      [email],
+    );
+    expect(proofRow.rows[0]?.consumed_at).not.toBeNull();
   });
 });
 

@@ -15,6 +15,8 @@ import { ProfilePhotoService } from '../application/profile-photo.service';
 import { Public, RequireScopes } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 import { AccountRecoveryMailer } from '../application/account-recovery-mailer';
+import { RegistrationVerificationService } from '../application/registration-verification.service';
+import { ContactVerificationMailer } from '../application/contact-verification-mailer';
 import { StructuredLogger } from '../../../common/logging/logger';
 
 /**
@@ -115,6 +117,12 @@ const rectification = z.object({
   { message: 'name at least one field to correct' },
 );
 
+const registerEmailVerificationRequest = z.object({ email: z.string().email().max(320) }).strict();
+const registerEmailVerificationConfirm = z.object({
+  email: z.string().email().max(320),
+  code: z.string().regex(/^\d{6}$/, 'must be the six-digit code'),
+}).strict();
+
 const refreshRequest = z.object({ refreshToken: z.string().min(1) });
 const revokeRequest = z.object({ allSessions: z.boolean().optional() });
 const forgotRequest = z.object({ email: z.string().email().max(320) });
@@ -152,6 +160,8 @@ function parse<T>(schema: z.ZodType<T>, body: unknown): T {
 export class AuthController {
   constructor(
     private readonly identity: IdentityService,
+    private readonly registrationVerification: RegistrationVerificationService,
+    private readonly registrationMailer: ContactVerificationMailer,
     private readonly recoveryMailer: AccountRecoveryMailer,
     private readonly logger: StructuredLogger,
   ) {}
@@ -240,11 +250,91 @@ export class AuthController {
     await this.identity.signOut(caller.sid);
   }
 
+  /**
+   * Verifying an email BEFORE the account it will belong to exists — Step 2
+   * of the web portal's own registration wizard, not a post-signup extra.
+   * Public, like `register` itself: there is no account yet to hold a scope
+   * against, and the same anti-enumeration posture applies (this reveals
+   * nothing about whether the address already has an account — `request`
+   * below always answers 202 the same way, and `confirm` never says
+   * "already registered").
+   */
+  @Public()
+  @Post('register/email/request')
+  @HttpCode(HttpStatus.ACCEPTED)
+  async requestRegistrationEmailCode(@Body() body: unknown): Promise<Record<string, unknown>> {
+    const input = parse(registerEmailVerificationRequest, body);
+    const result = await this.registrationVerification.request(input.email);
+    if (!result.ok) {
+      // 'too-soon' is a state the address is in (a code was just issued),
+      // not a validation failure — same 409 contacts.controller.ts's own
+      // refuse() uses for the identical reason.
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT, result.detail,
+      );
+    }
+
+    if (!this.registrationMailer.real) {
+      return {
+        delivery: 'not-sent',
+        detail: 'The request is recorded. The LGU has no message provider configured yet, '
+          + 'so no code has been sent — try again once one is set up.',
+      };
+    }
+    try {
+      await this.registrationMailer.sendCode(input.email, result.code);
+    } catch (cause) {
+      this.logger.error('registration email verification code could not be sent', {
+        reason: cause instanceof Error ? cause.message : String(cause),
+      });
+      return {
+        delivery: 'failed',
+        detail: 'The code was generated, but the email could not be sent just now. Try again in a moment.',
+      };
+    }
+    return {
+      delivery: 'sent',
+      detail: 'A 6-digit code was sent to this email address. It expires in a few minutes.',
+    };
+  }
+
+  @Public()
+  @Post('register/email/confirm')
+  @HttpCode(HttpStatus.OK)
+  async confirmRegistrationEmailCode(@Body() body: unknown): Promise<Record<string, unknown>> {
+    const input = parse(registerEmailVerificationConfirm, body);
+    const result = await this.registrationVerification.confirm(input.email, input.code);
+    if (!result.ok) {
+      // Every reason (no-challenge, expired, wrong-code, too-many-attempts)
+      // is a state the challenge is in, not a missing thing — same mapping
+      // contacts.controller.ts's own refuse() uses for the identical shape.
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this',
+        HttpStatus.CONFLICT, result.detail,
+      );
+    }
+    // Confirmed, not yet consumed — `register()` spends this the moment an
+    // account is actually created for this exact email. Nothing here says
+    // "you may now register"; that would be true of any six-digit answer,
+    // right or wrong, and is exactly the fabrication this whole feature
+    // exists to not perform.
+    return { confirmed: true };
+  }
+
   @Public()
   @Post('register')
   @HttpCode(HttpStatus.ACCEPTED)
   async register(@Body() body: unknown): Promise<void> {
     const input = parse(registration, body);
+    // Spent here, once, right before the account is created — not earlier,
+    // so a confirmed-then-abandoned Step 2 cannot be replayed against a
+    // different registration later than its own window (see
+    // RegistrationVerificationService.consumeConfirmedProof's own doc
+    // comment). `false` for the mobile client (which never calls
+    // register/email/request at all) is exactly today's behaviour: an
+    // unverified email, verified later from Profile.
+    const emailPreVerified = await this.registrationVerification.consumeConfirmedProof(input.email);
+
     // `mobileNumber` is validated above and was, until 2026-08-31, discarded
     // here — the service did not even accept it.
     const result = await this.identity.register({
@@ -263,6 +353,7 @@ export class AuthController {
       city: input.city,
       province: input.province,
       postalCode: input.postalCode,
+      emailPreVerified,
     });
 
     // A weak password IS reported: that is the caller's own input, not a fact

@@ -120,6 +120,24 @@ export class PostgresAccountRepository implements AccountRepository {
       for (const role of account.roles) {
         await tx.query('insert into account_roles (account_id, role) values ($1, $2)', [account.id, role]);
       }
+
+      // `contact_verifications` (migration 025) is what GET /me/contacts and
+      // the Admin/User portals actually read — `accounts.email_verified_at`
+      // alone is not enough, and a caller (registration, having already
+      // spent a confirmed pre-account proof) that set only the account
+      // column would leave every screen reading "Unverified" for an email
+      // the account itself already considers verified. Same two facts
+      // `ContactVerificationService.confirm()` writes, written here instead
+      // of through a second OTP round-trip for a code already checked once.
+      if (account.emailVerifiedAt !== null) {
+        await tx.query(
+          `insert into contact_verifications (account_id, channel, status, method, verified_at)
+           values ($1, 'email', 'Verified', 'Email Verification Link', $2)
+           on conflict (account_id, channel) do update
+             set status = 'Verified', method = 'Email Verification Link', verified_at = excluded.verified_at`,
+          [account.id, account.emailVerifiedAt],
+        );
+      }
     });
   }
 
