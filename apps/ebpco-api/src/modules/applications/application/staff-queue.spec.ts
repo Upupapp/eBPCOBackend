@@ -316,6 +316,81 @@ describe('paging a queue that is being worked', () => {
   });
 });
 
+describe('evaluationStage — the queue now carries what used to be detail()-only', () => {
+  // Direct insert, not EvaluationService.record(): that method enforces the
+  // in-order/self-review rules record() itself exists to check, and this
+  // only needs a real Passed row on the books — the same shape
+  // EvaluationService.of() (and therefore its caller's ORDER.find(...)
+  // rule, which QUEUE_SQL's own subquery replicates) reads.
+  //
+  // evaluator_id is required by the table's own decided_evaluation_is_
+  // attributable check the moment result isn't 'Pending' — a real staff
+  // account, not a bare uuid, the same as every other decided row.
+  async function passStage(applicationId: string, stage: string, evaluatorId: string): Promise<void> {
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, evaluated_at)
+       values ($1, $2, 'Passed', $3, $4)`,
+      [applicationId, stage, evaluatorId, NOW],
+    );
+  }
+
+  it('is the first stage, Initial, for an application with no decided evaluations', async () => {
+    const id = await file({ reference: 'BP-1', status: 'Under Evaluation' });
+
+    const page = await queue.page(await officer('administrator'));
+
+    expect(page.rows.find((r) => r.id === id)?.evaluationStage).toBe('Initial');
+  });
+
+  it('is the first UNDECIDED stage once earlier ones have passed', async () => {
+    const id = await file({ reference: 'BP-1', status: 'Under Evaluation' });
+    const evaluator = await officer('evaluator');
+    await passStage(id, 'Initial', evaluator.accountId);
+    await passStage(id, 'Zoning', evaluator.accountId);
+
+    const page = await queue.page(await officer('administrator'));
+
+    expect(page.rows.find((r) => r.id === id)?.evaluationStage).toBe('Fire Safety');
+  });
+
+  it('is null once all five stages have passed', async () => {
+    const id = await file({ reference: 'BP-1', status: 'Approved' });
+    const evaluator = await officer('evaluator');
+    for (const stage of ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval']) {
+      await passStage(id, stage, evaluator.accountId);
+    }
+
+    const page = await queue.page(await officer('administrator'));
+
+    expect(page.rows.find((r) => r.id === id)?.evaluationStage).toBeNull();
+  });
+
+  it('ignores a Pending or Revision Required row for the SAME stage — only Passed counts as decided', async () => {
+    const id = await file({ reference: 'BP-1', status: 'Under Evaluation' });
+    const evaluator = await officer('evaluator');
+    await db.query(
+      `insert into evaluations (application_id, stage, result, evaluator_id, remarks, evaluated_at)
+       values ($1, 'Initial', 'Revision Required', $2, 'Missing signature', $3)`,
+      [id, evaluator.accountId, NOW],
+    );
+
+    const page = await queue.page(await officer('administrator'));
+
+    expect(page.rows.find((r) => r.id === id)?.evaluationStage).toBe('Initial');
+  });
+
+  it('agrees with the detail endpoint’s own summary for the same application', async () => {
+    const id = await file({ reference: 'BP-1', status: 'Under Evaluation' });
+    const evaluator = await officer('evaluator');
+    await passStage(id, 'Initial', evaluator.accountId);
+
+    const admin = await officer('administrator');
+    const detail = await queue.detail(admin, id);
+
+    expect(detail?.summary.evaluationStage).toBe('Zoning');
+  });
+});
+
 describe('the dashboard is counted by the database, not the browser', () => {
   it('counts every row, not just the first page', async () => {
     // The defect this replaces: the admin held all applications in memory and

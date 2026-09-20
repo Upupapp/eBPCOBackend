@@ -93,6 +93,16 @@ export interface QueueRow {
    * purpose and returns null once no charter classification applies.
    */
   readonly completedAt: string | null;
+  /**
+   * The stage this application is waiting on, or null once all five are
+   * passed (see `QUEUE_SQL`'s own comment on the subquery this comes
+   * from). Was entirely absent from the queue before — the Admin
+   * Portal's own client-side ApplicationRecord mapper defaulted it to
+   * null for every server row and said, in its own words, that the
+   * honest fix was "a widened type or a queue row that carries them."
+   * This is that.
+   */
+  readonly evaluationStage: string | null;
 }
 
 export interface QueuePage {
@@ -221,7 +231,24 @@ const QUEUE_SQL = `
         and t.to_status = 'Under Evaluation') as suspended_to,
     (select max(t.occurred_at) from application_transitions t
       where t.application_id = a.id
-        and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at
+        and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at,
+    -- The stage this application is waiting on, or null once all five are
+    -- passed — the same "first undecided stage, in order" rule
+    -- EvaluationService.of()'s own caller applies client-side for one
+    -- application at a time (see its ORDER.find(...) there). Replicated
+    -- here as a correlated subquery so the QUEUE carries it too, not only
+    -- the detail endpoint: this list never sent it at all before, so
+    -- every caller that filters or displays by stage from the queue
+    -- (the Admin Portal's Business Application Stages board) had nothing
+    -- to filter on and treated every row as stageless.
+    (select stage
+       from unnest(array['Initial','Zoning','Fire Safety','OBO','Final Approval']) with ordinality as s(stage, ord)
+      where not exists (
+        select 1 from evaluations e
+         where e.application_id = a.id and e.stage = s.stage and e.result = 'Passed'
+      )
+      order by s.ord
+      limit 1) as evaluation_stage
   from applications a
   join applicants ap on ap.id = a.applicant_id
   join accounts acc on acc.id = ap.account_id
@@ -743,6 +770,7 @@ export class StaffQueueService {
       paymentVerified: row['payment_verified'] === true,
       pledge: pledgeOf(row, calendar, this.clock()),
       completedAt: completed === null || completed === undefined ? null : new Date(completed as string).toISOString(),
+      evaluationStage: (row['evaluation_stage'] as string | null) ?? null,
     };
   }
 
