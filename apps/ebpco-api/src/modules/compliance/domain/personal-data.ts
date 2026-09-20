@@ -206,6 +206,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     mobile_verified_at: none('account-lifetime'),
     totp_secret_encrypted: secret('authentication'),
     disabled_at: none('account-lifetime'),
+    // Free text an officer writes about WHY this account was disabled
+    // (migration 049, the Citizens module). Content, like
+    // `documents.review_remark`, not `none` like `payments.rejection_reason`
+    // beside it in this same register: a payment's rejection reason is a note
+    // about a transaction, this is a note an officer wrote about a specific
+    // PERSON's account, on a specific occasion, and may readily name them, a
+    // document, or an incident.
+    disabled_reason: content('account-lifetime', ACCOUNTABILITY),
     // When this account last authenticated. A bare timestamp identifies nobody
     // on its own -- the linkage is `id`, classified above -- so it is scored
     // the way `created_at` and the verification stamps are. It exists so the
