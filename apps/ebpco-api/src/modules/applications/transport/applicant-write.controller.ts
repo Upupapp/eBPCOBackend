@@ -29,8 +29,10 @@ import { StructuredLogger } from '../../../common/logging/logger';
 const submissionShape = z.object({
   permitType: z.string().min(1).max(80),
   applicationAction: z.enum(['New', 'Renewal', 'Amendment']),
-  /** The permit this renews, as printed on the applicant's copy. */
+  /** The permit this renews, as printed on the applicant's copy. Must already be on file — see SubmissionService.resolveRenewal. */
   renewsPermitNumber: z.string().min(1).max(60).nullable().optional(),
+  /** The permit this renews, when it predates eBPCO and so is not on file. Self-reported, never verified; use this or renewsPermitNumber, never both. */
+  priorPermitClaim: z.string().min(1).max(60).nullable().optional(),
   businessId: z.string().uuid().nullable().optional(),
   location: z.string().max(500).nullable().optional(),
   documentIds: z.array(z.string().uuid()).max(60).optional(),
@@ -168,6 +170,7 @@ export class ApplicantWriteController {
         businessId: input.businessId ?? null,
         location: input.location ?? null,
         renewsPermitNumber: input.renewsPermitNumber ?? null,
+        priorPermitClaim: input.priorPermitClaim ?? null,
         documentIds: input.documentIds ?? [],
         form,
       },

@@ -616,4 +616,55 @@ describe('what a renewal renews', () => {
       [applicant.rows[0]?.id, officerId],
     )).rejects.toThrow(/renewal_names_what_it_renews/);
   });
+
+  describe('a permit that predates eBPCO (053)', () => {
+    // An officer at the counter, holding the citizen's real paper permit,
+    // could not key it in before 053 — `renewsPermitNumber` only ever
+    // resolves against `generated_permits`, which this permit was never in.
+
+    it('links a Renewal to a claimed prior permit, unresolved', async () => {
+      const response = await file({
+        ...WALK_IN,
+        applicant: { ...WALK_IN.applicant, email: 'renewal.legacy@example.ph' },
+        applicationAction: 'Renewal',
+        priorPermitClaim: 'OLD-BP-1998-042',
+      });
+
+      expect(response.statusCode).toBe(201);
+      const row = await db.query<{ prior_permit_claim: string | null; renews_permit_id: string | null }>(
+        'select prior_permit_claim, renews_permit_id from applications where id = $1',
+        [response.json<{ applicationId: string }>().applicationId],
+      );
+      expect(row.rows[0]?.prior_permit_claim).toBe('OLD-BP-1998-042');
+      expect(row.rows[0]?.renews_permit_id).toBeNull();
+    });
+
+    it('the database now accepts a Renewal naming only a prior-permit claim', async () => {
+      // The positive counterpart to "is refused by the database too" above:
+      // 053 widened the constraint, not just kept the old refusal working.
+      const applicant = await db.query<{ id: string }>('select id from applicants limit 1');
+
+      await expect(db.query(
+        `insert into applications (reference_number, applicant_id, permit_type, application_action,
+                                   lifecycle_status, submitted_at, created_by, prior_permit_claim)
+         values ('E-BPCO-2026-999998', $1, 'Fencing Permit', 'Renewal', 'Submitted', now(), $2, 'OLD-BP-1998-043')`,
+        [applicant.rows[0]?.id, officerId],
+      )).resolves.toBeDefined();
+    });
+
+    it('REFUSES naming both a permit on file and a prior-permit claim', async () => {
+      await permitFor('renewal.bothclaims@example.ph', 'FP-2026-000504');
+
+      const response = await file({
+        ...WALK_IN,
+        applicant: { ...WALK_IN.applicant, email: 'renewal.bothclaims@example.ph' },
+        applicationAction: 'Renewal',
+        renewsPermitNumber: 'FP-2026-000504',
+        priorPermitClaim: 'OLD-BP-1998-044',
+      });
+
+      expect(response.statusCode).toBe(422);
+      expect(response.json<{ detail: string }>().detail).toMatch(/not both/i);
+    });
+  });
 });

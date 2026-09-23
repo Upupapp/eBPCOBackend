@@ -40,13 +40,13 @@ const submission = (overrides: Partial<Submission> = {}): Submission => ({
   ...overrides,
 });
 
-async function uploadedDocument(uploader: string): Promise<string> {
+async function uploadedDocument(uploader: string, requirementCode: string | null = null): Promise<string> {
   const id = randomUUID();
   await db.query(
     `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
-                            byte_size, sha256, storage_key, status)
-     values ($1,null,$2,'Lot plan','plan.pdf','application/pdf',1024,$3,$4,'Pending')`,
-    [id, uploader, 'a'.repeat(64), `objects/${id}.pdf`],
+                            byte_size, sha256, storage_key, status, requirement_code)
+     values ($1,null,$2,'Lot plan','plan.pdf','application/pdf',1024,$3,$4,'Pending',$5)`,
+    [id, uploader, 'a'.repeat(64), `objects/${id}.pdf`, requirementCode],
   );
   return id;
 }
@@ -293,6 +293,78 @@ describe('refusals', () => {
     expect(await count('select count(*) as n from audit_events')).toBe(0);
     expect(await count('select count(*) as n from idempotency_keys')).toBe(0);
     expect(await count(`select count(*) as n from document_number_sequences where series = 'APP'`)).toBe(0);
+  });
+});
+
+describe('a permit that predates eBPCO', () => {
+  // Migration 053's own reason for existing: eBPCO launched into a
+  // Municipality with decades of paper permits already outstanding, so
+  // `renewsPermitNumber` (which must resolve to a real generated_permits row)
+  // is a dead end for most real renewals. `priorPermitClaim` is the
+  // unverified alternative — accepted only alongside the proof document
+  // requirement code 053 seeded for every permit type.
+
+  it('refuses a claimed prior permit with no proof attached', async () => {
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({ applicationAction: 'Renewal', priorPermitClaim: 'BP-1998-000042' }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('prior-permit-proof-required');
+  });
+
+  it('leaves nothing behind when a prior-permit claim has no proof', async () => {
+    // The same guarantee the ordinary refusal path already has — see "leaves
+    // nothing behind when a submission is refused" above. Checked separately
+    // because this refusal was deliberately moved to run BEFORE the
+    // application row is inserted (see resolveRenewal()'s own doc comment):
+    // this proves that placement actually holds, not just that the reason
+    // code is right.
+    await submissions.submit({
+      caller: maria,
+      submission: submission({ applicationAction: 'Renewal', priorPermitClaim: 'BP-1998-000042' }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(await count('select count(*) as n from applications')).toBe(0);
+    expect(await count(`select count(*) as n from document_number_sequences where series = 'APP'`)).toBe(0);
+  });
+
+  it('accepts a claimed prior permit once proof is attached', async () => {
+    const proof = await uploadedDocument(MARIA, 'prior-permit-proof');
+
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({
+        applicationAction: 'Renewal', priorPermitClaim: 'BP-1998-000042', documentIds: [proof],
+      }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const row = await db.query<{ prior_permit_claim: string | null; renews_permit_id: string | null }>(
+      'select prior_permit_claim, renews_permit_id from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]?.prior_permit_claim).toBe('BP-1998-000042');
+    expect(row.rows[0]?.renews_permit_id).toBeNull();
+  });
+
+  it('refuses naming both a permit on file and a prior-permit claim', async () => {
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({
+        applicationAction: 'Renewal', renewsPermitNumber: 'BP-2026-000001', priorPermitClaim: 'BP-1998-000042',
+      }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('renewal-reference-conflict');
   });
 });
 

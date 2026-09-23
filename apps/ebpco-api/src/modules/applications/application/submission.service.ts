@@ -37,7 +37,8 @@ export type SubmitResult =
       readonly ok: false;
       readonly reason: 'no-applicant-record' | 'unknown-permit-type' | 'business-not-yours'
         | 'documents-not-yours' | 'requirement-unknown' | 'key-reused' | 'form-rejected'
-        | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found';
+        | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found'
+        | 'renewal-reference-conflict' | 'prior-permit-proof-required';
       readonly detail: string;
       /** Present for `form-rejected`, so a client can point at the field. */
       readonly violations?: readonly FormViolation[];
@@ -53,8 +54,21 @@ export interface Submission {
    * copy. Null for a New application, and required for the other two — a
    * renewal that names nothing leaves an officer searching for the original by
    * the applicant's name.
+   *
+   * MUST resolve to a real `generated_permits` row this applicant owns — see
+   * `resolveRenewal()`. For a permit eBPCO never issued, use
+   * `priorPermitClaim` instead, never this field.
    */
   readonly renewsPermitNumber?: string | null;
+  /**
+   * The permit a Renewal or Amendment is about, when it predates eBPCO and so
+   * has no `generated_permits` row to resolve against. Self-reported by the
+   * applicant and NEVER verified — `resolveRenewal()` accepts it as-is. Set
+   * this or `renewsPermitNumber`, never both; the proof document required
+   * alongside it (requirement code `prior-permit-proof`) is what lets an
+   * officer actually judge the claim.
+   */
+  readonly priorPermitClaim?: string | null;
   readonly documentIds: readonly string[];
   /** The applicant's answers. Structurally bounded by the transport; semantically checked here if a schema exists. */
   readonly form: Record<string, unknown>;
@@ -216,13 +230,36 @@ export class SubmissionService {
       const renewal = await this.resolveRenewal(tx, {
         action: submission.applicationAction,
         permitNumber: submission.renewsPermitNumber ?? null,
+        priorPermitClaim: submission.priorPermitClaim ?? null,
         applicantId,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
 
+      if (renewal.priorPermitClaim !== null) {
+        // Checked here, BEFORE anything is written — not after fileApplication()
+        // the way the requirement-unknown check below runs, because this
+        // service's transaction() only rolls back on a throw (see
+        // postgres-client.ts): returning `ok:false` after an insert still
+        // commits it. Needs only `submission.documentIds` (already verified
+        // to be this applicant's own, unattached documents above), so there
+        // is no reason to wait until after the application row exists.
+        const proof = submission.documentIds.length === 0 ? { rows: [{ n: '0' }] } : await tx.query<{ n: string }>(
+          `select count(*) as n from documents
+            where id = any($1) and requirement_code = 'prior-permit-proof'`,
+          [[...submission.documentIds]],
+        );
+        if (Number(proof.rows[0]?.n ?? 0) === 0) {
+          return {
+            ok: false, reason: 'prior-permit-proof-required',
+            detail: 'A permit claimed as issued before eBPCO needs a photo or scan of it attached.',
+          };
+        }
+      }
+
       const now = this.clock();
       const { applicationId, referenceNumber, requiredDocuments } = await this.fileApplication(tx, {
         applicantId, submission, now, renewsPermitId: renewal.permitId,
+        priorPermitClaim: renewal.priorPermitClaim,
         // Self-service: the filer and the applicant are the same account.
         filedBy: caller.accountId,
         formValidatedAgainst: schema?.version ?? null,
@@ -325,6 +362,7 @@ export class SubmissionService {
     businessId: string | null;
     submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'form'>;
     renewsPermitNumber?: string | null;
+    priorPermitClaim?: string | null;
     idempotencyKey: string;
   }): Promise<OnBehalfResult> {
     const { caller, applicant, submission, idempotencyKey } = options;
@@ -468,6 +506,7 @@ export class SubmissionService {
       const renewal = await this.resolveRenewal(tx, {
         action: submission.applicationAction,
         permitNumber: options.renewsPermitNumber ?? null,
+        priorPermitClaim: options.priorPermitClaim ?? null,
         applicantId,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
@@ -475,6 +514,7 @@ export class SubmissionService {
       const now = this.clock();
       const filed = await this.fileApplication(tx, {
         applicantId, now, renewsPermitId: renewal.permitId,
+        priorPermitClaim: renewal.priorPermitClaim,
         submission: { ...submission, businessId },
         // THE DISTINCTION. `created_by` is the officer who typed it in;
         // `applicant_id` is whose permit it is. Collapsing them would credit
@@ -509,41 +549,69 @@ export class SubmissionService {
   }
 
   /**
-   * The permit a Renewal or Amendment is about.
+   * The permit a Renewal or Amendment is about — a verified link, an
+   * unverified claim, or neither, depending which (if either) field the
+   * caller supplied.
    *
-   * Theirs, or nothing. Renewing someone else's permit would put their
-   * particulars on this applicant's filing, and it is the same rule the
-   * business check enforces one field away — an applicant may only build on
-   * records that are already theirs.
+   * `permitNumber` (→ `permitId`) is theirs, or nothing: renewing someone
+   * else's permit would put their particulars on this applicant's filing, the
+   * same rule the business check enforces one field away — an applicant may
+   * only build on records that are already theirs. Resolved from the permit
+   * NUMBER the applicant quotes, because that is what is printed on the
+   * instrument in their hand; the column stores the key.
    *
-   * Resolved from the permit NUMBER the applicant quotes, because that is what
-   * is printed on the instrument in their hand; the column stores the key.
+   * `priorPermitClaim` exists for the permit eBPCO never issued: launched
+   * into a Municipality with decades of paper permits already outstanding, so
+   * "no matching `generated_permits` row" is the COMMON case for a real
+   * renewal, not a fraud signal. Accepted as-is — there is nothing to
+   * resolve it against — and never promoted to a verified `permitId`. What
+   * makes it judgeable is the proof document `submit()` requires alongside
+   * it, not anything this method checks.
    */
   private async resolveRenewal(
     tx: SqlClient,
-    options: { action: string; permitNumber: string | null; applicantId: string },
+    options: {
+      action: string; permitNumber: string | null; priorPermitClaim: string | null; applicantId: string;
+    },
   ): Promise<
-    | { ok: true; permitId: string | null }
-    | { ok: false; reason: 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found'; detail: string }
+    | { ok: true; permitId: string | null; priorPermitClaim: string | null }
+    | {
+        ok: false;
+        reason: 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found' | 'renewal-reference-conflict';
+        detail: string;
+      }
   > {
-    const { action, permitNumber, applicantId } = options;
+    const { action, permitNumber, priorPermitClaim, applicantId } = options;
 
     if (action === 'New') {
-      if (permitNumber !== null) {
+      if (permitNumber !== null || priorPermitClaim !== null) {
         return {
           ok: false, reason: 'not-a-renewal',
           detail: 'A New application does not renew a permit. Choose Renewal or Amendment, or omit it.',
         };
       }
-      return { ok: true, permitId: null };
+      return { ok: true, permitId: null, priorPermitClaim: null };
     }
+
+    if (permitNumber !== null && priorPermitClaim !== null) {
+      // Two different claims about which one permit this is — the applicant
+      // (or the officer keying it in) must pick one, not have the server
+      // silently prefer one over the other.
+      return {
+        ok: false, reason: 'renewal-reference-conflict',
+        detail: 'Choose either a permit already on file or a prior permit claim, not both.',
+      };
+    }
+
+    if (priorPermitClaim !== null) return { ok: true, permitId: null, priorPermitClaim };
 
     if (permitNumber === null) {
       // The defect the whole column exists to prevent: an officer opening a
       // renewal and having to find the original by searching a name.
       return {
         ok: false, reason: 'renewal-needs-a-permit',
-        detail: `A ${action} has to say which permit it is about. Quote the permit number.`,
+        detail: `A ${action} has to say which permit it is about — quote the permit number, or, if it predates `
+          + 'eBPCO, claim it as a prior permit and attach proof.',
       };
     }
 
@@ -563,7 +631,7 @@ export class SubmissionService {
         detail: `No permit numbered "${permitNumber}" is registered to this applicant.`,
       };
     }
-    return { ok: true, permitId };
+    return { ok: true, permitId, priorPermitClaim: null };
   }
 
   /**
@@ -584,6 +652,7 @@ export class SubmissionService {
       filedBy: string;
       formValidatedAgainst: string | null;
       renewsPermitId: string | null;
+      priorPermitClaim: string | null;
     },
   ): Promise<{
     applicationId: string; referenceNumber: string;
@@ -619,15 +688,15 @@ export class SubmissionService {
       `insert into applications
          (reference_number, applicant_id, business_id, permit_type, application_action,
           location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
-          form, form_validated_against, required_documents, renews_permit_id)
-       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13,$14)
+          form, form_validated_against, required_documents, renews_permit_id, prior_permit_claim)
+       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13,$14,$15)
        returning id`,
       [
         referenceNumber, applicantId, submission.businessId, submission.permitType,
         submission.applicationAction, submission.location,
         charterEntry?.classification ?? null, charterEntry?.id ?? null, now, filedBy,
         JSON.stringify(submission.form), options.formValidatedAgainst,
-        JSON.stringify(requirements), options.renewsPermitId,
+        JSON.stringify(requirements), options.renewsPermitId, options.priorPermitClaim,
       ],
     );
     return { applicationId: inserted.rows[0]?.id ?? '', referenceNumber,

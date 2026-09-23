@@ -52,6 +52,9 @@ async function file(options: {
   businessName?: string;
   charterEntryId?: string | null;
   classification?: 'Simple' | 'Complex' | 'Highly Technical' | null;
+  applicationAction?: 'New' | 'Renewal' | 'Amendment';
+  renewsPermitId?: string | null;
+  priorPermitClaim?: string | null;
 }): Promise<string> {
   const id = randomUUID();
   let businessId: string | null = null;
@@ -72,15 +75,18 @@ async function file(options: {
   await db.query(
     `insert into applications (id, reference_number, applicant_id, business_id, permit_type,
                                application_action, lifecycle_status, submitted_at, charter_entry_id,
-                               classification, created_by)
-     values ($1,$2,$3,$4,$5,'New',$6,$7,$8,$9,$10)`,
+                               classification, created_by, renews_permit_id, prior_permit_claim)
+     values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)`,
     [
       id, options.reference, applicantId, businessId, options.permitType ?? 'Fencing Permit',
+      options.applicationAction ?? 'New',
       startAt,
       startAt === 'Draft' ? null : (options.submittedAt ?? NOW.toISOString()),
       options.charterEntryId ?? null,
       options.classification ?? null,
       APPLICANT_ACCOUNT,
+      options.renewsPermitId ?? null,
+      options.priorPermitClaim ?? null,
     ],
   );
 
@@ -388,6 +394,50 @@ describe('evaluationStage — the queue now carries what used to be detail()-onl
     const detail = await queue.detail(admin, id);
 
     expect(detail?.summary.evaluationStage).toBe('Zoning');
+  });
+});
+
+describe('what a Renewal/Amendment claims, verified or not (053)', () => {
+  it('carries the real permit number for a verified renewal', async () => {
+    const original = await file({ reference: 'BP-1', status: 'Approved' });
+    await db.query(
+      `insert into generated_permits (application_id, permit_number, issued_date, generated_by)
+       values ($1,'FP-2026-000900', now(), $2)`,
+      [original, APPLICANT_ACCOUNT],
+    );
+    const renewal = await file({
+      reference: 'BP-2', status: 'Under Evaluation',
+      applicationAction: 'Renewal', renewsPermitId: original,
+    });
+
+    const page = await queue.page(await officer('administrator'));
+
+    const row = page.rows.find((r) => r.id === renewal);
+    expect(row?.renewsPermitNumber).toBe('FP-2026-000900');
+    expect(row?.priorPermitClaim).toBeNull();
+  });
+
+  it('carries an unverified claim as-is, with no permit number', async () => {
+    const id = await file({
+      reference: 'BP-3', status: 'Under Evaluation',
+      applicationAction: 'Renewal', priorPermitClaim: 'OLD-BP-1998-042',
+    });
+
+    const page = await queue.page(await officer('administrator'));
+
+    const row = page.rows.find((r) => r.id === id);
+    expect(row?.priorPermitClaim).toBe('OLD-BP-1998-042');
+    expect(row?.renewsPermitNumber).toBeNull();
+  });
+
+  it('is null on both fields for a New application', async () => {
+    const id = await file({ reference: 'BP-4', status: 'Under Evaluation' });
+
+    const page = await queue.page(await officer('administrator'));
+
+    const row = page.rows.find((r) => r.id === id);
+    expect(row?.renewsPermitNumber).toBeNull();
+    expect(row?.priorPermitClaim).toBeNull();
   });
 });
 

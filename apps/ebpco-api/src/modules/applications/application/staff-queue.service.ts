@@ -103,6 +103,22 @@ export interface QueueRow {
    * This is that.
    */
   readonly evaluationStage: string | null;
+  /**
+   * The permit number a Renewal or Amendment names, when it resolved to a
+   * real permit eBPCO itself issued (`applications.renews_permit_id`, see
+   * migration 024). Null for a New application, and also null on the
+   * unverified path — see `priorPermitClaim`, its counterpart.
+   */
+  readonly renewsPermitNumber: string | null;
+  /**
+   * The permit number a Renewal or Amendment names, self-reported by the
+   * applicant, when it predates eBPCO and so has no `generated_permits` row
+   * to link (`applications.prior_permit_claim`, migration 053). NEVER
+   * verified — shown to staff as a claim to judge from the attached proof
+   * document, not a fact the system confirmed. Mutually exclusive with
+   * `renewsPermitNumber`: an application carries at most one of the two.
+   */
+  readonly priorPermitClaim: string | null;
 }
 
 export interface QueuePage {
@@ -248,7 +264,10 @@ const QUEUE_SQL = `
          where e.application_id = a.id and e.stage = s.stage and e.result = 'Passed'
       )
       order by s.ord
-      limit 1) as evaluation_stage
+      limit 1) as evaluation_stage,
+    a.prior_permit_claim,
+    (select g.permit_number from generated_permits g where g.application_id = a.renews_permit_id)
+      as renews_permit_number
   from applications a
   join applicants ap on ap.id = a.applicant_id
   join accounts acc on acc.id = ap.account_id
@@ -771,6 +790,8 @@ export class StaffQueueService {
       pledge: pledgeOf(row, calendar, this.clock()),
       completedAt: completed === null || completed === undefined ? null : new Date(completed as string).toISOString(),
       evaluationStage: (row['evaluation_stage'] as string | null) ?? null,
+      renewsPermitNumber: (row['renews_permit_number'] as string | null) ?? null,
+      priorPermitClaim: (row['prior_permit_claim'] as string | null) ?? null,
     };
   }
 

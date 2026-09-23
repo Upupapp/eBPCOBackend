@@ -129,6 +129,8 @@ const onBehalfShape = z.object({
   permitType: z.string().min(1).max(80),
   applicationAction: z.enum(['New', 'Renewal', 'Amendment']),
   renewsPermitNumber: z.string().min(1).max(60).nullable().optional(),
+  /** The permit this renews, when it predates eBPCO and so is not on file. Self-reported, never verified; use this or renewsPermitNumber, never both. */
+  priorPermitClaim: z.string().min(1).max(60).nullable().optional(),
   location: z.string().max(400).optional(),
   form: z.record(z.string(), z.unknown()).optional(),
 }).strict().refine((value) => !(value.business !== undefined && value.businessId !== undefined), {
@@ -225,6 +227,7 @@ export class StaffApplicationsController {
       business: input.business ?? null,
       businessId: input.businessId ?? null,
       renewsPermitNumber: input.renewsPermitNumber ?? null,
+      priorPermitClaim: input.priorPermitClaim ?? null,
       submission: {
         permitType: input.permitType,
         applicationAction: input.applicationAction,
