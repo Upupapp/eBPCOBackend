@@ -8,6 +8,7 @@ import { normaliseEmail } from '../../identity/application/account.repository';
 import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
 import { RequirementDocument, RequirementsService } from './requirements.service';
 import { RegistrationVerificationService } from '../../identity/application/registration-verification.service';
+import { resolveRenewal } from './resolve-renewal';
 
 /**
  * Filing an application, exactly once.
@@ -72,7 +73,37 @@ export interface Submission {
   readonly documentIds: readonly string[];
   /** The applicant's answers. Structurally bounded by the transport; semantically checked here if a schema exists. */
   readonly form: Record<string, unknown>;
+  /**
+   * Files at `Draft` instead of `Submitted` — a real, resumable row with a
+   * real reference number, just not yet filed. Relaxes exactly two checks
+   * that exist to keep a genuinely FILED application answerable: a Renewal/
+   * Amendment naming neither reference yet, and a prior-permit claim with no
+   * proof attached yet. Everything else — a bad permit number, a business
+   * that isn't theirs, an unknown permit type — still refuses, because those
+   * are errors in what was given, not gaps waiting to be filled in later.
+   */
+  readonly saveAsDraft?: boolean;
 }
+
+export interface DraftPatch {
+  readonly permitType?: string;
+  readonly applicationAction?: 'New' | 'Renewal' | 'Amendment';
+  readonly renewsPermitNumber?: string | null;
+  readonly priorPermitClaim?: string | null;
+  readonly businessId?: string | null;
+  readonly location?: string | null;
+  readonly form?: Record<string, unknown>;
+}
+
+export type UpdateDraftResult =
+  | { readonly ok: true }
+  | {
+      readonly ok: false;
+      readonly reason: 'not-found' | 'not-a-draft' | 'unknown-permit-type' | 'business-not-yours'
+        | 'documents-not-yours' | 'requirement-unknown' | 'not-a-renewal' | 'renewal-needs-a-permit'
+        | 'permit-not-found' | 'renewal-reference-conflict';
+      readonly detail: string;
+    };
 
 export interface NewBusiness {
   readonly name: string;
@@ -227,15 +258,20 @@ export class SubmissionService {
         }
       }
 
-      const renewal = await this.resolveRenewal(tx, {
+      const renewal = await resolveRenewal(tx, {
         action: submission.applicationAction,
         permitNumber: submission.renewsPermitNumber ?? null,
         priorPermitClaim: submission.priorPermitClaim ?? null,
         applicantId,
+        tolerateNoReferenceYet: submission.saveAsDraft ?? false,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
 
-      if (renewal.priorPermitClaim !== null) {
+      // A draft may claim a prior permit with no proof attached yet — the
+      // whole point of a draft is that it is not finished. Real filing still
+      // requires it: an unverifiable claim nobody can point at a scan of is
+      // not something staff can ever judge.
+      if (!submission.saveAsDraft && renewal.priorPermitClaim !== null) {
         // Checked here, BEFORE anything is written — not after fileApplication()
         // the way the requirement-unknown check below runs, because this
         // service's transaction() only rolls back on a throw (see
@@ -263,6 +299,7 @@ export class SubmissionService {
         // Self-service: the filer and the applicant are the same account.
         filedBy: caller.accountId,
         formValidatedAgainst: schema?.version ?? null,
+        saveAsDraft: submission.saveAsDraft ?? false,
       });
 
       if (submission.documentIds.length > 0) {
@@ -303,7 +340,7 @@ export class SubmissionService {
       }
 
       await this.audit.append({
-        action: 'application.submitted',
+        action: submission.saveAsDraft ? 'application.draft-saved' : 'application.submitted',
         subjectType: 'application',
         subjectId: applicationId,
         outcome: 'allowed',
@@ -318,6 +355,189 @@ export class SubmissionService {
       });
 
       return { ok: true, ...body, replayed: false };
+    });
+  }
+
+  /**
+   * Keeps editing a Draft across sessions — the resume-and-change path.
+   *
+   * Deliberately NOT `RecordsService.edit()` reused with a Draft-only guard
+   * bolted on. That class exists for a different act: an officer correcting
+   * a record someone else already filed, with a before/after audit trail
+   * for every field because the record is real and the correction is an
+   * event worth recording precisely. This is the applicant (or, for a
+   * walk-in's own draft, the officer who started it — same idempotent
+   * "keep saving my own not-yet-filed answers" act either way) still
+   * composing something that has not been filed. No audit ceremony, no
+   * frozen-field rules `RecordsService` enforces once money or a permit
+   * exists — none of that applies to a row nothing downstream has acted on
+   * yet. `caller` is generic on purpose: both the citizen wizard's own
+   * saves and the Admin Portal resuming a colleague's walk-in draft go
+   * through this one method.
+   */
+  async updateDraft(options: {
+    caller: Caller;
+    applicationId: string;
+    patch: DraftPatch;
+    documentIds?: readonly string[];
+  }): Promise<UpdateDraftResult> {
+    const { caller, applicationId, patch, documentIds } = options;
+    if (!/^[0-9a-fA-F-]{36}$/.test(applicationId)) {
+      return { ok: false, reason: 'not-found', detail: 'No such application.' };
+    }
+
+    return this.db.transaction(async (tx) => {
+      // Ownership is "this citizen's own applicant record", never
+      // `created_by` — a walk-in's draft belongs to the CITIZEN it names,
+      // whoever at the counter typed it in, the same rule every other
+      // applicant-facing route already enforces.
+      const found = await tx.query<{
+        id: string; lifecycle_status: string; applicant_id: string; permit_type: string;
+        application_action: 'New' | 'Renewal' | 'Amendment';
+      }>(
+        `select a.id, a.lifecycle_status, a.applicant_id, a.permit_type, a.application_action
+           from applications a
+           join applicants ap on ap.id = a.applicant_id
+          where a.id = $1 and ap.account_id = $2
+          for update`,
+        [applicationId, caller.accountId],
+      );
+      const before = found.rows[0];
+      if (before === undefined) {
+        return { ok: false, reason: 'not-found', detail: 'No such application.' };
+      }
+      if (before.lifecycle_status !== 'Draft') {
+        return {
+          ok: false, reason: 'not-a-draft',
+          detail: 'This application has already been filed and can no longer be edited this way.',
+        };
+      }
+
+      if (patch.permitType !== undefined) {
+        const known = await tx.query(
+          'select permit_type from permit_types where permit_type = $1', [patch.permitType],
+        );
+        if (known.rows.length === 0) {
+          return {
+            ok: false, reason: 'unknown-permit-type',
+            detail: `The LGU does not issue a "${patch.permitType}" permit.`,
+          };
+        }
+      }
+
+      if (patch.businessId !== undefined && patch.businessId !== null) {
+        const owned = await tx.query(
+          'select 1 from businesses where id = $1 and owner_applicant_id = $2',
+          [patch.businessId, before.applicant_id],
+        );
+        if (owned.rows.length === 0) {
+          return {
+            ok: false, reason: 'business-not-yours',
+            detail: 'That business is not registered to this account.',
+          };
+        }
+      }
+
+      const nextPermitType = patch.permitType ?? before.permit_type;
+      const nextAction = patch.applicationAction ?? before.application_action;
+
+      // The wizard always holds all three of action/renewsPermitNumber/
+      // priorPermitClaim together in memory and resends whichever it has
+      // on every save — so `applicationAction` present is the signal that
+      // the whole reference triad is being resent, not a sparse field.
+      let renewsPermitId: string | null | undefined;
+      let priorPermitClaim: string | null | undefined;
+      if (patch.applicationAction !== undefined) {
+        const renewal = await resolveRenewal(tx, {
+          action: nextAction,
+          permitNumber: patch.renewsPermitNumber ?? null,
+          priorPermitClaim: patch.priorPermitClaim ?? null,
+          applicantId: before.applicant_id,
+          tolerateNoReferenceYet: true,
+        });
+        if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
+        renewsPermitId = renewal.permitId;
+        priorPermitClaim = renewal.priorPermitClaim;
+      }
+
+      // Re-snapshotted, not left stale — unlike a filed application's frozen
+      // checklist (`fileApplication()`'s own comment on why THAT stays
+      // fixed forever), a Draft has not been judged against anything yet,
+      // so its checklist should track what it currently says it's for.
+      let requiredDocuments: readonly RequirementDocument[] | undefined;
+      if (patch.permitType !== undefined || patch.applicationAction !== undefined) {
+        requiredDocuments = await this.requirements.forPermitType(nextPermitType, nextAction, tx);
+      }
+
+      const assignments: string[] = [];
+      const values: unknown[] = [];
+      const set = (column: string, value: unknown): void => {
+        values.push(value);
+        assignments.push(`${column} = $${values.length}`);
+      };
+      if (patch.permitType !== undefined) set('permit_type', patch.permitType);
+      if (patch.applicationAction !== undefined) set('application_action', patch.applicationAction);
+      if (renewsPermitId !== undefined) set('renews_permit_id', renewsPermitId);
+      if (priorPermitClaim !== undefined) set('prior_permit_claim', priorPermitClaim);
+      if (patch.businessId !== undefined) set('business_id', patch.businessId);
+      if (patch.location !== undefined) set('location', patch.location);
+      if (patch.form !== undefined) set('form', JSON.stringify(patch.form));
+      if (requiredDocuments !== undefined) set('required_documents', JSON.stringify(requiredDocuments));
+
+      if (assignments.length > 0) {
+        values.push(this.clock(), caller.accountId, applicationId);
+        await tx.query(
+          `update applications set ${assignments.join(', ')},
+              updated_at = $${values.length - 2}, updated_by = $${values.length - 1}
+            where id = $${values.length}`,
+          values,
+        );
+      }
+
+      if (documentIds !== undefined && documentIds.length > 0) {
+        // The same ownership/attachment-collision rule `submit()` enforces —
+        // see that method's own comment on why the second half matters.
+        const mine = await tx.query<{ n: string }>(
+          `select count(*) as n from documents
+            where id = any($1) and uploaded_by = $2 and application_id is null and deleted_at is null`,
+          [[...documentIds], caller.accountId],
+        );
+        if (Number(mine.rows[0]?.n ?? 0) !== documentIds.length) {
+          return {
+            ok: false, reason: 'documents-not-yours',
+            detail: 'One or more documents are not yours, are already attached to an application, '
+              + 'or no longer exist.',
+          };
+        }
+
+        const checklist = requiredDocuments
+          ?? (await tx.query<{ required_documents: unknown }>(
+            'select required_documents from applications where id = $1', [applicationId],
+          )).rows[0]?.required_documents as readonly RequirementDocument[] | undefined ?? [];
+        const attributed = await tx.query<{ requirement_code: string }>(
+          `select distinct requirement_code from documents
+            where id = any($1) and requirement_code is not null`,
+          [[...documentIds]],
+        );
+        const onChecklist = new Set(checklist.map((entry) => entry.code));
+        const unknown = attributed.rows
+          .map((row) => row.requirement_code)
+          .filter((code) => !onChecklist.has(code))
+          .sort();
+        if (unknown.length > 0) {
+          return {
+            ok: false, reason: 'requirement-unknown',
+            detail: `This permit type has no requirement called ${unknown.join(', ')}.`,
+          };
+        }
+
+        await tx.query(
+          'update documents set application_id = $1 where id = any($2)',
+          [applicationId, [...documentIds]],
+        );
+      }
+
+      return { ok: true };
     });
   }
 
@@ -363,6 +583,8 @@ export class SubmissionService {
     submission: Pick<Submission, 'permitType' | 'applicationAction' | 'location' | 'form'>;
     renewsPermitNumber?: string | null;
     priorPermitClaim?: string | null;
+    /** See `Submission.saveAsDraft`'s own doc comment — same relaxation, for a draft an officer is filing on a walk-in's behalf. */
+    saveAsDraft?: boolean;
     idempotencyKey: string;
   }): Promise<OnBehalfResult> {
     const { caller, applicant, submission, idempotencyKey } = options;
@@ -503,11 +725,12 @@ export class SubmissionService {
         };
       }
 
-      const renewal = await this.resolveRenewal(tx, {
+      const renewal = await resolveRenewal(tx, {
         action: submission.applicationAction,
         permitNumber: options.renewsPermitNumber ?? null,
         priorPermitClaim: options.priorPermitClaim ?? null,
         applicantId,
+        tolerateNoReferenceYet: options.saveAsDraft ?? false,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
 
@@ -522,10 +745,11 @@ export class SubmissionService {
         // record that the LGU filed on their behalf.
         filedBy: caller.accountId,
         formValidatedAgainst: schemaFor(submission.permitType)?.version ?? null,
+        saveAsDraft: options.saveAsDraft ?? false,
       });
 
       await this.audit.append({
-        action: 'application.filed-on-behalf',
+        action: options.saveAsDraft ? 'application.draft-saved-on-behalf' : 'application.filed-on-behalf',
         subjectType: 'application',
         subjectId: filed.applicationId,
         outcome: 'allowed',
@@ -549,92 +773,6 @@ export class SubmissionService {
   }
 
   /**
-   * The permit a Renewal or Amendment is about — a verified link, an
-   * unverified claim, or neither, depending which (if either) field the
-   * caller supplied.
-   *
-   * `permitNumber` (→ `permitId`) is theirs, or nothing: renewing someone
-   * else's permit would put their particulars on this applicant's filing, the
-   * same rule the business check enforces one field away — an applicant may
-   * only build on records that are already theirs. Resolved from the permit
-   * NUMBER the applicant quotes, because that is what is printed on the
-   * instrument in their hand; the column stores the key.
-   *
-   * `priorPermitClaim` exists for the permit eBPCO never issued: launched
-   * into a Municipality with decades of paper permits already outstanding, so
-   * "no matching `generated_permits` row" is the COMMON case for a real
-   * renewal, not a fraud signal. Accepted as-is — there is nothing to
-   * resolve it against — and never promoted to a verified `permitId`. What
-   * makes it judgeable is the proof document `submit()` requires alongside
-   * it, not anything this method checks.
-   */
-  private async resolveRenewal(
-    tx: SqlClient,
-    options: {
-      action: string; permitNumber: string | null; priorPermitClaim: string | null; applicantId: string;
-    },
-  ): Promise<
-    | { ok: true; permitId: string | null; priorPermitClaim: string | null }
-    | {
-        ok: false;
-        reason: 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found' | 'renewal-reference-conflict';
-        detail: string;
-      }
-  > {
-    const { action, permitNumber, priorPermitClaim, applicantId } = options;
-
-    if (action === 'New') {
-      if (permitNumber !== null || priorPermitClaim !== null) {
-        return {
-          ok: false, reason: 'not-a-renewal',
-          detail: 'A New application does not renew a permit. Choose Renewal or Amendment, or omit it.',
-        };
-      }
-      return { ok: true, permitId: null, priorPermitClaim: null };
-    }
-
-    if (permitNumber !== null && priorPermitClaim !== null) {
-      // Two different claims about which one permit this is — the applicant
-      // (or the officer keying it in) must pick one, not have the server
-      // silently prefer one over the other.
-      return {
-        ok: false, reason: 'renewal-reference-conflict',
-        detail: 'Choose either a permit already on file or a prior permit claim, not both.',
-      };
-    }
-
-    if (priorPermitClaim !== null) return { ok: true, permitId: null, priorPermitClaim };
-
-    if (permitNumber === null) {
-      // The defect the whole column exists to prevent: an officer opening a
-      // renewal and having to find the original by searching a name.
-      return {
-        ok: false, reason: 'renewal-needs-a-permit',
-        detail: `A ${action} has to say which permit it is about — quote the permit number, or, if it predates `
-          + 'eBPCO, claim it as a prior permit and attach proof.',
-      };
-    }
-
-    const found = await tx.query<{ application_id: string }>(
-      `select g.application_id
-         from generated_permits g
-         join applications a on a.id = g.application_id
-        where g.permit_number = $1 and a.applicant_id = $2`,
-      [permitNumber, applicantId],
-    );
-    const permitId = found.rows[0]?.application_id;
-    if (permitId === undefined) {
-      // One answer for "no such permit" and "not yours", deliberately. Telling
-      // them apart would let anyone test whether a permit number exists.
-      return {
-        ok: false, reason: 'permit-not-found',
-        detail: `No permit numbered "${permitNumber}" is registered to this applicant.`,
-      };
-    }
-    return { ok: true, permitId, priorPermitClaim: null };
-  }
-
-  /**
    * The row itself, written the same way however the filing was initiated.
    *
    * Extracted because assisted filing needs it and a second copy would mean two
@@ -653,6 +791,7 @@ export class SubmissionService {
       formValidatedAgainst: string | null;
       renewsPermitId: string | null;
       priorPermitClaim: string | null;
+      saveAsDraft: boolean;
     },
   ): Promise<{
     applicationId: string; referenceNumber: string;
@@ -684,17 +823,25 @@ export class SubmissionService {
     const requirements = await this.requirements.forPermitType(submission.permitType, submission.applicationAction, tx);
 
     const referenceNumber = await this.nextReference(tx, now);
+    // A Draft is a real row from the moment it exists — same reference
+    // sequence, same charter/requirements snapshot behaviour — it simply
+    // has not been filed yet: `submitted_at` stays null (the CHECK
+    // constraint `submitted_at_matches_status`, migration 003, requires
+    // exactly that pairing) until `POST /applications/:id/submit` moves it
+    // to Submitted for real.
     const inserted = await tx.query<{ id: string }>(
       `insert into applications
          (reference_number, applicant_id, business_id, permit_type, application_action,
           location, lifecycle_status, classification, charter_entry_id, submitted_at, created_by,
           form, form_validated_against, required_documents, renews_permit_id, prior_permit_claim)
-       values ($1,$2,$3,$4,$5,$6,'Submitted',$7,$8,$9,$10,$11,$12,$13,$14,$15)
+       values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
        returning id`,
       [
         referenceNumber, applicantId, submission.businessId, submission.permitType,
         submission.applicationAction, submission.location,
-        charterEntry?.classification ?? null, charterEntry?.id ?? null, now, filedBy,
+        options.saveAsDraft ? 'Draft' : 'Submitted',
+        charterEntry?.classification ?? null, charterEntry?.id ?? null,
+        options.saveAsDraft ? null : now, filedBy,
         JSON.stringify(submission.form), options.formValidatedAgainst,
         JSON.stringify(requirements), options.renewsPermitId, options.priorPermitClaim,
       ],

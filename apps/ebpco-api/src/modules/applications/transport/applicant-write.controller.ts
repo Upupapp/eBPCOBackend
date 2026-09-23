@@ -1,4 +1,4 @@
-import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Post, Req } from '@nestjs/common';
+import { Body, Controller, Headers, HttpCode, HttpStatus, Param, Patch, Post, Req } from '@nestjs/common';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -14,6 +14,7 @@ import { PaymentService } from '../../payments/application/payment.service';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
 import { StructuredLogger } from '../../../common/logging/logger';
+import { refusalToProblem } from './refusal-to-problem';
 
 /**
  * What an applicant WRITES.
@@ -41,11 +42,30 @@ const submissionShape = z.object({
   // knowing it, and without them this endpoint accepts a ten-megabyte nested
   // object.
   form: z.record(z.string(), z.unknown()).optional(),
+  /** Files at Draft instead of Submitted — see Submission.saveAsDraft's own doc comment. */
+  saveAsDraft: z.boolean().optional(),
 // `.strict()` on every write shape. A field the client sent and this server
 // silently dropped is a field the client believes was honoured — and on a
 // filing that could be a location, a business, or a document the applicant
 // thinks they attached. `form` stays open on purpose: its field set is
 // permit-type-specific and has not been supplied (M-10).
+}).strict();
+
+/**
+ * Keeps editing a Draft — every field optional, because a partial save is
+ * the normal case: the citizen changed the project address and nothing
+ * else. `.strict()` still applies — see `submissionShape`'s own comment on
+ * why a silently-dropped field is the wrong failure mode here.
+ */
+const draftPatchShape = z.object({
+  permitType: z.string().min(1).max(80).optional(),
+  applicationAction: z.enum(['New', 'Renewal', 'Amendment']).optional(),
+  renewsPermitNumber: z.string().min(1).max(60).nullable().optional(),
+  priorPermitClaim: z.string().min(1).max(60).nullable().optional(),
+  businessId: z.string().uuid().nullable().optional(),
+  location: z.string().max(500).nullable().optional(),
+  form: z.record(z.string(), z.unknown()).optional(),
+  documentIds: z.array(z.string().uuid()).max(60).optional(),
 }).strict();
 
 /**
@@ -173,6 +193,7 @@ export class ApplicantWriteController {
         priorPermitClaim: input.priorPermitClaim ?? null,
         documentIds: input.documentIds ?? [],
         form,
+        saveAsDraft: input.saveAsDraft ?? false,
       },
     });
 
@@ -205,6 +226,98 @@ export class ApplicantWriteController {
     // build a half-record from a creation response.
     const view = await this.applications.byId(caller.accountId, result.applicationId);
     return view ?? { id: result.applicationId, referenceNumber: result.referenceNumber };
+  }
+
+  /**
+   * Keeps editing a Draft this citizen already started — resume, change an
+   * answer, attach another document, save again. Refuses once the
+   * application has actually been filed (`not-a-draft`): from that point
+   * a correction is a records act with its own audit trail, not this.
+   */
+  @Patch('applications/:applicationId')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async updateDraft(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    const caller = applicantCaller(request);
+    const input = parse(draftPatchShape, body);
+
+    if (input.form !== undefined) {
+      const structural = validateStructure(input.form);
+      if (structural.length > 0) {
+        throw ProblemException.validation(structural.map((violation) => ({
+          pointer: violation.pointer,
+          message: violation.message,
+        })));
+      }
+    }
+
+    const result = await this.submissions.updateDraft({
+      caller,
+      applicationId,
+      patch: {
+        ...(input.permitType === undefined ? {} : { permitType: input.permitType }),
+        ...(input.applicationAction === undefined ? {} : { applicationAction: input.applicationAction }),
+        ...(input.renewsPermitNumber === undefined ? {} : { renewsPermitNumber: input.renewsPermitNumber }),
+        ...(input.priorPermitClaim === undefined ? {} : { priorPermitClaim: input.priorPermitClaim }),
+        ...(input.businessId === undefined ? {} : { businessId: input.businessId }),
+        ...(input.location === undefined ? {} : { location: input.location }),
+        ...(input.form === undefined ? {} : { form: input.form }),
+      },
+      ...(input.documentIds === undefined ? {} : { documentIds: input.documentIds }),
+    });
+
+    if (!result.ok) {
+      if (result.reason === 'not-found') throw ProblemException.notFound(result.detail);
+      throw new ProblemException(
+        ProblemType.unprocessable, 'A precondition is unmet',
+        HttpStatus.UNPROCESSABLE_ENTITY, result.detail,
+      );
+    }
+
+    const view = await this.applications.byId(caller.accountId, applicationId);
+    return view ?? { id: applicationId };
+  }
+
+  /**
+   * Finalizing a Draft — the resume flow's last step. Just the existing
+   * transition engine: `Draft -> Submitted` (lifecycle.ts) already carries
+   * the `identity-document-verified`/`required-documents-present`
+   * preconditions, so an incomplete draft is refused here the same
+   * principled way any other illegal move is, not by a bespoke check.
+   */
+  @Post('applications/:applicationId/submit')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async submitDraft(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<Record<string, unknown>> {
+    const caller = applicantCaller(request);
+
+    if (await this.applications.byId(caller.accountId, applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+
+    const result = await this.lifecycle.transition({
+      applicationId, caller, to: 'Submitted', idempotencyKey: idempotencyKey(key),
+    });
+
+    if (result.ok) {
+      const view = await this.applications.byId(caller.accountId, applicationId);
+      return view ?? { status: result.status, version: result.version };
+    }
+    if ('reused' in result) {
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+        'This Idempotency-Key was already used for a different request. Use a new key.',
+      );
+    }
+    throw refusalToProblem(result.refusal);
   }
 
   @Post('applications/:applicationId/payments')

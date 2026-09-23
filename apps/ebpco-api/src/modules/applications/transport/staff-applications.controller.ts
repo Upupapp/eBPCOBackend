@@ -8,7 +8,7 @@ import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { LIFECYCLE_STATUSES } from '../domain/lifecycle';
-import { PRECONDITION_MESSAGE, PROBLEM_TYPE, Refusal } from '../domain/lifecycle-errors';
+import { refusalToProblem } from './refusal-to-problem';
 import { Caller } from '../domain/application';
 import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
@@ -133,6 +133,8 @@ const onBehalfShape = z.object({
   priorPermitClaim: z.string().min(1).max(60).nullable().optional(),
   location: z.string().max(400).optional(),
   form: z.record(z.string(), z.unknown()).optional(),
+  /** Files at Draft instead of Submitted — see Submission.saveAsDraft's own doc comment. */
+  saveAsDraft: z.boolean().optional(),
 }).strict().refine((value) => !(value.business !== undefined && value.businessId !== undefined), {
   message: 'give either business or businessId, not both',
   path: ['business'],
@@ -144,6 +146,11 @@ const patchShape = z.object({
   applicationAction: z.enum(['New', 'Renewal', 'Amendment']).optional(),
   businessId: z.string().uuid().nullable().optional(),
   form: z.record(z.string(), z.unknown()).optional(),
+  // Resent together with applicationAction, always — see EditableFields'
+  // own doc comment. Either without the other is refused by the service,
+  // not silently ignored here.
+  renewsPermitNumber: z.string().min(1).max(80).nullable().optional(),
+  priorPermitClaim: z.string().min(1).max(80).nullable().optional(),
 }).strict();
 
 const noteShape = z.object({
@@ -234,6 +241,7 @@ export class StaffApplicationsController {
         location: input.location ?? null,
         form: input.form ?? {},
       },
+      saveAsDraft: input.saveAsDraft ?? false,
       idempotencyKey: key,
     });
 
@@ -331,6 +339,8 @@ export class StaffApplicationsController {
       ...(parsed.applicationAction === undefined ? {} : { applicationAction: parsed.applicationAction }),
       ...(parsed.businessId === undefined ? {} : { businessId: parsed.businessId }),
       ...(parsed.form === undefined ? {} : { form: parsed.form }),
+      ...(parsed.renewsPermitNumber === undefined ? {} : { renewsPermitNumber: parsed.renewsPermitNumber }),
+      ...(parsed.priorPermitClaim === undefined ? {} : { priorPermitClaim: parsed.priorPermitClaim }),
     };
     const result = await this.records.edit({
       applicationId, patch, caller: callerOf(request),
@@ -513,63 +523,7 @@ export class StaffApplicationsController {
   }
 }
 
-/**
- * A refusal, translated without losing which kind it was.
- *
- * The distinction matters to the officer standing at the counter: "you may not
- * do this", "this application is not ready for that yet", and "someone else
- * changed it while you were reading" require three different next actions, and
- * collapsing them into one 400 makes all three look like a bug in the app.
- *
- * The problem type and the plain-language text come from the domain's own
- * tables rather than from strings written here. A second wording of "you have
- * not paid yet" is a second thing to keep in step with the first, and the one
- * that drifts is always the one the applicant reads.
- */
-function refusalToProblem(refusal: Refusal): ProblemException {
-  switch (refusal.kind) {
-    case 'not-permitted':
-      return new ProblemException(
-        PROBLEM_TYPE['not-permitted'], 'Not permitted', HttpStatus.FORBIDDEN,
-        refusal.reason === 'wrong-actor'
-          ? 'This move is not one this kind of account may make.'
-          : 'This account does not hold the permission this action requires.',
-      );
-
-    case 'illegal-transition':
-      return new ProblemException(
-        PROBLEM_TYPE['illegal-transition'],
-        'The resource is not in a state that permits this',
-        HttpStatus.CONFLICT,
-        refusal.legalMoves.length === 0
-          ? `${refusal.from} is a final status; nothing follows it.`
-          : `An application at ${refusal.from} cannot move to ${refusal.to}. It can move to: ${refusal.legalMoves.join(', ')}.`,
-      );
-
-    case 'precondition-unmet': {
-      // Every unmet precondition, not the first — an officer told to fix one
-      // thing, who fixes it and is then told about the next, learns to
-      // distrust the message. `order-of-payment-issued` is the one
-      // exception: since AssessmentService.issue() itself now refuses to
-      // issue an Order before every evaluation stage has passed, an officer
-      // cannot act on "no Order of Payment" until `evaluations-complete` is
-      // already true — reporting it alongside an incomplete evaluation
-      // doesn't name a second thing to fix, it names a step that is not
-      // reachable yet, which is exactly the noise this rule exists to avoid.
-      const reportable = refusal.unmet.includes('evaluations-complete')
-        ? refusal.unmet.filter((precondition) => precondition !== 'order-of-payment-issued')
-        : refusal.unmet;
-      return new ProblemException(
-        PROBLEM_TYPE['precondition-unmet'], 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY,
-        reportable.map((precondition) => PRECONDITION_MESSAGE[precondition]).join(' '),
-      );
-    }
-
-    case 'stale-version':
-      return new ProblemException(
-        PROBLEM_TYPE['stale-version'], 'The resource has changed', HttpStatus.PRECONDITION_FAILED,
-        'Someone else changed this application while it was open. Reload it and look again before acting: '
-        + 'the decision you were about to make may no longer be the right one.',
-      );
-  }
-}
+// `refusalToProblem` moved to `./refusal-to-problem.ts` — the citizen-facing
+// controller needs the exact same translation for its own cancel/submit-draft
+// routes, and a domain-error-to-HTTP-problem mapping has nothing staff-specific
+// in it to justify two copies.

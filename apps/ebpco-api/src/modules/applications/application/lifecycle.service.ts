@@ -272,13 +272,21 @@ export class LifecycleService {
       // from, so they are staged here as a transaction-local setting it
       // reads while building the `application_transitions` row.
       await tx.query('select set_config($1, $2, true)', ['app.transition_remarks', remarks ?? '']);
+      // A Draft leaving Draft is being filed for the first time --
+      // submitted_at_matches_status (migration 003) requires submitted_at
+      // non-null the instant lifecycle_status isn't 'Draft', and nothing
+      // else on this row ever sets it. "submitted_at is null" rather than
+      // "to <> 'Draft'"/"from = 'Draft'" so this is a no-op for every OTHER
+      // transition, where it is already set and must stay the original
+      // filing date, not move.
       const updated = await tx.query(
         `update applications
             set lifecycle_status = $1,
                 updated_by = $2,
-                pledge_suspended_since = case when $3 then now() else null end
+                pledge_suspended_since = case when $3 then now() else null end,
+                submitted_at = case when submitted_at is null then $6 else submitted_at end
           where id = $4 and version = $5`,
-        [to, caller.accountId, decision.outcome.pledgeSuspended, applicationId, snapshot.version],
+        [to, caller.accountId, decision.outcome.pledgeSuspended, applicationId, snapshot.version, this.clock()],
       );
 
       if (updated.rowCount === 0) {

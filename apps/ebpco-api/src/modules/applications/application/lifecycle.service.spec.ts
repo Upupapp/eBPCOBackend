@@ -17,6 +17,7 @@ const APPLICANT_ACCOUNT = randomUUID();
 const OFFICER_ACCOUNT = randomUUID();
 const APPLICANT = randomUUID();
 const APPLICATION = randomUUID();
+const DRAFT_APPLICATION = randomUUID();
 
 const applicant: Caller = { accountId: APPLICANT_ACCOUNT, kind: 'applicant', scopes: APPLICANT_SCOPES };
 const officer: Caller = {
@@ -50,6 +51,15 @@ async function seed(): Promise<void> {
                                lifecycle_status, submitted_at, created_by)
      values ($1, 'BP-2026-000001', $2, 'Fencing Permit', 'New', 'Submitted', now(), $3)`,
     [APPLICATION, APPLICANT, APPLICANT_ACCOUNT],
+  );
+  // A self-service Draft: not yet filed, submitted_at null (the CHECK
+  // constraint that requires it non-null applies only once the status
+  // leaves 'Draft'), created by the applicant themselves.
+  await db.query(
+    `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                               lifecycle_status, submitted_at, created_by)
+     values ($1, 'BP-2026-000002', $2, 'Fencing Permit', 'New', 'Draft', null, $3)`,
+    [DRAFT_APPLICATION, APPLICANT, APPLICANT_ACCOUNT],
   );
 }
 
@@ -362,5 +372,91 @@ describe('follow-on moves', () => {
       applicationId: randomUUID(), hops: [{ caller: officer, to: 'Received' }],
     });
     expect(chain).toEqual({ status: null, stoppedAt: null });
+  });
+});
+
+describe('leaving Draft', () => {
+  // The shared UPDATE in transition() never touched submitted_at until this
+  // was found by reading submitted_at_matches_status (migration 003)
+  // against it -- so every Draft->X move, including the one this whole
+  // describe block exercises, would have failed the CHECK constraint
+  // outright before the fix.
+
+  async function markIdentityVerified(applicationId: string): Promise<void> {
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared)
+       values ($1,$2,$3,'Valid ID','id.jpg','image/jpeg',1024,$4,$5,'Approved',true)`,
+      [randomUUID(), applicationId, APPLICANT_ACCOUNT, 'a'.repeat(64), `objects/${randomUUID()}.jpg`],
+    );
+  }
+
+  it('refuses Submitted while the identity document is unverified, and touches nothing', async () => {
+    const result = await service.transition({
+      applicationId: DRAFT_APPLICATION, caller: applicant, to: 'Submitted',
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok || 'reused' in result) return;
+    expect(result.refusal.kind).toBe('precondition-unmet');
+    const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null }>(
+      'select lifecycle_status, submitted_at from applications where id = $1', [DRAFT_APPLICATION]);
+    expect(row.rows[0]).toEqual({ lifecycle_status: 'Draft', submitted_at: null });
+  });
+
+  it('moves Draft to Submitted and stamps submitted_at, once its preconditions are met', async () => {
+    await markIdentityVerified(DRAFT_APPLICATION);
+
+    const result = await service.transition({
+      applicationId: DRAFT_APPLICATION, caller: applicant, to: 'Submitted',
+    });
+
+    expect(result).toEqual({ ok: true, status: 'Submitted', version: 2 });
+    const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null }>(
+      'select lifecycle_status, submitted_at from applications where id = $1', [DRAFT_APPLICATION]);
+    expect(row.rows[0]?.lifecycle_status).toBe('Submitted');
+    expect(row.rows[0]?.submitted_at).not.toBeNull();
+  });
+
+  it('moves Draft to Cancelled with no precondition at all, and still stamps submitted_at', async () => {
+    // Cancelled carries no preconditions, but the CHECK constraint applies
+    // regardless of which status a Draft is leaving TO.
+    const result = await service.transition({
+      applicationId: DRAFT_APPLICATION, caller: applicant, to: 'Cancelled',
+    });
+
+    expect(result).toEqual({ ok: true, status: 'Cancelled', version: 2 });
+    const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null }>(
+      'select lifecycle_status, submitted_at from applications where id = $1', [DRAFT_APPLICATION]);
+    expect(row.rows[0]?.lifecycle_status).toBe('Cancelled');
+    expect(row.rows[0]?.submitted_at).not.toBeNull();
+  });
+
+  it('lets an officer finalize a Draft too, not only the applicant who owns it', async () => {
+    // actors: ['applicant', 'staff'] -- widened for the walk-in case, where a
+    // colleague other than the one who started the draft needs to finish or
+    // discard it. staff_permit_access still gates it the same as any other
+    // staff move (seed() grants the officer every permit type).
+    await markIdentityVerified(DRAFT_APPLICATION);
+
+    const result = await service.transition({
+      applicationId: DRAFT_APPLICATION, caller: officer, to: 'Submitted',
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('leaves a later, already-filed application\'s submitted_at alone', async () => {
+    // The CASE guards on "submitted_at is null" specifically so this is a
+    // no-op for every transition that does not originate at Draft -- proven
+    // here against the ordinary Submitted seed application.
+    const before = await db.query<{ submitted_at: Date }>(
+      'select submitted_at from applications where id = $1', [APPLICATION]);
+
+    await service.transition({ applicationId: APPLICATION, caller: officer, to: 'Received' });
+
+    const after = await db.query<{ submitted_at: Date }>(
+      'select submitted_at from applications where id = $1', [APPLICATION]);
+    expect(after.rows[0]?.submitted_at).toEqual(before.rows[0]?.submitted_at);
   });
 });

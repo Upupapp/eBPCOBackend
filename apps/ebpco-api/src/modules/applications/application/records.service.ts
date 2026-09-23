@@ -2,6 +2,8 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
 import { LifecycleStatus, isTerminal } from '../domain/lifecycle';
+import { RequirementsService } from './requirements.service';
+import { resolveRenewal } from './resolve-renewal';
 
 /**
  * Correcting and putting away a filed application.
@@ -43,6 +45,21 @@ export interface EditableFields {
   readonly applicationAction?: 'New' | 'Renewal' | 'Amendment';
   readonly businessId?: string | null;
   readonly form?: Record<string, unknown>;
+  /**
+   * Which permit this Renewal/Amendment is about — see `Submission.
+   * renewsPermitNumber`/`priorPermitClaim` (submission.service.ts) for what
+   * each means; the resolution rule is the exact same `resolveRenewal()`
+   * both go through.
+   *
+   * Resent TOGETHER with `applicationAction`, always — the admin intake
+   * form holds all three in its own state the same way the citizen wizard
+   * does (see `SubmissionService.updateDraft()`'s identical convention), so
+   * `applicationAction` present is read as "the whole reference triad is
+   * being resent", not a sparse field. Sending either of these two without
+   * `applicationAction` is refused rather than silently ignored.
+   */
+  readonly renewsPermitNumber?: string | null;
+  readonly priorPermitClaim?: string | null;
 }
 
 /** The fields an order of payment freezes, because it was computed from them. */
@@ -50,7 +67,17 @@ const FROZEN_BY_ASSESSMENT: readonly (keyof EditableFields)[] = [
   'permitType', 'applicationAction', 'businessId',
 ];
 
-const COLUMN_OF: Readonly<Record<keyof EditableFields, string>> = {
+/**
+ * The plain, direct-pass-through fields — everything `EditableFields` has
+ * EXCEPT the renewal reference, which is deliberately not here: the column
+ * it writes (`renews_permit_id`, an application id) is not the value the
+ * patch carries (`renewsPermitNumber`, a permit number quoted by the
+ * applicant), so it cannot go through a value-in-column-out map the way
+ * these can. It is resolved and written by its own dedicated block below.
+ */
+type PlainField = Exclude<keyof EditableFields, 'renewsPermitNumber' | 'priorPermitClaim'>;
+
+const COLUMN_OF: Readonly<Record<PlainField, string>> = {
   location: 'location',
   permitType: 'permit_type',
   applicationAction: 'application_action',
@@ -78,11 +105,14 @@ interface StateRow {
   business_id: string | null;
   form: Record<string, unknown> | null;
   applicant_id: string;
+  renews_permit_id: string | null;
+  prior_permit_claim: string | null;
 }
 
 const STATE = `
   select a.id, a.lifecycle_status, a.archived_at, a.location, a.permit_type,
          a.application_action, a.business_id, a.form, a.applicant_id,
+         a.renews_permit_id, a.prior_permit_claim,
          exists (select 1 from orders_of_payment o where o.application_id = a.id) as has_order_of_payment,
          exists (select 1 from generated_permits p where p.application_id = a.id) as has_permit
     from applications a
@@ -93,6 +123,8 @@ const STATE = `
 export class RecordsService {
   private readonly audit: AuditService;
 
+  private readonly requirements: RequirementsService;
+
   // Constructed rather than injected, as `LifecycleService` and
   // `EvaluationService` already do here: `ApplicationsModule` does not import
   // `ComplianceModule`, and importing it in order to reach one collaborator
@@ -101,8 +133,10 @@ export class RecordsService {
     private readonly db: SqlClient,
     private readonly clock: () => Date = () => new Date(),
     audit?: AuditService,
+    requirements?: RequirementsService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    this.requirements = requirements ?? new RequirementsService(db, clock, this.audit);
   }
 
   async edit(options: {
@@ -179,20 +213,59 @@ export class RecordsService {
         }
       }
 
+      // See EditableFields.renewsPermitNumber's own comment: either of these
+      // two without applicationAction is a client bug, not a sparse patch —
+      // resend the whole triad or none of it.
+      if ((patch.renewsPermitNumber !== undefined || patch.priorPermitClaim !== undefined)
+        && patch.applicationAction === undefined) {
+        return {
+          ok: false, reason: 'renewal-reference-incomplete',
+          detail: 'Changing which permit this renews/amends requires resending applicationAction alongside it.',
+        };
+      }
+
+      const nextAction = patch.applicationAction ?? before.application_action;
+
       // Only what actually differs. A patch that resends the current value is
       // not a change, and recording it would fill the audit chain with entries
       // that say nothing happened — which is how a trail stops being read.
-      const currentOf: Record<keyof EditableFields, unknown> = {
+      const currentOf: Record<PlainField, unknown> = {
         location: before.location,
         permitType: before.permit_type,
         applicationAction: before.application_action,
         businessId: before.business_id,
         form: before.form,
       };
-      const changes = requested.filter(
+      const plainFields = requested.filter(
+        (field): field is PlainField => field !== 'renewsPermitNumber' && field !== 'priorPermitClaim',
+      );
+      const changes = plainFields.filter(
         (field) => JSON.stringify(patch[field]) !== JSON.stringify(currentOf[field]),
       );
-      if (changes.length === 0) {
+
+      // Resolved the same way a fresh filing resolves it — see
+      // resolveRenewal()'s own doc comment. `tolerateNoReferenceYet` only
+      // for a Draft: a FILED Renewal/Amendment must still name what it
+      // renews, the same rule submit() enforces: a correction may not
+      // un-name it.
+      let renewsPermitId: string | null | undefined;
+      let priorPermitClaim: string | null | undefined;
+      if (patch.applicationAction !== undefined) {
+        const renewal = await resolveRenewal(tx, {
+          action: nextAction,
+          permitNumber: patch.renewsPermitNumber ?? null,
+          priorPermitClaim: patch.priorPermitClaim ?? null,
+          applicantId: before.applicant_id,
+          tolerateNoReferenceYet: before.lifecycle_status === 'Draft',
+        });
+        if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
+        renewsPermitId = renewal.permitId;
+        priorPermitClaim = renewal.priorPermitClaim;
+      }
+      const renewalChanged = renewsPermitId !== undefined
+        && (renewsPermitId !== before.renews_permit_id || priorPermitClaim !== before.prior_permit_claim);
+
+      if (changes.length === 0 && !renewalChanged) {
         return { ok: true, changed: [] };
       }
 
@@ -202,6 +275,26 @@ export class RecordsService {
         values.push(field === 'form' ? JSON.stringify(patch.form) : patch[field]);
         assignments.push(`${COLUMN_OF[field]} = $${values.length}`);
       }
+      if (renewalChanged) {
+        values.push(renewsPermitId);
+        assignments.push(`renews_permit_id = $${values.length}`);
+        values.push(priorPermitClaim);
+        assignments.push(`prior_permit_claim = $${values.length}`);
+      }
+      // Re-snapshotted alongside a Draft's own permitType/action edit only —
+      // unlike a filed application's checklist, frozen forever (see this
+      // class's own doc comment on why), a Draft has not been judged
+      // against anything yet, so its checklist should track what it
+      // currently says it's for. Same reasoning as
+      // SubmissionService.updateDraft().
+      if (before.lifecycle_status === 'Draft'
+        && (patch.permitType !== undefined || patch.applicationAction !== undefined)) {
+        const nextPermitType = patch.permitType ?? before.permit_type;
+        const requiredDocuments = await this.requirements.forPermitType(nextPermitType, nextAction, tx);
+        values.push(JSON.stringify(requiredDocuments));
+        assignments.push(`required_documents = $${values.length}`);
+      }
+
       values.push(this.clock(), caller.accountId, applicationId);
       await tx.query(
         `update applications set ${assignments.join(', ')},
@@ -210,6 +303,17 @@ export class RecordsService {
         values,
       );
 
+      const changed: string[] = [...changes];
+      const beforeState: Record<string, unknown> = Object.fromEntries(changes.map((field) => [field, currentOf[field]]));
+      const afterState: Record<string, unknown> = Object.fromEntries(changes.map((field) => [field, patch[field]]));
+      if (renewalChanged) {
+        changed.push('renewsPermitNumber', 'priorPermitClaim');
+        beforeState.renewsPermitId = before.renews_permit_id;
+        beforeState.priorPermitClaim = before.prior_permit_claim;
+        afterState.renewsPermitId = renewsPermitId;
+        afterState.priorPermitClaim = priorPermitClaim;
+      }
+
       await this.audit.append({
         action: 'application.edited',
         subjectType: 'application',
@@ -217,11 +321,11 @@ export class RecordsService {
         outcome: 'allowed',
         actorAccountId: caller.accountId,
         actorRole: caller.kind,
-        beforeState: Object.fromEntries(changes.map((field) => [field, currentOf[field]])),
-        afterState: Object.fromEntries(changes.map((field) => [field, patch[field]])),
+        beforeState,
+        afterState,
       }, tx);
 
-      return { ok: true, changed: changes };
+      return { ok: true, changed };
     });
   }
 

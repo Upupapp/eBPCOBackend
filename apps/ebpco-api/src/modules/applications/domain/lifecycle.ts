@@ -88,10 +88,22 @@ export interface TransitionRule {
  * See docs/decisions/0007-applicant-cancellation.md.
  */
 export const TRANSITIONS: readonly TransitionRule[] = [
-  { from: 'Draft', to: 'Submitted', actors: ['applicant'], requires: 'applications:write',
+  // 'staff' added alongside 'applicant': a walk-in's draft is started by an
+  // officer at the counter (fileOnBehalf with saveAsDraft), and per the
+  // owner's decision it must be resumable by ANY officer, not just the one
+  // who began it — so finishing or discarding it has to be a real staff
+  // move too, not something only the applicant account can do. Same
+  // `applications:write` scope fileOnBehalf itself already requires; staff
+  // callers are still checked against their own `staff_permit_access` by
+  // `LifecycleService.transition()` before this rule is even consulted.
+  //
+  // This table is only the SEED's starting point (D-5) — migration 054
+  // carries the same widening into `lifecycle_transitions`, the table
+  // `LifecycleService.transition()` actually reads at runtime.
+  { from: 'Draft', to: 'Submitted', actors: ['applicant', 'staff'], requires: 'applications:write',
     preconditions: ['identity-document-verified', 'required-documents-present'],
     notifies: 'application-submitted' },
-  { from: 'Draft', to: 'Cancelled', actors: ['applicant'], requires: 'applications:write',
+  { from: 'Draft', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
     preconditions: [] },
 
   { from: 'Submitted', to: 'Received', actors: ['staff'], requires: 'staff:receive',

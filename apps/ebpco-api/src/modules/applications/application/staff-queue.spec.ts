@@ -55,6 +55,8 @@ async function file(options: {
   applicationAction?: 'New' | 'Renewal' | 'Amendment';
   renewsPermitId?: string | null;
   priorPermitClaim?: string | null;
+  /** Defaults to the citizen applicant. Pass a staff account id to fixture a walk-in draft. */
+  createdBy?: string;
 }): Promise<string> {
   const id = randomUUID();
   let businessId: string | null = null;
@@ -84,7 +86,7 @@ async function file(options: {
       startAt === 'Draft' ? null : (options.submittedAt ?? NOW.toISOString()),
       options.charterEntryId ?? null,
       options.classification ?? null,
-      APPLICANT_ACCOUNT,
+      options.createdBy ?? APPLICANT_ACCOUNT,
       options.renewsPermitId ?? null,
       options.priorPermitClaim ?? null,
     ],
@@ -245,13 +247,29 @@ describe('an officer sees only what their role needs', () => {
     expect(page.rows).toHaveLength(0);
   });
 
-  it('never shows a draft to anyone', async () => {
-    // A draft is the applicant's private working copy. Nobody at the LGU has
-    // filed anything yet, so nobody at the LGU may read it.
-    await file({ reference: 'BP-1', status: 'Draft' });
+  it('never shows a citizen\'s own draft to anyone at the LGU', async () => {
+    // A self-service draft is the applicant's private working copy. Nobody
+    // at the LGU has filed anything yet, so nobody at the LGU may read it.
+    const id = await file({ reference: 'BP-1', status: 'Draft' });
 
     expect((await queue.page(await officer('administrator'))).rows).toHaveLength(0);
     expect((await queue.metrics(await officer('administrator'))).total).toBe(0);
+    expect(await queue.detail(await officer('administrator'), id)).toBeNull();
+  });
+
+  it('shows a staff-authored (walk-in) draft to any officer, not just the one who started it', async () => {
+    // The distinction is `created_by`: an officer typing in a walk-in's
+    // details is real queue work, not the citizen's own private working
+    // copy, and a colleague must be able to pick it up.
+    const clerk = await officer('records-officer');
+    const id = await file({ reference: 'BP-1', status: 'Draft', createdBy: clerk.accountId });
+
+    const anotherOfficer = await officer('administrator');
+    const page = await queue.page(anotherOfficer);
+    expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-1']);
+    expect((await queue.metrics(anotherOfficer)).total).toBe(1);
+    expect((await queue.metrics(anotherOfficer)).byStatus['Draft']).toBe(1);
+    expect((await queue.detail(anotherOfficer, id))?.summary.referenceNumber).toBe('BP-1');
   });
 });
 
@@ -394,6 +412,23 @@ describe('evaluationStage — the queue now carries what used to be detail()-onl
     const detail = await queue.detail(admin, id);
 
     expect(detail?.summary.evaluationStage).toBe('Zoning');
+  });
+});
+
+describe('the applicant\'s structured name on detail()', () => {
+  it('carries first/middle/last separately from the joined display name', async () => {
+    // summary.applicantName (first_name || ' ' || last_name) is fine to
+    // display but cannot be split back apart reliably -- resuming a
+    // staff-authored Draft needs the real, separate fields to refill
+    // editable first/middle/last inputs.
+    await db.query(`update applicants set middle_name = 'Reyes' where id = $1`, [applicantId]);
+    const id = await file({ reference: 'BP-1', status: 'Submitted' });
+
+    const detail = await queue.detail(await officer('administrator'), id);
+
+    expect(detail?.applicantFirstName).toBe('Maria');
+    expect(detail?.applicantMiddleName).toBe('Reyes');
+    expect(detail?.applicantLastName).toBe('Santos');
   });
 });
 

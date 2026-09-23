@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { PgliteClient } from '../../../persistence/pglite-client';
 import { SqlClient } from '../../../persistence/sql-client';
 import { loadMigrations, migrate } from '../../../persistence/migrator';
-import { APPLICANT_SCOPES } from '../../identity/domain/account';
+import { APPLICANT_SCOPES, ROLE_SCOPES } from '../../identity/domain/account';
 import { Caller } from '../domain/application';
 import { Submission, SubmissionService } from './submission.service';
 
@@ -492,5 +492,345 @@ describe('the applicant’s own answers', () => {
 
     expect(replay.ok && replay.replayed).toBe(true);
     expect(first.ok && replay.ok && replay.applicationId).toBe(first.ok ? first.applicationId : '');
+  });
+});
+
+describe('saving a draft', () => {
+  it('files at Draft, with a real reference number and no submitted_at yet', async () => {
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ saveAsDraft: true }), idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.referenceNumber).toMatch(/^E-BPCO-2026-\d{6}$/);
+    const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null; created_by: string }>(
+      'select lifecycle_status, submitted_at, created_by from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]).toEqual({ lifecycle_status: 'Draft', submitted_at: null, created_by: MARIA });
+  });
+
+  it('tolerates a Renewal naming neither a permit on file nor a prior-permit claim yet', async () => {
+    // A real (non-draft) filing refuses this as renewal-needs-a-permit -- the
+    // whole point of a draft is that the citizen has picked Renewal and
+    // stopped there.
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({ applicationAction: 'Renewal', saveAsDraft: true }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+  });
+
+  it('still refuses a New application naming a permit reference, even as a draft', async () => {
+    // Not every refusal in resolveRenewal() is about a gap still to be
+    // filled in -- naming a permit on a New application is a genuine error
+    // in what was given.
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({
+        applicationAction: 'New', renewsPermitNumber: 'BP-2026-000001', saveAsDraft: true,
+      }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-a-renewal');
+  });
+
+  it('still refuses naming both a permit on file and a prior-permit claim, even as a draft', async () => {
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({
+        applicationAction: 'Renewal', renewsPermitNumber: 'BP-2026-000001',
+        priorPermitClaim: 'BP-1998-000042', saveAsDraft: true,
+      }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('renewal-reference-conflict');
+  });
+
+  it('still refuses an unknown permit type as a draft', async () => {
+    // A bad answer, not an unfinished one -- draft status relaxes gaps, not
+    // errors.
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ permitType: 'Time Machine', saveAsDraft: true }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('unknown-permit-type');
+  });
+
+  it('tolerates a claimed prior permit with no proof attached yet', async () => {
+    // The other check saveAsDraft relaxes: a real filing refuses this as
+    // prior-permit-proof-required (see "a permit that predates eBPCO" above).
+    const result = await submissions.submit({
+      caller: maria,
+      submission: submission({
+        applicationAction: 'Renewal', priorPermitClaim: 'BP-1998-000042', saveAsDraft: true,
+      }),
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const row = await db.query<{ prior_permit_claim: string | null }>(
+      'select prior_permit_claim from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]?.prior_permit_claim).toBe('BP-1998-000042');
+  });
+
+  it('records a draft-saved audit action, not a submitted one', async () => {
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ saveAsDraft: true }), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) return;
+
+    const audit = await db.query<{ action: string }>(
+      'select action from audit_events where subject_id = $1', [result.applicationId],
+    );
+    expect(audit.rows[0]?.action).toBe('application.draft-saved');
+  });
+});
+
+describe('filing for a walk-in, as a draft', () => {
+  // fileOnBehalf() itself has no other unit coverage in this file — these
+  // two are scoped to the one thing this session added, saveAsDraft, not a
+  // general backfill of the walk-in path.
+
+  async function officer(): Promise<Caller> {
+    const accountId = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
+      [accountId, `officer-${accountId.slice(0, 8)}@lgu.gov.ph`],
+    );
+    return { accountId, kind: 'staff', scopes: ROLE_SCOPES['records-officer'] };
+  }
+
+  it('files a walk-in at Draft, crediting the officer as created_by and the citizen as applicant', async () => {
+    const caller = await officer();
+    const result = await submissions.fileOnBehalf({
+      caller,
+      applicant: { firstName: 'Pedro', lastName: 'Reyes', email: 'pedro@example.ph', mobileNumber: null },
+      business: {
+        name: 'Reyes Sari-Sari', category: 'Retail', street: '1 Main', barangay: 'Poblacion',
+        city: 'Castilla', province: 'Sorsogon', registrationNumber: 'DTI-9', dateRegistered: '2024-01-01',
+      },
+      businessId: null,
+      submission: { permitType: 'Fencing Permit', applicationAction: 'New', location: null, form: {} },
+      saveAsDraft: true,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null; created_by: string }>(
+      'select lifecycle_status, submitted_at, created_by from applications where id = $1', [result.applicationId],
+    );
+    expect(row.rows[0]).toEqual({ lifecycle_status: 'Draft', submitted_at: null, created_by: caller.accountId });
+  });
+
+  it('tolerates a Renewal naming no reference yet, the same relaxation the self-service path gets', async () => {
+    const caller = await officer();
+    const result = await submissions.fileOnBehalf({
+      caller,
+      applicant: { firstName: 'Ana', lastName: 'Cruz', email: 'ana@example.ph', mobileNumber: null },
+      business: {
+        name: 'Cruz Hardware', category: 'Retail', street: '2 Main', barangay: 'Poblacion',
+        city: 'Castilla', province: 'Sorsogon', registrationNumber: 'DTI-10', dateRegistered: '2024-01-01',
+      },
+      businessId: null,
+      submission: { permitType: 'Fencing Permit', applicationAction: 'Renewal', location: null, form: {} },
+      saveAsDraft: true,
+      idempotencyKey: randomUUID(),
+    });
+
+    expect(result.ok).toBe(true);
+  });
+});
+
+describe('updateDraft', () => {
+  async function draftId(overrides: Partial<Submission> = {}): Promise<string> {
+    const result = await submissions.submit({
+      caller: maria, submission: submission({ saveAsDraft: true, ...overrides }), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) throw new Error('setup: expected the draft to be created');
+    return result.applicationId;
+  }
+
+  it('refuses an application that does not exist', async () => {
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: randomUUID(), patch: { location: 'New address' },
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'not-found', detail: expect.any(String) });
+  });
+
+  it('refuses a draft that belongs to a different applicant', async () => {
+    const id = await draftId();
+    const jose: Caller = { accountId: JOSE, kind: 'applicant', scopes: APPLICANT_SCOPES };
+
+    const result = await submissions.updateDraft({
+      caller: jose, applicationId: id, patch: { location: 'Somewhere else' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-found');
+  });
+
+  it('refuses editing an application that has already been filed', async () => {
+    const result = await submissions.submit({
+      caller: maria, submission: submission(), idempotencyKey: randomUUID(),
+    });
+    if (!result.ok) return;
+
+    const updated = await submissions.updateDraft({
+      caller: maria, applicationId: result.applicationId, patch: { location: 'New address' },
+    });
+
+    expect(updated).toEqual({ ok: false, reason: 'not-a-draft', detail: expect.any(String) });
+  });
+
+  it('updates the fields given, and bumps updated_at/updated_by', async () => {
+    const id = await draftId();
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: { location: 'New address, Barangay Uno' },
+    });
+
+    expect(result.ok).toBe(true);
+    const row = await db.query<{ location: string; updated_by: string }>(
+      'select location, updated_by from applications where id = $1', [id],
+    );
+    expect(row.rows[0]).toEqual({ location: 'New address, Barangay Uno', updated_by: MARIA });
+  });
+
+  it('refuses an unknown permit type', async () => {
+    const id = await draftId();
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: { permitType: 'Time Machine' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('unknown-permit-type');
+  });
+
+  it('refuses a business not registered to this applicant', async () => {
+    const id = await draftId();
+    const business = randomUUID();
+    await db.query(
+      `insert into businesses (id, owner_applicant_id, name, category, street, barangay, city,
+                               province, registration_number, date_registered)
+       values ($1,$2,'Jose Hardware','Retail','1 Main','Poblacion','Cabuyao','Laguna','DTI-1','2024-01-15')`,
+      [business, joseApplicant],
+    );
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: { businessId: business },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('business-not-yours');
+  });
+
+  it('re-resolves the renewal reference when applicationAction is patched', async () => {
+    const id = await draftId({ applicationAction: 'New' });
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id,
+      patch: { applicationAction: 'Renewal', priorPermitClaim: 'BP-1998-000042' },
+    });
+
+    expect(result.ok).toBe(true);
+    const row = await db.query<{ application_action: string; prior_permit_claim: string | null }>(
+      'select application_action, prior_permit_claim from applications where id = $1', [id],
+    );
+    expect(row.rows[0]).toEqual({ application_action: 'Renewal', prior_permit_claim: 'BP-1998-000042' });
+  });
+
+  it('refuses a bad renewal reference the same way a fresh filing would', async () => {
+    const id = await draftId({ applicationAction: 'New' });
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id,
+      patch: { applicationAction: 'Renewal', renewsPermitNumber: 'BP-9999-000001' },
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('permit-not-found');
+  });
+
+  it('re-snapshots required_documents when applicationAction changes', async () => {
+    // Migration 053 seeded prior-permit-proof onto Renewal/Amendment's
+    // checklist but not New's, for every permit type -- an observable,
+    // real difference to prove the resnapshot actually happened, not a
+    // fabricated one.
+    const id = await draftId({ applicationAction: 'New' });
+    const before = await db.query<{ required_documents: { code: string }[] }>(
+      'select required_documents from applications where id = $1', [id],
+    );
+    expect(before.rows[0]?.required_documents.some((d) => d.code === 'prior-permit-proof')).toBe(false);
+
+    await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: { applicationAction: 'Renewal' },
+    });
+
+    const after = await db.query<{ required_documents: { code: string }[] }>(
+      'select required_documents from applications where id = $1', [id],
+    );
+    expect(after.rows[0]?.required_documents.some((d) => d.code === 'prior-permit-proof')).toBe(true);
+  });
+
+  it('attaches new documents the same ownership-checked way submit() does', async () => {
+    const id = await draftId();
+    const document = await uploadedDocument(MARIA);
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: {}, documentIds: [document],
+    });
+
+    expect(result.ok).toBe(true);
+    expect(await count(
+      'select count(*) as n from documents where application_id = $1', [id],
+    )).toBe(1);
+  });
+
+  it('refuses someone else\'s document', async () => {
+    const id = await draftId();
+    const josesDocument = await uploadedDocument(JOSE);
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: {}, documentIds: [josesDocument],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('documents-not-yours');
+  });
+
+  it('refuses a document whose requirement code is not on this draft\'s checklist', async () => {
+    const id = await draftId();
+    const document = await uploadedDocument(MARIA, 'not-a-real-requirement');
+
+    const result = await submissions.updateDraft({
+      caller: maria, applicationId: id, patch: {}, documentIds: [document],
+    });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('requirement-unknown');
   });
 });

@@ -324,7 +324,15 @@ export class StaffQueueService {
     // Archived applications are out of the working queue by default -- that is
     // what archiving IS. Without this the act is cosmetic and an officer who
     // tidied their queue would watch it refill on the next refresh.
-    const where: string[] = ["a.lifecycle_status <> 'Draft'", 'a.archived_at is null'];
+    //
+    // A citizen's own draft stays invisible to staff exactly as before -- but
+    // a draft an officer started on a walk-in's behalf (created_by is a staff
+    // account) is real queue work and must be visible to any officer, not
+    // just the one who typed it in.
+    const where: string[] = [
+      "(a.lifecycle_status <> 'Draft' or exists(select 1 from accounts c where c.id = a.created_by and c.kind = 'staff'))",
+      'a.archived_at is null',
+    ];
     const values: unknown[] = [];
     const bind = (value: unknown): string => {
       values.push(value);
@@ -427,7 +435,7 @@ export class StaffQueueService {
     // officer who follows a link to it, and a record the LGU holds must stay
     // readable by the people accountable for it. The asymmetry is the point.
     const head = await this.db.query<Record<string, never>>(
-      `${QUEUE_SQL} where a.id = $1 and a.lifecycle_status <> 'Draft'${clause}`,
+      `${QUEUE_SQL} where a.id = $1 and (a.lifecycle_status <> 'Draft' or exists(select 1 from accounts c where c.id = a.created_by and c.kind = 'staff'))${clause}`,
       values,
     );
     const row = (head.rows as unknown as ReadonlyArray<Record<string, unknown>>)[0];
@@ -440,9 +448,11 @@ export class StaffQueueService {
           email: string; mobile_number: string | null; email_verified_at: Date | null;
           street: string | null; barangay: string | null; city: string | null;
           province: string | null; postal_code: string | null;
+          first_name: string; middle_name: string | null; last_name: string;
         }>(
           `select acc.email, acc.mobile_number, acc.email_verified_at,
-                  ap.street, ap.barangay, ap.city, ap.province, ap.postal_code
+                  ap.street, ap.barangay, ap.city, ap.province, ap.postal_code,
+                  ap.first_name, ap.middle_name, ap.last_name
              from applications a
              join applicants ap on ap.id = a.applicant_id
              join accounts acc on acc.id = ap.account_id
@@ -538,6 +548,14 @@ export class StaffQueueService {
       applicantEmail: account.rows[0]?.email ?? '',
       applicantEmailVerifiedAt: account.rows[0]?.email_verified_at?.toISOString() ?? null,
       applicantMobile: account.rows[0]?.mobile_number ?? null,
+      // The structured name `applicantName` (on `summary`, above) collapses
+      // into one string -- fine to display, but a caller that needs to
+      // refill an EDITABLE first/middle/last set of fields (resuming a
+      // walk-in Draft) cannot recover them from it: a name with an internal
+      // space is genuinely ambiguous once joined.
+      applicantFirstName: account.rows[0]?.first_name ?? '',
+      applicantMiddleName: account.rows[0]?.middle_name ?? null,
+      applicantLastName: account.rows[0]?.last_name ?? '',
       // Migration 036's own reason for existing: "the office writes to about
       // a permit... a citizen who moves currently has to telephone the
       // Municipal Engineer". The columns have carried this since 3 Sep 2026;
@@ -596,7 +614,8 @@ export class StaffQueueService {
     const result = await this.db.query<{ lifecycle_status: string; n: string }>(
       `select a.lifecycle_status, count(*) as n
          from applications a
-        where a.lifecycle_status <> 'Draft' and a.archived_at is null${clause}${formsClause}
+        where (a.lifecycle_status <> 'Draft' or exists(select 1 from accounts c where c.id = a.created_by and c.kind = 'staff'))
+          and a.archived_at is null${clause}${formsClause}
         group by a.lifecycle_status`,
       values,
     );
@@ -666,6 +685,10 @@ export class StaffQueueService {
     const formsClause = formsHere.sql === 'true' ? '' : ` and ${formsHere.sql}`;
     values.push(...formsHere.params);
 
+    // `<> 'Draft'` is left un-widened here (unlike page()/detail()/metrics()'s
+    // status breakdown): a Draft has no `submitted_at`, so the date-range
+    // predicate below already excludes every draft, staff-authored or not.
+    // Submission-volume trend is about what got filed, not what is pending.
     const rows = await this.db.query<{ lifecycle_status: string; bucket: string; n: string }>(
       `select a.lifecycle_status,
               -- Named bucket, not window: WINDOW is a reserved word in SQL,
@@ -896,6 +919,16 @@ export interface StaffApplicationDetail {
   readonly applicantEmailVerifiedAt: string | null;
   /** From the applicant's account (`accounts.mobile_number`), the same source `applicantEmail` reads — `null` when the account has none on file, never fabricated. */
   readonly applicantMobile: string | null;
+  /**
+   * The structured name behind `summary.applicantName` — needed wherever a
+   * caller must refill EDITABLE first/middle/last fields (resuming a
+   * staff-authored Draft) rather than only display the name: a joined
+   * "First Last" cannot be split back apart reliably, since either part may
+   * itself contain a space.
+   */
+  readonly applicantFirstName: string;
+  readonly applicantMiddleName: string | null;
+  readonly applicantLastName: string;
   /**
    * Where to send correspondence ABOUT THIS APPLICATION — migration 036's
    * `applicants` columns, not `summary`'s `location` (the site the work

@@ -81,6 +81,21 @@ export interface ApplicationRecord {
   readonly officer: string | null;
   readonly applicantName: string;
   readonly evaluationStage: string | null;
+  /**
+   * The permit number a Renewal or Amendment names, when it resolved to a
+   * real permit eBPCO itself issued (`applications.renews_permit_id`). Null
+   * for a New application, and also null on the unverified path -- see
+   * `priorPermitClaim`, its counterpart. Round-tripped so a citizen resuming
+   * a draft sees which permit they were renewing.
+   */
+  readonly renewsPermitNumber: string | null;
+  /**
+   * The permit number a Renewal or Amendment names, self-reported by the
+   * applicant, when it predates eBPCO and so has no `generated_permits` row
+   * to link (`applications.prior_permit_claim`). Mutually exclusive with
+   * `renewsPermitNumber`.
+   */
+  readonly priorPermitClaim: string | null;
 }
 
 export interface OrderOfPaymentRecord {
@@ -107,6 +122,10 @@ export function toApplicantView(record: ApplicationRecord): Record<string, unkno
     businessId: record.businessId,
     businessName: record.businessName,
     location: record.location,
+    // Which permit this renews/amends, if any -- a resumed draft needs this
+    // back to re-select the right radio and prefill the claim field.
+    renewsPermitNumber: record.renewsPermitNumber,
+    priorPermitClaim: record.priorPermitClaim,
 
     lifecycleStatus: record.lifecycleStatus,
     // Computed here, server-side, and returned. Neither client recomputes it.

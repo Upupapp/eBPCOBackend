@@ -54,7 +54,10 @@ const RECORD_SQL = `
     to_char(o.due_date, 'YYYY-MM-DD') as oop_due_date,
     o.fee_schedule_version as oop_version,
     o.filing_centavos, o.processing_centavos, o.architectural_centavos,
-    o.structural_centavos, o.electrical_centavos, o.others_centavos, o.total_centavos
+    o.structural_centavos, o.electrical_centavos, o.others_centavos, o.total_centavos,
+    a.prior_permit_claim,
+    (select g.permit_number from generated_permits g where g.application_id = a.renews_permit_id)
+      as renews_permit_number
   from applications a
   join applicants ap on ap.id = a.applicant_id
   join permit_types pt on pt.permit_type = a.permit_type
@@ -500,6 +503,8 @@ export class ApplicantQueryService {
       officer: null,
       applicantName: '',
       evaluationStage: null,
+      renewsPermitNumber: (row.renews_permit_number as string | null) ?? null,
+      priorPermitClaim: (row.prior_permit_claim as string | null) ?? null,
     };
   }
 }

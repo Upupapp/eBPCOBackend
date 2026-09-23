@@ -26,6 +26,8 @@ const record = (overrides: Partial<ApplicationRecord> = {}): ApplicationRecord =
   officer: 'Engr. Dela Cruz',
   applicantName: 'Maria Santos',
   evaluationStage: 'Zoning',
+  renewsPermitNumber: null,
+  priorPermitClaim: null,
   ...overrides,
 });
 
