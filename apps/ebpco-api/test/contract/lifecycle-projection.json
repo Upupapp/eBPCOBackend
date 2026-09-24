@@ -214,8 +214,14 @@
       "Completed"
     ],
     "Completed": [],
-    "Rejected": [],
-    "Cancelled": [],
-    "Expired": []
+    "Rejected": [
+      "Submitted"
+    ],
+    "Cancelled": [
+      "Submitted"
+    ],
+    "Expired": [
+      "Submitted"
+    ]
   }
 }

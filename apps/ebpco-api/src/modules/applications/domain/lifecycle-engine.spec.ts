@@ -101,12 +101,23 @@ describe('every legal transition, and only those', () => {
     expect(decision.refusal.legalMoves).toEqual(expect.arrayContaining(['Received', 'Cancelled']));
   });
 
-  it('lets no terminal status be left', () => {
+  it('lets no terminal status be left, except the one deliberate restore path', () => {
+    // Migration 056_archive_restore.sql (seeded from this file's own
+    // TRANSITIONS) gives Cancelled, Rejected and Expired exactly one onward
+    // move each, back to Submitted — the Archive screen's "Unarchive",
+    // reachable only by staff holding `staff:approve`. Every OTHER pair out
+    // of a terminal status must still be refused; only that one path is a
+    // chosen exception, not a hole in the rule this test otherwise checks.
+    const RESTORABLE_TO_SUBMITTED: ReadonlySet<LifecycleStatus> = new Set(['Cancelled', 'Rejected', 'Expired']);
     for (const status of LIFECYCLE_STATUSES.filter(isTerminal)) {
       for (const to of LIFECYCLE_STATUSES) {
         if (to === status) continue;
         const decision = decide({ rules: TRANSITIONS, snapshot: satisfied(status), caller: superOfficer(), to, now: NOW });
-        expect(decision.ok).toBe(false);
+        if (RESTORABLE_TO_SUBMITTED.has(status) && to === 'Submitted') {
+          expect(decision.ok).toBe(true);
+        } else {
+          expect(decision.ok).toBe(false);
+        }
       }
     }
   });

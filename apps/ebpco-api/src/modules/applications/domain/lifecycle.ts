@@ -189,6 +189,23 @@ export const TRANSITIONS: readonly TransitionRule[] = [
 
   { from: 'Released', to: 'Completed', actors: ['staff'], requires: 'staff:release',
     preconditions: [] },
+
+  // Restoring an archived application (the Archive screen's own "Unarchive"),
+  // back to square one rather than to whatever status it happened to leave
+  // from — Cancelled and Rejected are reachable from a dozen different
+  // statuses each (decision E-4 and the For Approval trio above), so there is
+  // no single "the" prior status to reopen into, and guessing one would be a
+  // silent, undocumented decision the officer never made. `staff:approve`
+  // rather than the read-adjacent scopes further down the chain: reopening a
+  // closed record is the same order of decision as Approve/Reject/Revision
+  // Required above, made by the same tier of officer, not a routine
+  // receiving-desk action.
+  { from: 'Cancelled', to: 'Submitted', actors: ['staff'], requires: 'staff:approve',
+    preconditions: [] },
+  { from: 'Rejected', to: 'Submitted', actors: ['staff'], requires: 'staff:approve',
+    preconditions: [] },
+  { from: 'Expired', to: 'Submitted', actors: ['staff'], requires: 'staff:approve',
+    preconditions: [] },
 ];
 
 /**
