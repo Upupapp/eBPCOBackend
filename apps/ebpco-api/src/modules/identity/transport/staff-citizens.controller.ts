@@ -102,7 +102,7 @@ function refuse(refusal: CitizenRefusal | { readonly reason: string; readonly de
   if (refusal.reason === 'key-reused') {
     throw new ProblemException(ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT, refusal.detail);
   }
-  if (refusal.reason === 'no-profile' || refusal.reason === 'staff-account') {
+  if (refusal.reason === 'no-profile' || refusal.reason === 'staff-account' || refusal.reason === 'erased') {
     throw new ProblemException(ProblemType.unprocessable, 'A precondition is unmet', HttpStatus.UNPROCESSABLE_ENTITY, refusal.detail);
   }
   throw new ProblemException(ProblemType.badRequest, 'The request could not be completed', HttpStatus.BAD_REQUEST, refusal.detail);

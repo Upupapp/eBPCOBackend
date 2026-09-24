@@ -67,6 +67,8 @@ export interface CitizenListRow {
   readonly emailVerified: boolean;
   readonly mobileVerified: boolean;
   readonly status: 'active' | 'disabled';
+  readonly hasPhoto: boolean;
+  readonly erasedAt: string | null;
   readonly registeredAt: string;
   readonly businessCount: number;
   readonly applicationCount: number;
@@ -132,7 +134,14 @@ export interface CitizenDetail extends CitizenListRow {
 
 export type CitizenRefusal =
   | { readonly ok: false; readonly reason: 'not-found'; readonly detail: string }
-  | { readonly ok: false; readonly reason: 'key-reused'; readonly detail: string };
+  | { readonly ok: false; readonly reason: 'key-reused'; readonly detail: string }
+  // The account has been erased under RA 10173 s.16(e) (`accounts.erased_at`).
+  // Its row survives as an opaque key — `byId()` still finds it — but the row
+  // holds no personal data and its `password_hash` is a literal that can
+  // never verify, so no action that presumes a live account (re-enabling it,
+  // messaging its email, correcting its details, or ending sessions it does
+  // not have) is meaningful against it any more.
+  | { readonly ok: false; readonly reason: 'erased'; readonly detail: string };
 
 export type CitizenRectifyResult =
   | { readonly ok: true; readonly mobileVerificationCleared: boolean }
@@ -151,6 +160,7 @@ export type CitizenResetLinkResult =
 interface ListRow {
   id: string; first_name: string; last_name: string; email: string;
   email_verified_at: Date | null; mobile_verified_at: Date | null; disabled_at: Date | null;
+  has_photo: boolean; erased_at: Date | null;
   created_at: Date; business_count: number; application_count: number;
 }
 
@@ -162,7 +172,8 @@ interface ListRow {
  */
 const LIST_SELECT = `
   select a.id, ap.first_name, ap.last_name, a.email,
-         a.email_verified_at, a.mobile_verified_at, a.disabled_at, a.created_at,
+         a.email_verified_at, a.mobile_verified_at, a.disabled_at,
+         (a.photo_key is not null) as has_photo, a.erased_at, a.created_at,
          (select count(*)::int from businesses b where b.owner_applicant_id = ap.id) as business_count,
          (select count(*)::int from applications app where app.applicant_id = ap.id) as application_count
     from accounts a
@@ -179,6 +190,8 @@ function listRow(row: ListRow): CitizenListRow {
     emailVerified: row.email_verified_at !== null,
     mobileVerified: row.mobile_verified_at !== null,
     status: row.disabled_at !== null ? 'disabled' : 'active',
+    hasPhoto: row.has_photo,
+    erasedAt: row.erased_at === null ? null : row.erased_at.toISOString(),
     registeredAt: row.created_at.toISOString(),
     businessCount: row.business_count,
     applicationCount: row.application_count,
@@ -489,6 +502,12 @@ export class CitizenDirectoryService {
   }): Promise<{ ok: true; revoked: number; replayed: boolean } | CitizenRefusal> {
     const found = await this.byId(options.citizenId);
     if (found === null) return { ok: false, reason: 'not-found', detail: 'No such citizen account.' };
+    if (found.row.erased_at !== null) {
+      return {
+        ok: false, reason: 'erased',
+        detail: 'This account was erased at the data subject’s request. It already has no active sessions.',
+      };
+    }
 
     // `withDelegateTransaction`, not `withOwnTransaction`: `TokenService
     // .endAllSessions` calls `SessionRepository.revokeAllForAccount`, which
@@ -536,6 +555,19 @@ export class CitizenDirectoryService {
   }): Promise<{ ok: true; replayed: boolean } | CitizenRefusal> {
     const found = await this.byId(options.citizenId);
     if (found === null) return { ok: false, reason: 'not-found', detail: 'No such citizen account.' };
+    if (found.row.erased_at !== null) {
+      // Migration 011's `erased_account_holds_no_personal_data` CHECK
+      // constraint already refuses the UPDATE below if `disabled` is false
+      // here — an erased account's `disabled_at` can never go back to null —
+      // but that surfaces as an opaque database error. Refusing explicitly,
+      // before the write, gives the officer an honest reason instead.
+      return {
+        ok: false, reason: 'erased',
+        detail: options.disabled
+          ? 'This account was already erased, and an erased account is always disabled.'
+          : 'This account was erased at the data subject’s request and cannot be re-enabled.',
+      };
+    }
     const before = found.row.disabled_at !== null;
 
     const outcome = await this.withOwnTransaction<Record<string, never>>(
@@ -586,6 +618,17 @@ export class CitizenDirectoryService {
   }): Promise<CitizenResetLinkResult> {
     const found = await this.byId(options.citizenId);
     if (found === null) return { ok: false, reason: 'not-found', detail: 'No such citizen account.' };
+    if (found.row.erased_at !== null) {
+      // Post-erasure, `accounts.email` is the placeholder
+      // `erased-{id}@erased.invalid` (migration 011) — mailing "a link" to it
+      // would only ever be reported honestly by `beginPasswordReset` as
+      // "no such account", which reads as a system fault rather than the
+      // true reason: there is no one left to reach.
+      return {
+        ok: false, reason: 'erased',
+        detail: 'This account was erased at the data subject’s request and has no reachable email address.',
+      };
+    }
     const email = found.row.email;
 
     // `withDelegateTransaction`, not `withOwnTransaction`: `IdentityService
@@ -655,6 +698,12 @@ export class CitizenDirectoryService {
   }): Promise<CitizenRectifyResult> {
     const found = await this.byId(options.citizenId);
     if (found === null) return { ok: false, reason: 'not-found', detail: 'No such citizen account.' };
+    if (found.row.erased_at !== null) {
+      return {
+        ok: false, reason: 'erased',
+        detail: 'This account was erased at the data subject’s request. Its details can no longer be corrected.',
+      };
+    }
 
     const before = await this.snapshotForRectification(options.citizenId);
 
