@@ -1,6 +1,7 @@
 import {
-  Body, Controller, Delete, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req,
+  Body, Controller, Delete, Get, Headers, HttpCode, HttpStatus, Param, Post, Query, Req, Res,
 } from '@nestjs/common';
+import type { FastifyReply } from 'fastify';
 import { z } from 'zod';
 
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
@@ -9,6 +10,7 @@ import type { AuthenticatedRequest } from './guards/authentication.guard';
 import {
   CitizenDirectoryService, CitizenRefusal,
 } from '../application/citizen-directory.service';
+import { ProfilePhotoService } from '../application/profile-photo.service';
 
 /**
  * The Citizens module, over HTTP: `GET /staff/citizens*` for lookup,
@@ -108,7 +110,10 @@ function refuse(refusal: CitizenRefusal | { readonly reason: string; readonly de
 
 @Controller('staff/citizens')
 export class StaffCitizensController {
-  constructor(private readonly citizens: CitizenDirectoryService) {}
+  constructor(
+    private readonly citizens: CitizenDirectoryService,
+    private readonly photos: ProfilePhotoService,
+  ) {}
 
   @Get('metrics')
   @RequireScopes('citizens:read')
@@ -145,6 +150,39 @@ export class StaffCitizensController {
     const detail = await this.citizens.detail(citizenId, actor);
     if (detail === null) throw ProblemException.notFound('No such citizen account.');
     return { ...detail };
+  }
+
+  /**
+   * A citizen's own profile photo, for any staff screen that shows one —
+   * the Businesses module's own Contact Person avatar among them. Same
+   * bytes/headers as the citizen's own `GET /me/photo` and the identical
+   * route on applications (`staff-applications.controller.ts`
+   * `applicantPhoto`), scoped here by `citizenId` (`accounts.id`, this
+   * module's own id space) rather than by an application, since a business
+   * — or a citizen looked up directly — has no application to view it
+   * through. 404 both when the account does not exist and when it has no
+   * photo, so the response does not distinguish the two.
+   */
+  @Get(':citizenId/photo')
+  @RequireScopes('citizens:read')
+  async photo(
+    @Req() request: AuthenticatedRequest,
+    @Param('citizenId') citizenId: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
+  ): Promise<Buffer> {
+    if (request.caller?.kind !== 'staff') {
+      throw new ProblemException(ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, 'This route serves LGU staff.');
+    }
+    if (await this.citizens.byId(citizenId) === null) throw ProblemException.notFound('No such citizen account.');
+    const stored = await this.photos.photoFor(citizenId);
+    if (stored === null) throw ProblemException.notFound('No photo on file.');
+
+    void reply
+      .header('content-disposition', 'inline')
+      .header('content-type', stored.contentType)
+      .header('x-content-type-options', 'nosniff')
+      .header('cache-control', 'private, no-store');
+    return stored.bytes;
   }
 
   @Get(':citizenId/sessions')

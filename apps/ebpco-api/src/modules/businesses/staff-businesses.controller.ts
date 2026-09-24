@@ -70,8 +70,10 @@ const SELECT = `
          b.status, b.created_at,
          ap.id as owner_applicant_id,
          ap.first_name || ' ' || ap.last_name as owner_name,
+         acc.id as owner_account_id,
          acc.email as owner_email,
          acc.mobile_number as owner_mobile_number,
+         (acc.photo_key is not null) as owner_has_photo,
          (select count(*)::int from applications a where a.business_id = b.id) as application_count
     from businesses b
     join applicants ap on ap.id = b.owner_applicant_id
@@ -82,7 +84,8 @@ interface BusinessRow {
   id: string; name: string; category: string; street: string; barangay: string;
   city: string; province: string; registration_number: string; date_registered: string;
   status: string; created_at: Date; owner_applicant_id: string; owner_name: string;
-  owner_email: string; owner_mobile_number: string | null; application_count: number;
+  owner_account_id: string; owner_email: string; owner_mobile_number: string | null;
+  owner_has_photo: boolean; application_count: number;
 }
 
 function onTheWire(row: BusinessRow): Record<string, unknown> {
@@ -103,9 +106,17 @@ function onTheWire(row: BusinessRow): Record<string, unknown> {
     // constant 1 dressed as a count would be worse than its absence.
     owner: {
       applicantId: row.owner_applicant_id,
+      // The account id, not the applicant id — GET /staff/citizens/:id/photo
+      // (staff-citizens.controller.ts) is keyed on accounts.id, the same id
+      // space the Citizens module itself already uses for "citizenId".
+      accountId: row.owner_account_id,
       name: row.owner_name,
       email: row.owner_email,
       mobileNumber: row.owner_mobile_number,
+      // Whether to even ask for a photo — same reason staff-queue.service.ts
+      // sends `applicantHasPhoto` on every row: twenty businesses should not
+      // become twenty 404s to find out none of their owners set one.
+      hasPhoto: row.owner_has_photo,
     },
     applicationCount: row.application_count,
   };
