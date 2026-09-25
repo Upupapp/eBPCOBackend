@@ -507,7 +507,7 @@ describe('staff editing and deactivating a business', () => {
 
   it('answers 404 for a business id that does not exist', async () => {
     const response = await edit(randomUUID(), {
-      name: 'X', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+      name: 'X', category: 'Retail', street: 'x', barangay: 'Poblacion', city: 'x', province: 'x',
     });
 
     expect(response.statusCode).toBe(404);

@@ -13,6 +13,7 @@ import { Caller } from '../domain/application';
 import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { SubmissionService } from '../application/submission.service';
+import { CASTILLA_BARANGAYS } from '../../businesses/castilla-barangays';
 import { EditableFields, RecordsService } from '../application/records.service';
 import { NotesService } from '../application/notes.service';
 import { ProfilePhotoService } from '../../identity/application/profile-photo.service';
@@ -119,7 +120,7 @@ const onBehalfShape = z.object({
       'Construction', 'Transport', 'Agriculture', 'Other',
     ]),
     street: z.string().min(1).max(200),
-    barangay: z.string().min(1).max(120),
+    barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),
     province: z.string().min(1).max(120),
     registrationNumber: z.string().min(1).max(60),

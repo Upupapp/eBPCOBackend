@@ -576,7 +576,7 @@ describe('withdrawing', () => {
 describe('registering a business', () => {
   const business = {
     name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',
-    barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
     registrationNumber: 'DTI-2024-004417', dateRegistered: '2024-01-15',
   };
 
@@ -633,7 +633,7 @@ describe('registering a business', () => {
 describe('editing a business already on file', () => {
   const business = {
     name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',
-    barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
     registrationNumber: 'DTI-2024-004417', dateRegistered: '2024-01-15',
   };
 
@@ -642,7 +642,7 @@ describe('editing a business already on file', () => {
 
     const response = await patch(`/businesses/${businessId}`, maria, {
       name: 'Nena\'s Sari-Sari Store', category: 'Food Service',
-      street: '14 Rizal Street', barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+      street: '14 Rizal Street', barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
     });
 
     expect(response.statusCode).toBe(200);
@@ -665,7 +665,7 @@ describe('editing a business already on file', () => {
     const businessId = (await post('/businesses', jose, business)).json<{ id: string }>().id;
 
     const response = await patch(`/businesses/${businessId}`, maria, {
-      name: 'Hijacked', category: 'Retail', street: 'x', barangay: 'x', city: 'x', province: 'x',
+      name: 'Hijacked', category: 'Retail', street: 'x', barangay: 'Poblacion', city: 'x', province: 'x',
     });
 
     expect(response.statusCode).toBe(404);
@@ -675,7 +675,7 @@ describe('editing a business already on file', () => {
 describe('deactivating a business', () => {
   const business = {
     name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',
-    barangay: 'Poblacion Uno', city: 'Cabuyao', province: 'Laguna',
+    barangay: 'Poblacion', city: 'Castilla', province: 'Sorsogon',
     registrationNumber: 'DTI-2024-004417', dateRegistered: '2024-01-15',
   };
 

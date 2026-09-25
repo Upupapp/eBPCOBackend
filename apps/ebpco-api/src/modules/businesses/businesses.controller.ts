@@ -7,6 +7,7 @@ import { SqlClient } from '../../persistence/sql-client';
 import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
+import { CASTILLA_BARANGAYS } from './castilla-barangays';
 
 /**
  * The businesses an applicant has registered with the LGU.
@@ -34,7 +35,7 @@ const businessShape = z.object({
     'Construction', 'Transport', 'Agriculture', 'Other',
   ]),
   street: z.string().min(1).max(200),
-  barangay: z.string().min(1).max(120),
+  barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
   registrationNumber: z.string().min(1).max(80),
@@ -58,7 +59,7 @@ const businessUpdateShape = z.object({
     'Construction', 'Transport', 'Agriculture', 'Other',
   ]),
   street: z.string().min(1).max(200),
-  barangay: z.string().min(1).max(120),
+  barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
 }).strict();

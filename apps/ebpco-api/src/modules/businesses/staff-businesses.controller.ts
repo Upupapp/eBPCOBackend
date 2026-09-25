@@ -12,6 +12,7 @@ import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import { AuditService } from '../compliance/application/audit.service';
 import { StaffBusinessRegistrationService } from './staff-business-registration.service';
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
+import { CASTILLA_BARANGAYS } from './castilla-barangays';
 
 /**
  * The LGU's business directory, as an officer sees it.
@@ -153,7 +154,7 @@ const businessUpdateShape = z.object({
     'Construction', 'Transport', 'Agriculture', 'Other',
   ]),
   street: z.string().min(1).max(200),
-  barangay: z.string().min(1).max(120),
+  barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
 }).strict();
@@ -188,7 +189,7 @@ const registrationShape = z.object({
       'Construction', 'Transport', 'Agriculture', 'Other',
     ]),
     street: z.string().min(1).max(200),
-    barangay: z.string().min(1).max(120),
+    barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),
     province: z.string().min(1).max(120),
     registrationNumber: z.string().min(1).max(60),
