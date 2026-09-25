@@ -153,6 +153,32 @@ describe('what stays, and why', () => {
     expect(await count('select count(*) as n from applications where id = $1', [applicationId])).toBe(1);
   });
 
+  it('withdraws an application still in progress, on the erased citizen\'s behalf', async () => {
+    // The bug this was built to fix: an erased account cannot sign back in to
+    // click "Cancel" itself, and the fixture's application (Submitted) was
+    // otherwise left exactly where it was forever — reported live as an
+    // application still showing "Under Review" for an applicant who no
+    // longer exists.
+    await erasure.erase(ACCOUNT);
+
+    const row = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    );
+    expect(row.rows[0]!.lifecycle_status).toBe('Cancelled');
+  });
+
+  it('records the withdrawal on the application\'s own timeline', async () => {
+    await erasure.erase(ACCOUNT);
+
+    const row = await db.query<{ from_status: string | null; to_status: string; remarks: string | null }>(
+      `select from_status, to_status, remarks from application_transitions
+        where application_id = $1 and to_status = 'Cancelled'`,
+      [applicationId],
+    );
+    expect(row.rows[0]!.from_status).toBe('Submitted');
+    expect(row.rows[0]!.remarks).toMatch(/RA 10173/);
+  });
+
   it('keeps the name the permit was issued to', async () => {
     // A permit without one is not a record. This is the decision most likely to
     // be got wrong by someone implementing "delete my account".

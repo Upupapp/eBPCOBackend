@@ -8,6 +8,10 @@ import { DataExportService } from './application/data-export.service';
 import { OBJECT_STORE } from '../documents/documents.module';
 import { ObjectStore } from '../documents/domain/object-store';
 import { AuditController } from './transport/audit.controller';
+// From LifecycleModule (@Global()), not an import of ApplicationsModule —
+// see lifecycle.module.ts's own doc comment for why that module resolves
+// this exact cross-module shape with @Global() rather than a direct import.
+import { LifecycleService } from '../applications/application/lifecycle.service';
 
 /**
  * The chained audit trail, and the data-subject rights that read and write it.
@@ -36,8 +40,9 @@ import { AuditController } from './transport/audit.controller';
     },
     {
       provide: ErasureService,
-      inject: [SQL_CLIENT, OBJECT_STORE],
-      useFactory: (db: SqlClient, store: ObjectStore) => new ErasureService(db, undefined, undefined, store),
+      inject: [SQL_CLIENT, OBJECT_STORE, LifecycleService],
+      useFactory: (db: SqlClient, store: ObjectStore, lifecycle: LifecycleService) =>
+        new ErasureService(db, undefined, undefined, store, lifecycle),
     },
   ],
   exports: [AuditService, ErasureService, DataExportService],

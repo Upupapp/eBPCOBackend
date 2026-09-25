@@ -1,6 +1,11 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { ObjectStore } from '../../documents/domain/object-store';
 import { AuditService } from './audit.service';
+// Constructed via DI from LifecycleModule (@Global()), the same way
+// staff-payments.controller.ts already takes it, rather than this module
+// importing ApplicationsModule outright — see lifecycle.module.ts's own
+// doc comment for why that module chose @Global() to begin with.
+import { LifecycleService } from '../../applications/application/lifecycle.service';
 
 /**
  * "Delete my account", answered honestly.
@@ -115,6 +120,7 @@ export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = 
 
 export class ErasureService {
   private readonly audit: AuditService;
+  private readonly lifecycle: LifecycleService;
 
   constructor(
     private readonly db: SqlClient,
@@ -129,8 +135,17 @@ export class ErasureService {
      * degrades around, not one it refuses on.
      */
     private readonly store?: ObjectStore,
+    /**
+     * Optional for the same reason `store` is: the unit specs construct this
+     * service with none of its collaborators. Defaults to a fresh instance
+     * over its own connection rather than sharing `tx` below, because it has
+     * to run outside that transaction — see the cascade-cancel comment at
+     * the end of `erase()` for why.
+     */
+    lifecycle?: LifecycleService,
   ) {
     this.audit = audit ?? new AuditService(db, clock);
+    this.lifecycle = lifecycle ?? new LifecycleService(db, clock);
   }
 
   async erase(accountId: string): Promise<ErasureResult> {
@@ -139,6 +154,11 @@ export class ErasureService {
     // the end of this method), and reading it in the same `for update` query
     // the transaction already runs is one round trip rather than two.
     let photoKeyToDelete: string | null = null;
+    // Same reasoning, same moment: captured only on the branch below that
+    // knows this erasure is genuinely happening, so a replay of an
+    // already-erased account does not re-attempt a cascade the first call
+    // already ran (or correctly didn't need to).
+    let applicantIdToCascade: string | null = null;
 
     const outcome = await this.db.transaction<ErasureResult>(async (tx) => {
       const account = await tx.query<{
@@ -176,6 +196,15 @@ export class ErasureService {
       // already-erased account's already-null key cannot be mistaken for one
       // still pointing at real bytes.
       photoKeyToDelete = row.photo_key;
+
+      // A citizen without an applicant profile (never filed anything) has
+      // no cascade to run; `applicants` is never touched by the deletes
+      // below — the name and address on any permit record stay put, same as
+      // `RETAINED` says — so this is just the join needed to find them.
+      const applicant = await tx.query<{ id: string }>(
+        'select id from applicants where account_id = $1', [accountId],
+      );
+      applicantIdToCascade = applicant.rows[0]?.id ?? null;
 
       const erased: Record<string, number> = {};
 
@@ -272,7 +301,73 @@ export class ErasureService {
       await this.store.delete(photoKeyToDelete).catch(() => undefined);
     }
 
+    // Also outside the transaction, and for the same reason: `transition()`
+    // runs its own, on its own connection, and nesting it inside the one
+    // above would let a cascade-cancel outlive a rolled-back erasure — an
+    // application withdrawn on behalf of a citizen whose erasure never
+    // actually committed. The account being gone is the one part of this
+    // that must be atomic; an application still catching up a moment later
+    // is the same order of gap as the photo above, not a new kind of one.
+    //
+    // Not folded into `outcome.receipt.counts`: this runs after the audit
+    // entry those counts come from has already been written and hashed into
+    // the chain, so there is nowhere left to record a count that a REPLAY of
+    // this same request (the "asking twice" branch above, which never
+    // reaches this line) could also reproduce byte-for-byte. Each
+    // cancellation gets its own `application.transitioned` audit entry via
+    // `transition()` itself — the paper trail exists, just on the
+    // application's own timeline rather than duplicated onto this receipt.
+    if (applicantIdToCascade !== null && outcome.ok) {
+      await this.cancelInProgress(applicantIdToCascade, accountId);
+    }
+
     return outcome;
+  }
+
+  /**
+   * Withdraws, on the erased citizen's behalf, every application they can no
+   * longer act on themselves — because the account that could click "Cancel"
+   * does not exist any more. An application still moving through evaluation
+   * with nobody left to answer a Letter of Instruction or attend to it is not
+   * "retained" the way `RETAINED` below means it (the record, kept because
+   * PD 1096 requires it); it is simply stuck, which is the bug this method
+   * exists to close.
+   *
+   * Reaches exactly as far as the applicant themselves ever could while their
+   * account was live — Draft, Submitted, Received, Revision Required (ADR
+   * 0007 / decision E-4) — and deliberately no further. `caller.kind:
+   * 'applicant'` is what enforces that boundary: `Assessed -> Cancelled`
+   * stays `actors: ['staff']` in the transition table, so an assessed
+   * application is refused here exactly as it would refuse the citizen
+   * themselves, and is left for an officer to close — an Order of Payment is
+   * an immutable financial instrument, and erasure grants no shortcut around
+   * that. A status with no route to Cancelled at all (Document Verification,
+   * Under Evaluation) is refused the same way, for the same reason: this is
+   * the ordinary transition engine, not a bypass of it.
+   *
+   * Best-effort per application, same as the payment-proof follow-on
+   * transition in applicant-write.controller.ts: one refused move must not
+   * stop the rest, and none of it can turn an already-completed erasure into
+   * a failure the caller reads as "that didn't work".
+   */
+  private async cancelInProgress(applicantId: string, erasedAccountId: string): Promise<void> {
+    const open = await this.db.query<{ id: string }>(
+      `select id from applications
+        where applicant_id = $1
+          and lifecycle_status not in ('Completed', 'Rejected', 'Cancelled', 'Expired')`,
+      [applicantId],
+    );
+
+    const caller = { accountId: erasedAccountId, kind: 'applicant' as const, scopes: ['applications:write'] };
+    for (const { id } of open.rows) {
+      await this.lifecycle.transition({
+        applicationId: id,
+        caller,
+        to: 'Cancelled',
+        remarks: "Cancelled: the applicant's account was erased at their request (RA 10173 s.16(e)) "
+          + 'before this application was resolved.',
+      });
+    }
   }
 
   /** The receipt for an account already erased, so a repeated request is answerable. */
