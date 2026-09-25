@@ -185,6 +185,19 @@ export const CATALOG: readonly CatalogEntry[] = [
     body: 'Something changed on your account.' },
 ];
 
+// Tried adding an 'application-restored' type here for the Archive screen's
+// "Restore to Active Queue" (Cancelled/Rejected -> Submitted) and reverted
+// it, 2026-09-25: this file's own tests pin the catalog to exactly the
+// twenty-five types the mobile client declares ("has exactly the twenty-five
+// types the client declares" / "has no duplicate types"), on purpose -- see
+// the module comment above on TAB 01. A twenty-sixth type invented here,
+// with no client-side counterpart, is precisely that mistake again, just
+// smaller. The citizen still sees the restore: it lands as a real row in
+// the application's own timeline (confirmed live). What it does not get is
+// an inbox/push notice, same as the seven other gaps already recorded in
+// domain/lifecycle.ts's own comment -- and closing that one gap needs a
+// client-side enum value and a contract version bump, not a unilateral add.
+
 const BY_TYPE = new Map(CATALOG.map((entry) => [entry.type, entry]));
 
 export function entryFor(type: string): CatalogEntry | undefined {

@@ -18,7 +18,14 @@ import { recipientsFor } from './staff-recipients';
  */
 
 const EXPECTED: Readonly<Record<string, { reason: string; roles: string[] }>> = {
-  'Draft': { reason: 'awaiting-applicant', roles: [] },
+  // Was `awaiting-applicant`/[] until the walk-in-intake draft feature added
+  // 'staff' to Draft -> Submitted's actors (an officer-started draft must be
+  // resumable and finishable by any officer, not just the one who began it).
+  // Unreachable today -- nothing writes a Draft row yet (Save-as-draft is
+  // still a plan, not shipped) -- but this is a pure function tested for
+  // every status regardless of reachability, and the answer is now correct
+  // for the case it will matter for: a colleague finishing a walk-in draft.
+  'Draft': { reason: 'oversight-only', roles: ['records-officer', 'super-admin'] },
   // Was `evaluator` until 2026-08-30, because intake was gated on
   // `applications:read` and the evaluator was the narrowest holder. With
   // `staff:receive` the notice reaches the officer whose job the status names.

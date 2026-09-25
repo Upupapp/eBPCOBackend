@@ -62,14 +62,21 @@ export interface TransitionRule {
 }
 
 /**
- * Eight transitions carry no notification, and that is a recorded gap rather
+ * Eleven transitions carry no notification, and that is a recorded gap rather
  * than an omission: evaluation-started, instruction-resolved,
  * payment-under-verification, payment-rejected, for-approval, completed,
- * expired and cancelled have no counterpart in the client's catalog. Mapping
+ * expired, cancelled, and the three Cancelled/Rejected/Expired -> Submitted
+ * "restore" moves (added 2026-09-25 for the Archive screen's "Restore to
+ * Active Queue") have no counterpart in the client's catalog. Mapping
  * them onto an approximate type would tell the applicant something other than
- * what happened -- "payment overdue" is not "your payment was rejected". They
+ * what happened -- "payment overdue" is not "your payment was rejected", and
+ * there is no existing type that means "reopened". They
  * need new client types and a contract version bump; see
- * docs/decisions/0012-notification-catalog-reconciliation.md.
+ * docs/decisions/0012-notification-catalog-reconciliation.md. A restored
+ * application is not silent to the applicant in the meantime: the move still
+ * writes a normal `application_transitions` row, so it shows in the
+ * application's own timeline same as any other status change -- what it
+ * lacks is the inbox/push notice every catalog-backed move also gets.
  *
  * Decision E-4 — may applicants cancel their own applications?
  *

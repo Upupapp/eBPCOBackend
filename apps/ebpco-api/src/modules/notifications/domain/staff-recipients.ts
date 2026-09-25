@@ -1,5 +1,5 @@
 import { ROLE_SCOPES, Scope, StaffRole } from '../../identity/domain/account';
-import { LifecycleStatus, TransitionRule } from '../../applications/domain/lifecycle';
+import { isTerminal, LifecycleStatus, TransitionRule } from '../../applications/domain/lifecycle';
 import { visibleStatusesFor } from '../../applications/domain/visibility';
 
 /**
@@ -83,6 +83,18 @@ export function recipientsFor(
   status: LifecycleStatus,
   rules: readonly TransitionRule[],
 ): RecipientDecision {
+  // A terminal status's only way out, if any, is an admin override (the
+  // Archive screen's "Restore to Active Queue") -- found and taken rarely and
+  // on purpose, not a queue anyone is sitting in front of. Without this
+  // check, adding that override made `next` (below) resolve to it for every
+  // Cancelled/Rejected/Expired application, and every ordinary cancel,
+  // rejection or expiry started paging building-official/super-admin with
+  // "is waiting for your action" -- true of none of them. Found live,
+  // 2026-09-25: the routing table this file's spec pins down still says
+  // 'terminal' for all three, and the restore feature's own actors widening
+  // (commit 9bb69e7) silently stopped matching it.
+  if (isTerminal(status)) return { roles: [], awaiting: null, reason: 'terminal' };
+
   // THE FIRST move out, and only the first. Not the first move a member of
   // staff happens to be able to make.
   //
