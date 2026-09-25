@@ -98,11 +98,12 @@ export class StaffPaymentsController {
     const result = await this.db.query<{
       id: string; application_id: string; reference_number: string; application_reference: string;
       amount_centavos: string; method: string; status: string; submitted_at: Date;
-      applicant_name: string; official_receipt_number: string | null;
+      applicant_name: string; official_receipt_number: string | null; proof_document_id: string | null;
     }>(
       `select p.id, p.application_id, p.reference_number, a.reference_number as application_reference,
               p.amount_centavos, p.method, p.status, p.submitted_at,
-              ap.first_name || ' ' || ap.last_name as applicant_name, p.official_receipt_number
+              ap.first_name || ' ' || ap.last_name as applicant_name, p.official_receipt_number,
+              p.proof_document_id
          from payments p
          join applications a on a.id = p.application_id
          join applicants ap on ap.id = a.applicant_id
@@ -124,6 +125,7 @@ export class StaffPaymentsController {
         status: row.status,
         submittedAt: new Date(row.submitted_at).toISOString(),
         officialReceiptNumber: row.official_receipt_number,
+        proofDocumentId: row.proof_document_id,
       })),
     };
   }

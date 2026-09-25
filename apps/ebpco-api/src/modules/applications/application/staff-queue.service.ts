@@ -492,7 +492,7 @@ export class StaffQueueService {
         this.evaluations.of(applicationId),
         this.db.query(
           `select id, reference_number, amount_centavos, method, status, submitted_at,
-                  verified_at, official_receipt_number
+                  verified_at, official_receipt_number, proof_document_id
              from payments where application_id = $1 order by submitted_at`, [applicationId]),
         this.db.query(
           `select id, number, total_centavos, filing_centavos, processing_centavos,
