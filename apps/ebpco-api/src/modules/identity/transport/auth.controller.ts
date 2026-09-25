@@ -18,6 +18,7 @@ import { AccountRecoveryMailer } from '../application/account-recovery-mailer';
 import { RegistrationVerificationService } from '../application/registration-verification.service';
 import { ContactVerificationMailer } from '../application/contact-verification-mailer';
 import { StructuredLogger } from '../../../common/logging/logger';
+import { CASTILLA_BARANGAYS, CASTILLA_CITY, CASTILLA_PROVINCE } from '../../businesses/castilla-barangays';
 
 /**
  * The identity endpoints.
@@ -70,9 +71,9 @@ const registration = z.object({
   // still sends none of this and must keep registering cleanly.
   middleName: z.string().min(1).max(100).optional(),
   street: z.string().min(1).max(200).optional(),
-  barangay: z.string().min(1).max(120).optional(),
-  city: z.string().min(1).max(120).optional(),
-  province: z.string().min(1).max(120).optional(),
+  barangay: z.enum(CASTILLA_BARANGAYS).optional(),
+  city: z.literal(CASTILLA_CITY).optional(),
+  province: z.literal(CASTILLA_PROVINCE).optional(),
   postalCode: z.string().regex(/^[0-9]{4}$/, 'a Philippine postal code is four digits').optional(),
 // `.strict()`, because Zod's default SILENTLY STRIPS what it does not know.
 // A client adding an unlisted field here would get 202 and the field would
@@ -107,9 +108,9 @@ const rectification = z.object({
   // `businesses` already calls this street, and a second spelling of one idea
   // inside one service is the defect D-10 spent a migration undoing.
   street: z.string().min(1).max(200).nullable().optional(),
-  barangay: z.string().min(1).max(100).nullable().optional(),
-  city: z.string().min(1).max(100).nullable().optional(),
-  province: z.string().min(1).max(100).nullable().optional(),
+  barangay: z.enum(CASTILLA_BARANGAYS).nullable().optional(),
+  city: z.literal(CASTILLA_CITY).nullable().optional(),
+  province: z.literal(CASTILLA_PROVINCE).nullable().optional(),
   postalCode: z.string().regex(/^[0-9]{4}$/, 'a Philippine ZIP is four digits')
     .nullable().optional(),
 }).strict().refine(

@@ -13,6 +13,7 @@ import { AuditService } from '../compliance/application/audit.service';
 import { StaffBusinessRegistrationService } from './staff-business-registration.service';
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 import { CASTILLA_BARANGAYS } from './castilla-barangays';
+import { BUSINESS_CATEGORIES } from './business-categories';
 
 /**
  * The LGU's business directory, as an officer sees it.
@@ -47,10 +48,7 @@ import { CASTILLA_BARANGAYS } from './castilla-barangays';
 // citizen can genuinely register today) could never be filtered for here.
 const filtersShape = z.object({
   q: z.string().min(1).max(120).optional(),
-  category: z.enum([
-    'Retail', 'Food Service', 'Services', 'Manufacturing',
-    'Construction', 'Transport', 'Agriculture', 'Other',
-  ]).optional(),
+  category: z.enum(BUSINESS_CATEGORIES).optional(),
   status: z.enum(['Active', 'Inactive']).optional(),
 }).strict();
 
@@ -149,10 +147,7 @@ function callerOf(request: AuthenticatedRequest): Caller {
  */
 const businessUpdateShape = z.object({
   name: z.string().min(1).max(200),
-  category: z.enum([
-    'Retail', 'Food Service', 'Services', 'Manufacturing',
-    'Construction', 'Transport', 'Agriculture', 'Other',
-  ]),
+  category: z.enum(BUSINESS_CATEGORIES),
   street: z.string().min(1).max(200),
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
@@ -184,10 +179,7 @@ const registrationShape = z.object({
   }).strict(),
   business: z.object({
     name: z.string().min(1).max(200),
-    category: z.enum([
-      'Retail', 'Food Service', 'Services', 'Manufacturing',
-      'Construction', 'Transport', 'Agriculture', 'Other',
-    ]),
+    category: z.enum(BUSINESS_CATEGORIES),
     street: z.string().min(1).max(200),
     barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),

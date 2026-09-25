@@ -14,6 +14,7 @@ import { LifecycleService } from '../application/lifecycle.service';
 import { StaffQueueService } from '../application/staff-queue.service';
 import { SubmissionService } from '../application/submission.service';
 import { CASTILLA_BARANGAYS } from '../../businesses/castilla-barangays';
+import { BUSINESS_CATEGORIES } from '../../businesses/business-categories';
 import { EditableFields, RecordsService } from '../application/records.service';
 import { NotesService } from '../application/notes.service';
 import { ProfilePhotoService } from '../../identity/application/profile-photo.service';
@@ -105,7 +106,7 @@ const onBehalfShape = z.object({
      * record. An existing applicant's address is theirs to change.
      */
     street: z.string().max(200).optional(),
-    barangay: z.string().max(120).optional(),
+    barangay: z.enum(CASTILLA_BARANGAYS).optional(),
   }).strict(),
   // One or the other, never both: `business` registers a new one, `businessId`
   // names an existing one already owned by this applicant.
@@ -115,10 +116,7 @@ const onBehalfShape = z.object({
     // this had drifted to an older six-value list missing
     // Construction/Transport/Agriculture, so an officer assisting a walk-in
     // citizen who wanted exactly one of those three could never file it.
-    category: z.enum([
-      'Retail', 'Food Service', 'Services', 'Manufacturing',
-      'Construction', 'Transport', 'Agriculture', 'Other',
-    ]),
+    category: z.enum(BUSINESS_CATEGORIES),
     street: z.string().min(1).max(200),
     barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),

@@ -8,6 +8,7 @@ import { RequireScopes } from '../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../identity/transport/guards/authentication.guard';
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 import { CASTILLA_BARANGAYS } from './castilla-barangays';
+import { BUSINESS_CATEGORIES } from './business-categories';
 
 /**
  * The businesses an applicant has registered with the LGU.
@@ -30,10 +31,7 @@ import { CASTILLA_BARANGAYS } from './castilla-barangays';
  */
 const businessShape = z.object({
   name: z.string().min(1).max(200),
-  category: z.enum([
-    'Retail', 'Food Service', 'Services', 'Manufacturing',
-    'Construction', 'Transport', 'Agriculture', 'Other',
-  ]),
+  category: z.enum(BUSINESS_CATEGORIES),
   street: z.string().min(1).max(200),
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
@@ -54,10 +52,7 @@ const businessShape = z.object({
  */
 const businessUpdateShape = z.object({
   name: z.string().min(1).max(200),
-  category: z.enum([
-    'Retail', 'Food Service', 'Services', 'Manufacturing',
-    'Construction', 'Transport', 'Agriculture', 'Other',
-  ]),
+  category: z.enum(BUSINESS_CATEGORIES),
   street: z.string().min(1).max(200),
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),

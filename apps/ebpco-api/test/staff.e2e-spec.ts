@@ -1009,13 +1009,13 @@ describe('the address the office writes to (both citizen lanes)', () => {
     const token = await citizen();
 
     const response = await patch(token, {
-      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion Uno',
+      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion',
       city: 'Castilla', province: 'Sorsogon', postalCode: '4718',
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion Uno',
+      middleName: 'Reyes', street: '12 Rizal Street', barangay: 'Poblacion',
       city: 'Castilla', province: 'Sorsogon', postalCode: '4718',
     });
     // And it is what /me answers afterwards, not just what PATCH echoed back.
@@ -1028,12 +1028,12 @@ describe('the address the office writes to (both citizen lanes)', () => {
     // A citizen fixing a barangay must not lose the street they entered last
     // month.
     const token = await citizen();
-    await patch(token, { street: '12 Rizal Street', barangay: 'Poblacion Uno' });
+    await patch(token, { street: '12 Rizal Street', barangay: 'Poblacion' });
 
-    await patch(token, { barangay: 'Poblacion Dos' });
+    await patch(token, { barangay: 'Bagalayag' });
 
     expect((await get('/me', token)).json()).toMatchObject({
-      street: '12 Rizal Street', barangay: 'Poblacion Dos',
+      street: '12 Rizal Street', barangay: 'Bagalayag',
     });
   });
 

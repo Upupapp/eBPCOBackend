@@ -11,6 +11,7 @@ import {
   CitizenDirectoryService, CitizenRefusal,
 } from '../application/citizen-directory.service';
 import { ProfilePhotoService } from '../application/profile-photo.service';
+import { CASTILLA_BARANGAYS, CASTILLA_CITY, CASTILLA_PROVINCE } from '../../businesses/castilla-barangays';
 
 /**
  * The Citizens module, over HTTP: `GET /staff/citizens*` for lookup,
@@ -43,9 +44,9 @@ const rectifyShape = z.object({
     lastName: z.string().min(1).max(100).optional(),
     mobileNumber: z.string().regex(/^(09\d{9}|\+639\d{9})$/, 'must be 09XXXXXXXXX or +639XXXXXXXXX').optional(),
     street: z.string().min(1).max(200).nullable().optional(),
-    barangay: z.string().min(1).max(100).nullable().optional(),
-    city: z.string().min(1).max(100).nullable().optional(),
-    province: z.string().min(1).max(100).nullable().optional(),
+    barangay: z.enum(CASTILLA_BARANGAYS).nullable().optional(),
+    city: z.literal(CASTILLA_CITY).nullable().optional(),
+    province: z.literal(CASTILLA_PROVINCE).nullable().optional(),
     postalCode: z.string().regex(/^[0-9]{4}$/, 'a Philippine ZIP is four digits').nullable().optional(),
   }).strict().refine((value) => Object.keys(value).length > 0, { message: 'name at least one field to correct' }),
 }).strict();
