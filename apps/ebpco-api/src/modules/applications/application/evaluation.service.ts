@@ -2,7 +2,12 @@ import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { Caller } from '../domain/application';
+import {
+  EVALUATION_STAGES, EvaluationStage, describeHeld, evaluationStagesOf, holdsStage,
+} from '../domain/evaluation-stages';
 import { visibleStatusesFor } from '../domain/visibility';
+import { LifecycleStatus } from '../domain/lifecycle';
+import { Responsibility, responsibilityFor, rosterOf } from './responsibility';
 
 /**
  * An officer's decision on one stage of an evaluation.
@@ -18,8 +23,10 @@ import { visibleStatusesFor } from '../domain/visibility';
  * does this, earlier and with a message that says which field.
  */
 
-export const EVALUATION_STAGES = ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval'] as const;
-export type EvaluationStage = (typeof EVALUATION_STAGES)[number];
+// The stage list lives in the domain (evaluation-stages.ts) so the staff
+// directory can validate assignments against it; re-exported for callers
+// that have always imported it from here.
+export { EVALUATION_STAGES, type EvaluationStage } from '../domain/evaluation-stages';
 
 export const EVALUATION_RESULTS = ['Passed', 'Revision Required', 'Rejected'] as const;
 export type EvaluationResult = (typeof EVALUATION_RESULTS)[number];
@@ -28,7 +35,8 @@ export type RecordResult =
   | { readonly ok: true; readonly evaluationId: string; readonly complete: boolean }
   | {
       readonly ok: false;
-      readonly reason: 'not-found' | 'already-decided' | 'remarks-required' | 'self-review' | 'out-of-order';
+      readonly reason:
+        | 'not-found' | 'already-decided' | 'remarks-required' | 'self-review' | 'out-of-order' | 'not-your-stage';
       readonly detail: string;
     };
 
@@ -62,6 +70,8 @@ export interface EvaluationQueueRow {
   /** Both sides, never the difference — see `queue()` for why. */
   readonly requiredDocumentCount: number;
   readonly attachedDocumentCount: number;
+  /** Who it is waiting on — the same derivation as the applications queue (responsibility.ts). */
+  readonly responsibility: Responsibility;
 }
 
 /** Same shape as the applications queue's, deliberately: one cursor to learn. */
@@ -232,6 +242,7 @@ export class EvaluationService {
     );
 
     const page = result.rows.slice(0, limit);
+    const roster = await rosterOf(this.db);
     const rows: EvaluationQueueRow[] = [];
     for (const row of page) {
       const evaluations = await this.of(row.id);
@@ -258,6 +269,7 @@ export class EvaluationService {
         nextStage: next,
         requiredDocumentCount: required.length,
         attachedDocumentCount: row.attached_documents,
+        responsibility: responsibilityFor(row.lifecycle_status as LifecycleStatus, next, row.permit_type, roster),
       });
     }
 
@@ -328,6 +340,19 @@ export class EvaluationService {
           ok: false,
           reason: 'self-review',
           detail: 'An officer may not evaluate their own application.',
+        };
+      }
+
+      // Each stage is a different office's decision (migration 057): the Fire
+      // Safety stage is the BFP's, Zoning the MPDO's, and an evaluator decides
+      // only the stages assigned to them. Checked before the ordering rule, so
+      // an officer holding none of this is told that, not which stage is next.
+      const held = await evaluationStagesOf(tx, evaluator.accountId);
+      if (!holdsStage(held, stage)) {
+        return {
+          ok: false,
+          reason: 'not-your-stage',
+          detail: `The ${stage} stage is not assigned to your account. ${describeHeld(held)}`,
         };
       }
 

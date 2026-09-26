@@ -47,6 +47,9 @@ export const SECURITY_ACTIONS = {
   accessRejected: 'access.rejected',
   accessLevelChanged: 'access.level-changed',
   accessFormsChanged: 'access.forms-changed',
+  // Which evaluation stages an officer may decide (migration 057) — authority
+  // over a decision, like the forms above.
+  accessStagesChanged: 'access.stages-changed',
   accessDisabled: 'access.disabled',
   accessEnabled: 'access.enabled',
 } as const;
@@ -67,6 +70,7 @@ export const SECURITY_STREAM_ACTIONS: readonly SecurityAction[] = [
   SECURITY_ACTIONS.accessRejected,
   SECURITY_ACTIONS.accessLevelChanged,
   SECURITY_ACTIONS.accessFormsChanged,
+  SECURITY_ACTIONS.accessStagesChanged,
   SECURITY_ACTIONS.accessDisabled,
   SECURITY_ACTIONS.accessEnabled,
   SECURITY_ACTIONS.sessionRefused,

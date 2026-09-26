@@ -181,6 +181,21 @@ const levelShape = z.object({ level: z.enum(LEVELS) }).strict();
 const formsShape = z.object({
   permitTypes: z.array(z.string().min(1).max(120)).min(1).max(30),
 }).strict();
+const stagesShape = z.object({
+  stages: z.array(z.string().min(1).max(40)).max(10),
+}).strict();
+
+/**
+ * A refused access change: 403 when the caller may not touch this account (a
+ * super admin's, changed by an administrator — see super-admin-guard.ts), 409
+ * when the change itself cannot be made (no forms, an unknown stage).
+ */
+function accessRefused(title: string, refusal: { reason: string; detail: string }): never {
+  if (refusal.reason === 'not-permitted') {
+    throw new ProblemException(ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, refusal.detail);
+  }
+  throw new ProblemException(ProblemType.conflict, title, HttpStatus.CONFLICT, refusal.detail);
+}
 
 /**
  * Changing what an officer may work on, after they have an account.
@@ -205,7 +220,24 @@ export class StaffAccessController {
       level: assigned.level,
       permitTypes: assigned.permitTypes,
       livePermitTypes: live.permitTypes,
+      evaluationStages: await this.access.stagesFor(userId),
     };
+  }
+
+  /**
+   * The evaluation stages an officer may decide (migration 057). A whole
+   * list, replacing the old one — an empty list takes every stage away.
+   */
+  @Put(':userId/access/stages')
+  @RequireScopes('staff:administer')
+  async setStages(
+    @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ evaluationStages: readonly string[] }> {
+    const input = parse(stagesShape, body);
+    const result = await this.access.setStages(userId, input.stages, actorOf(request));
+    if (!result.ok) accessRefused('Cannot change these stages', result);
+    return { evaluationStages: await this.access.stagesFor(userId) };
   }
 
   @Put(':userId/access/level')
@@ -216,10 +248,7 @@ export class StaffAccessController {
   ): Promise<{ level: string }> {
     const input = parse(levelShape, body);
     const result = await this.access.setLevel(userId, input.level, actorOf(request));
-    if (!result.ok) {
-      throw new ProblemException(
-        ProblemType.conflict, 'Cannot change this level', HttpStatus.CONFLICT, result.detail);
-    }
+    if (!result.ok) accessRefused('Cannot change this level', result);
     return { level: input.level };
   }
 
@@ -231,10 +260,7 @@ export class StaffAccessController {
   ): Promise<{ permitTypes: string[] }> {
     const input = parse(formsShape, body);
     const result = await this.access.setForms(userId, input.permitTypes, actorOf(request));
-    if (!result.ok) {
-      throw new ProblemException(
-        ProblemType.conflict, 'Cannot change these forms', HttpStatus.CONFLICT, result.detail);
-    }
+    if (!result.ok) accessRefused('Cannot change these forms', result);
     return { permitTypes: input.permitTypes };
   }
 }

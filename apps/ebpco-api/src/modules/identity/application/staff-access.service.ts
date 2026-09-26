@@ -1,7 +1,9 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { SECURITY_ACTIONS } from '../../compliance/domain/security-events';
+import { EVALUATION_STAGES, EvaluationStage, isEvaluationStage } from '../../applications/domain/evaluation-stages';
 import { AccessLevel, NO_ACCESS, StaffAccess } from '../domain/staff-access';
+import { SUPER_ADMIN_ONLY, holdsSuperAdmin } from './super-admin-guard';
 
 export type Refusal = { readonly ok: false; readonly reason: string; readonly detail: string };
 export type Outcome = { readonly ok: true } | Refusal;
@@ -81,6 +83,8 @@ export class StaffAccessService {
    * answer to the question a reviewer actually asks.
    */
   async setLevel(accountId: string, level: AccessLevel, actor: Actor): Promise<Outcome> {
+    const guarded = await this.superAdminGuard(accountId, actor);
+    if (guarded !== null) return guarded;
     const before = await this.db.query<{ level: AccessLevel }>(
       'select level from staff_access where account_id = $1', [accountId]);
     const previous = before.rows[0]?.level ?? null;
@@ -122,6 +126,8 @@ export class StaffAccessService {
   async setForms(
     accountId: string, permitTypes: readonly string[], actor: Actor,
   ): Promise<Outcome> {
+    const guarded = await this.superAdminGuard(accountId, actor);
+    if (guarded !== null) return guarded;
     const wanted = [...new Set(permitTypes)].sort();
     if (wanted.length === 0) {
       return {
@@ -168,6 +174,74 @@ export class StaffAccessService {
     });
 
     return { ok: true };
+  }
+
+  /**
+   * The evaluation stages this account may decide (migration 057) — as
+   * assigned, so a super admin's reads as whatever was assigned to it; the
+   * enforcement point (`evaluationStagesOf`) is what treats that role as all.
+   */
+  async stagesFor(accountId: string): Promise<readonly EvaluationStage[]> {
+    const { rows } = await this.db.query<{ stage: string }>(
+      'select stage from staff_evaluation_stages where account_id = $1', [accountId]);
+    const held = new Set(rows.map((row) => row.stage));
+    return EVALUATION_STAGES.filter((stage) => held.has(stage));
+  }
+
+  /**
+   * Replace the stages, recording both sides. An empty list is allowed, unlike
+   * the forms: most officers decide no evaluation stage at all, and an
+   * evaluator between assignments is a normal state, not a broken account.
+   */
+  async setStages(
+    accountId: string, stages: readonly string[], actor: Actor,
+  ): Promise<Outcome> {
+    const guarded = await this.superAdminGuard(accountId, actor);
+    if (guarded !== null) return guarded;
+    const unknown = stages.filter((stage) => !isEvaluationStage(stage));
+    if (unknown.length > 0) {
+      return {
+        ok: false, reason: 'unknown-stage',
+        detail: `Not evaluation stages: ${unknown.join(', ')}. The stages are ${EVALUATION_STAGES.join(', ')}.`,
+      };
+    }
+    const wanted = EVALUATION_STAGES.filter((stage) => stages.includes(stage));
+    const previous = await this.stagesFor(accountId);
+    if (previous.length === wanted.length && previous.every((stage) => wanted.includes(stage))) {
+      return { ok: true };
+    }
+
+    await this.db.transaction(async (tx) => {
+      await tx.query('delete from staff_evaluation_stages where account_id = $1', [accountId]);
+      for (const stage of wanted) {
+        await tx.query(
+          'insert into staff_evaluation_stages (account_id, stage, granted_by) values ($1,$2,$3)',
+          [accountId, stage, actor.accountId]);
+      }
+      await this.audit.append({
+        action: SECURITY_ACTIONS.accessStagesChanged,
+        subjectType: 'account',
+        subjectId: accountId,
+        outcome: 'allowed',
+        actorAccountId: actor.accountId,
+        actorRole: actor.role,
+        beforeState: { stages: previous },
+        afterState: { stages: wanted },
+      }, tx);
+    });
+
+    return { ok: true };
+  }
+
+  /**
+   * A super admin's access is changed only by a super admin — a view-only level
+   * would take `staff:administer` away from the one role that could restore it.
+   * See `super-admin-guard.ts`.
+   */
+  private async superAdminGuard(accountId: string, actor: Actor): Promise<Refusal | null> {
+    if (!(await holdsSuperAdmin(this.db, accountId))) return null;
+    if (await holdsSuperAdmin(this.db, actor.accountId)) return null;
+    return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
   }
 
   // `mayLoseSuperAdmin` lived here and was removed: StaffDirectoryService asks

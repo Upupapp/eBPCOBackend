@@ -3,6 +3,7 @@ import { AuditService } from '../../compliance/application/audit.service';
 import { SecretBox } from '../domain/secret-box';
 import { StaffRole, requiresMfa } from '../domain/account';
 import { codeFor, generateSecret, provisioningUri, stepAt, verify } from '../domain/totp';
+import { SUPER_ADMIN_ONLY, holdsSuperAdmin } from './super-admin-guard';
 
 /**
  * Enrolling a second factor, without being locked out by the attempt.
@@ -238,6 +239,10 @@ export class TotpService {
     const account = found.rows[0];
     if (account === undefined || account.kind !== 'staff') {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+    // A super admin's factor is re-issued by a super admin (super-admin-guard.ts).
+    if (await holdsSuperAdmin(this.db, accountId) && !(await holdsSuperAdmin(this.db, actorAccountId))) {
+      return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
     }
 
     await this.db.transaction(async (tx) => {

@@ -25,7 +25,10 @@ export function refusalToProblem(refusal: Refusal): ProblemException {
         PROBLEM_TYPE['not-permitted'], 'Not permitted', HttpStatus.FORBIDDEN,
         refusal.reason === 'wrong-actor'
           ? 'This move is not one this kind of account may make.'
-          : 'This account does not hold the permission this action requires.',
+          : refusal.reason === 'wrong-stage'
+            ? `This application is at the ${refusal.stage ?? 'current'} evaluation stage, which is not assigned to `
+              + 'your account. The officer who holds that stage decides it.'
+            : 'This account does not hold the permission this action requires.',
       );
 
     case 'illegal-transition':

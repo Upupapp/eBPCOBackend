@@ -20,6 +20,7 @@ import { ContactVerificationMailer } from '../application/contact-verification-m
 import { StructuredLogger } from '../../../common/logging/logger';
 import { UploadRoute } from '../../../common/http/upload-route';
 import { CASTILLA_BARANGAYS, CASTILLA_CITY, CASTILLA_PROVINCE } from '../../businesses/castilla-barangays';
+import { EVALUATION_STAGES } from '../../applications/domain/evaluation-stages';
 
 /**
  * The identity endpoints.
@@ -662,6 +663,12 @@ export class MeController {
         scopes: caller.scopes,
         level: access.level,
         permitTypes: access.permitTypes,
+        // The evaluation stages this officer decides (migration 057), so the
+        // portal offers Evaluate only on the stage that is theirs. A super
+        // admin decides every stage whatever is assigned.
+        evaluationStages: account.roles.includes('super-admin')
+          ? [...EVALUATION_STAGES]
+          : await this.staffAccess.stagesFor(account.id),
       };
     }
 

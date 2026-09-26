@@ -24,9 +24,14 @@ export interface NotPermitted {
   readonly kind: 'not-permitted';
   readonly from: LifecycleStatus;
   readonly to: LifecycleStatus;
-  /** Which of the two failed: being the wrong kind of account, or lacking the scope. */
-  readonly reason: 'wrong-actor' | 'missing-scope';
+  /**
+   * Which failed: being the wrong kind of account, lacking the scope, or —
+   * for an evaluation move — not holding the stage the application is on
+   * (migration 057; `stage` names it).
+   */
+  readonly reason: 'wrong-actor' | 'missing-scope' | 'wrong-stage';
   readonly requiredScope: string;
+  readonly stage?: string;
 }
 
 export interface PreconditionUnmet {

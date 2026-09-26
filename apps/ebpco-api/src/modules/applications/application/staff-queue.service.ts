@@ -7,6 +7,11 @@ import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
 import { visibleStatusesFor } from '../domain/visibility';
 import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
+import { EvaluationStage, isEvaluationStage } from '../domain/evaluation-stages';
+import { Responsibility, RosterEntry, responsibilityFor, rosterOf } from './responsibility';
+
+const stageOrNull = (value: unknown): EvaluationStage | null =>
+  typeof value === 'string' && isEvaluationStage(value) ? value : null;
 
 /**
  * What an officer sees, and what an officer is allowed to count.
@@ -119,6 +124,12 @@ export interface QueueRow {
    * `renewsPermitNumber`: an application carries at most one of the two.
    */
   readonly priorPermitClaim: string | null;
+  /**
+   * Who this application is waiting on: the step, the position that takes it,
+   * and the officers who hold that position for this permit type
+   * (responsibility.ts, migration 057). Derived on every read, never stored.
+   */
+  readonly responsibility: Responsibility;
 }
 
 export interface QueuePage {
@@ -387,7 +398,8 @@ export class StaffQueueService {
     const hasMore = raw.length > limit;
     const page = hasMore ? raw.slice(0, limit) : raw;
     const calendar = await this.calendars.load();
-    const rows = page.map((row) => this.toQueueRow(row, calendar));
+    const roster = await rosterOf(this.db);
+    const rows = page.map((row) => this.toQueueRow(row, calendar, roster));
     const last = page[page.length - 1];
 
     return {
@@ -544,7 +556,7 @@ export class StaffQueueService {
       (r.rows as Record<string, unknown>[]).map(camelKeys);
 
     return {
-      summary: this.toQueueRow(row, calendar),
+      summary: this.toQueueRow(row, calendar, await rosterOf(this.db)),
       applicantEmail: account.rows[0]?.email ?? '',
       applicantEmailVerifiedAt: account.rows[0]?.email_verified_at?.toISOString() ?? null,
       applicantMobile: account.rows[0]?.mobile_number ?? null,
@@ -764,7 +776,9 @@ export class StaffQueueService {
     return { overdue, indeterminate };
   }
 
-  private toQueueRow(row: Record<string, unknown>, calendar: HolidayCalendar): QueueRow {
+  private toQueueRow(
+    row: Record<string, unknown>, calendar: HolidayCalendar, roster: readonly RosterEntry[],
+  ): QueueRow {
     const submitted = row['submitted_at'];
     const completed = row['completed_at'];
     const amount = row['assessed_amount_centavos'];
@@ -815,6 +829,12 @@ export class StaffQueueService {
       evaluationStage: (row['evaluation_stage'] as string | null) ?? null,
       renewsPermitNumber: (row['renews_permit_number'] as string | null) ?? null,
       priorPermitClaim: (row['prior_permit_claim'] as string | null) ?? null,
+      responsibility: responsibilityFor(
+        row['lifecycle_status'] as LifecycleStatus,
+        stageOrNull(row['evaluation_stage']),
+        row['permit_type'] as string,
+        roster,
+      ),
     };
   }
 

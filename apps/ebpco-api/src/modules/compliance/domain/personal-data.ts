@@ -173,6 +173,14 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     granted_at: none('audit'),
   },
 
+  /** Which evaluation stages an officer may decide (migration 057). About their duties. */
+  staff_evaluation_stages: {
+    account_id: linkable('account-lifetime', ACCESS_ADMINISTRATION),
+    stage: none('account-lifetime'),
+    granted_by: linkable('audit', ACCOUNTABILITY),
+    granted_at: none('audit'),
+  },
+
   /** An officer's access level. About their duties, not their person. */
   staff_access: {
     account_id: linkable('account-lifetime', ACCESS_ADMINISTRATION),
@@ -224,6 +232,12 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // person, and useless without the secret.
     totp_last_step: none('account-lifetime'),
     erased_at: none('account-lifetime'),
+    // A super admin removed this staff account from the directory (migration
+    // 057). The row is kept so its decisions stay attributed; `removed_by`
+    // names who removed it, for the same accountability reason `created_by`
+    // does.
+    removed_at: none('account-lifetime'),
+    removed_by: linkable('audit', ACCOUNTABILITY),
     created_at: none('account-lifetime'),
     updated_at: none('account-lifetime'),
     created_by: linkable('account-lifetime', ACCOUNTABILITY),
@@ -344,6 +358,12 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // Which permit this renewal is about. A link between two applications
     // of the same applicant, not information about them.
     renews_permit_id: structural,
+    // ── Added by migration 053 (prior permit claim) ───────────────────
+    // The number of a permit the applicant SAYS they hold from before eBPCO.
+    // The same kind of fact as `renews_permit_id` above, but typed in rather
+    // than linked, and it names a permit issued to this person -- so content,
+    // statutory like the rest of the permit record.
+    prior_permit_claim: content('statutory', PERMIT_RECORD),
   },
 
   application_transitions: {
@@ -410,6 +430,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     issuing_office: none('statutory'),
     uploaded_at: none('statutory'),
     deleted_at: none('statutory'),
+    // When the citizen took this copy out of "My Documents" (migration 052).
+    // A bare timestamp about the library listing, like `deleted_at`.
+    removed_from_library_at: none('statutory'),
     // ── Added by migration 027 (document review) ──────────────────────
     // Classified here because the gate refuses an unclassified column, and an
     // unclassified column is one nobody has decided the erasure rule for.

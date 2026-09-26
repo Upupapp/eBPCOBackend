@@ -31,6 +31,13 @@ beforeEach(async () => {
             ($2,'staff','evaluator@lgu.gov.ph','evaluator@lgu.gov.ph','scrypt$1$1$1$a$b')`,
     [APPLICANT_ACCOUNT, EVALUATOR_ACCOUNT],
   );
+  // Every stage (migration 057): these tests are about ordering and records,
+  // not about which office holds which stage — officer-positions.e2e-spec.ts is.
+  await db.query(
+    `insert into staff_evaluation_stages (account_id, stage, granted_by)
+     select $1, stage, $1 from unnest(array['Initial','Zoning','Fire Safety','OBO','Final Approval']) as stage`,
+    [EVALUATOR_ACCOUNT],
+  );
   const applicantId = randomUUID();
   await db.query(
     `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Maria','Santos')`,

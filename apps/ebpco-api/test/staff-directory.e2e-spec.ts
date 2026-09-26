@@ -61,7 +61,7 @@ async function staffAccount(role: StaffRole): Promise<{ id: string; token: strin
 }
 
 const send = (
-  method: 'GET' | 'POST' | 'PATCH' | 'DELETE', url: string, token: string,
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE', url: string, token: string,
   payload?: Record<string, unknown>,
 ) =>
   app.inject({
@@ -234,6 +234,79 @@ describe('the escalation rules, which hold each other up', () => {
   });
 });
 
+describe('only a super admin acts on a super admin', () => {
+  // `staff:administer` is held by the administrator too. Without these an
+  // administrator is a super admin one request away — by a second account, a
+  // promoted colleague, or a super admin demoted to view-only so nobody can
+  // undo it (super-admin-guard.ts).
+  const rolesOf = async (id: string) => (await db.query<{ role: string }>(
+    'select role from account_roles where account_id = $1 order by role', [id])).rows.map((r) => r.role);
+
+  it('refuses an administrator creating a super admin account', async () => {
+    const response = await send('POST', '/staff/users', adminToken, {
+      email: 'second.boss@lgu.gov.ph', roles: ['super-admin'],
+    });
+
+    expect(response.statusCode).toBe(403);
+    const created = await db.query("select 1 from accounts where email_normalised = 'second.boss@lgu.gov.ph'");
+    expect(created.rows).toHaveLength(0);
+  });
+
+  it('refuses an administrator promoting someone to super admin', async () => {
+    const colleague = await staffAccount('evaluator');
+    const response = await send('POST', `/staff/users/${colleague.id}/roles`, adminToken, {
+      roles: ['evaluator', 'super-admin'],
+    });
+
+    expect(response.statusCode).toBe(403);
+    expect(await rolesOf(colleague.id)).toEqual(['evaluator']);
+  });
+
+  it('refuses an administrator demoting, disabling, narrowing or re-issuing the factor of a super admin', async () => {
+    const boss = await staffAccount('super-admin');
+    // A second one, so the last-super-admin floor is not what refuses.
+    await staffAccount('super-admin');
+
+    expect((await send('POST', `/staff/users/${boss.id}/roles`, adminToken, { roles: ['evaluator'] })).statusCode)
+      .toBe(403);
+    expect((await send('POST', `/staff/users/${boss.id}/disable`, adminToken, {})).statusCode).toBe(403);
+    expect((await send('PUT', `/staff/users/${boss.id}/access/level`, adminToken, { level: 'view' })).statusCode)
+      .toBe(403);
+    expect((await send('PUT', `/staff/users/${boss.id}/access/stages`, adminToken, { stages: [] })).statusCode)
+      .toBe(403);
+    expect((await send('POST', `/staff/users/${boss.id}/mfa/reissue`, adminToken)).statusCode).toBe(403);
+
+    expect(await rolesOf(boss.id)).toEqual(['super-admin']);
+    const level = await db.query('select 1 from staff_access where account_id = $1', [boss.id]);
+    expect(level.rows).toHaveLength(0);
+  });
+
+  it('lets a super admin do each of those — the control', async () => {
+    const superAdmin = await staffAccount('super-admin');
+    const colleague = await staffAccount('evaluator');
+
+    const created = await send('POST', '/staff/users', superAdmin.token, {
+      email: 'deputy.boss@lgu.gov.ph', roles: ['super-admin'],
+    });
+    expect(created.statusCode).toBe(201);
+
+    expect((await send('POST', `/staff/users/${colleague.id}/roles`, superAdmin.token, {
+      roles: ['evaluator', 'super-admin'],
+    })).statusCode).toBe(200);
+    expect((await send('PUT', `/staff/users/${colleague.id}/access/level`, superAdmin.token, {
+      level: 'view-edit',
+    })).statusCode).toBe(200);
+  });
+
+  it('still lets an administrator manage every other account', async () => {
+    const colleague = await staffAccount('cashier');
+    expect((await send('PUT', `/staff/users/${colleague.id}/access/level`, adminToken, { level: 'view' })).statusCode)
+      .toBe(200);
+    expect((await send('POST', `/staff/users/${colleague.id}/roles`, adminToken, { roles: ['assessor'] })).statusCode)
+      .toBe(200);
+  });
+});
+
 describe('disabling an account', () => {
   it('disables it, and the standing check stops the next request it makes', async () => {
     const victim = await staffAccount('evaluator');
@@ -355,6 +428,37 @@ describe('sessions', () => {
       'select count(*) as n from revoked_sessions where family_id = $1', [family],
     );
     expect(Number(revocations.rows[0]?.n)).toBe(0);
+  });
+});
+
+describe('correcting a name', () => {
+  it('changes the name the officer\'s decisions are shown under, and records who changed it', async () => {
+    const officer = await staffAccount('evaluator');
+    const response = await send('PATCH', `/staff/users/${officer.id}`, adminToken, {
+      fullName: 'Engr. Ana Reyes',
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ fullName: string }>().fullName).toBe('Engr. Ana Reyes');
+    const audit = await db.query<{ actor_account_id: string; after_state: { fullName: string } }>(
+      `select actor_account_id, after_state from audit_events
+        where action = 'staff.account.renamed' and subject_id = $1`,
+      [officer.id],
+    );
+    expect(audit.rows[0]?.actor_account_id).toBe(adminId);
+    expect(audit.rows[0]?.after_state.fullName).toBe('Engr. Ana Reyes');
+  });
+
+  it('refuses an administrator renaming a super admin', async () => {
+    const boss = await staffAccount('super-admin');
+    const response = await send('PATCH', `/staff/users/${boss.id}`, adminToken, { fullName: 'Someone Else' });
+
+    expect(response.statusCode).toBe(403);
+  });
+
+  it('refuses a body with nothing to change', async () => {
+    const officer = await staffAccount('evaluator');
+    expect((await send('PATCH', `/staff/users/${officer.id}`, adminToken, {})).statusCode).toBe(400);
   });
 });
 

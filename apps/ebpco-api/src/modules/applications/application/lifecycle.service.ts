@@ -8,6 +8,7 @@ import { LifecycleStatus } from '../domain/lifecycle';
 import { Refusal } from '../domain/lifecycle-errors';
 import { loadTransitions } from '../domain/transition-repository';
 import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
+import { evaluationStagesOf, holdsStage, nextStageOf } from '../domain/evaluation-stages';
 import { EVALUATION_STAGES } from './evaluation.service';
 
 /**
@@ -248,6 +249,33 @@ export class LifecycleService {
       }
 
       const rules = await loadTransitions(tx);
+
+      // THE STAGE ASSIGNMENT, on the write path (migration 057). A move that
+      // needs `staff:evaluate` belongs to whoever holds the stage the
+      // application is on: out of Document Verification, the Initial
+      // evaluator's; out of Under Evaluation, the officer of the stage it is
+      // waiting on — so a Fire Safety evaluator cannot send an application
+      // back for revision while it sits at Zoning. Checked only when the rule
+      // would otherwise apply; everything else is the engine's to decide.
+      const rule = rules.find((candidate) => candidate.from === snapshot.status && candidate.to === to);
+      if (caller.kind === 'staff' && rule?.requires === 'staff:evaluate') {
+        const stage = snapshot.status === 'Document Verification'
+          ? 'Initial'
+          : snapshot.status === 'Under Evaluation' ? await nextStageOf(tx, applicationId) : null;
+        if (stage !== null && !holdsStage(await evaluationStagesOf(tx, caller.accountId), stage)) {
+          return {
+            ok: false,
+            refusal: {
+              kind: 'not-permitted' as const,
+              from: snapshot.status,
+              to,
+              reason: 'wrong-stage' as const,
+              requiredScope: `evaluation-stage:${stage}`,
+              stage,
+            },
+          };
+        }
+      }
 
       const decision = decide({
         rules,

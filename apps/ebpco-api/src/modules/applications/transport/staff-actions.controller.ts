@@ -130,7 +130,7 @@ function callerOf(request: AuthenticatedRequest): Caller {
 function refusal(reason: string, detail: string): ProblemException {
   const status = reason === 'not-found'
     ? HttpStatus.NOT_FOUND
-    : reason === 'self-review' || reason === 'self-verification'
+    : reason === 'self-review' || reason === 'self-verification' || reason === 'not-your-stage'
       ? HttpStatus.FORBIDDEN
       : reason === 'already-decided' || reason === 'already-generated'
         || reason === 'already-released' || reason === 'already-assessed'

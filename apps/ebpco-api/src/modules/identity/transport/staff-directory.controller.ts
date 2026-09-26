@@ -26,6 +26,9 @@ const roleShape = z.string().refine(isStaffRole, {
 
 const createShape = z.object({
   email: z.string().email().max(320),
+  // The officer's own name, shown on every decision they make. Optional only
+  // because accounts made before names were recorded exist.
+  fullName: z.string().trim().min(2).max(200).optional(),
   // An account with no roles is legitimate: created now, assigned when the
   // officer's posting is confirmed. It simply has no staff scope until then.
   roles: z.array(roleShape).max(10).default([]),
@@ -40,8 +43,12 @@ const disableShape = z.object({
 }).strict();
 
 const patchShape = z.object({
-  email: z.string().email().max(320),
-}).strict();
+  email: z.string().email().max(320).optional(),
+  // The name shown on the officer's decisions. Correctable, unlike the address.
+  fullName: z.string().trim().min(2).max(200).optional(),
+}).strict().refine((body) => body.email !== undefined || body.fullName !== undefined, {
+  message: 'Nothing to change: send fullName.',
+});
 
 function parse<T>(shape: z.ZodType<T>, value: unknown): T {
   const result = shape.safeParse(value);
@@ -182,6 +189,7 @@ export class StaffDirectoryController {
     const actor = await actorOf(request, this.directory);
     const result = await this.directory.create({
       email: input.email,
+      ...(input.fullName === undefined ? {} : { fullName: input.fullName }),
       roles: input.roles as StaffRole[],
       actor: actor.accountId,
       actorRole: actor.role,
@@ -198,24 +206,35 @@ export class StaffDirectoryController {
 
   @Patch(':userId')
   @RequireScopes('staff:administer')
-  update(@Param('userId') userId: string, @Body() body: unknown): Record<string, unknown> {
-    // Validated first even though it always refuses: a malformed body should be
-    // told it is malformed, and answering "not available" to a request that was
-    // also wrong hides the second problem until the first is fixed.
-    parse(patchShape, body);
-    // Deliberately not implemented rather than half-implemented. Changing an
-    // officer's address changes the identity they sign in with and the address
-    // a recovery ticket is sent to, so it is an account-takeover step unless it
-    // is paired with re-verification — which does not exist yet. Refused
-    // explicitly so the portal gets an answer it can show, instead of a 404
-    // that reads as "wrong URL".
-    throw new ProblemException(
-      ProblemType.conflict,
-      'Changing a staff address is not available',
-      HttpStatus.CONFLICT,
-      'It moves both the sign-in identity and where a recovery ticket is delivered, so it needs '
-      + 're-verification that has not been built. Disable the account and create the new address instead.',
-    );
+  async update(
+    @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
+  ): Promise<Record<string, unknown>> {
+    // Validated first even though an address change always refuses: a
+    // malformed body should be told it is malformed, and answering "not
+    // available" to a request that was also wrong hides the second problem.
+    const input = parse(patchShape, body);
+    if (input.email !== undefined) {
+      // Deliberately not implemented rather than half-implemented. Changing an
+      // officer's address changes the identity they sign in with and the
+      // address a recovery ticket is sent to, so it is an account-takeover step
+      // unless it is paired with re-verification — which does not exist yet.
+      // Refused explicitly so the portal gets an answer it can show, instead of
+      // a 404 that reads as "wrong URL". Refused whole, name and all, so a
+      // request is never half applied.
+      throw new ProblemException(
+        ProblemType.conflict,
+        'Changing a staff address is not available',
+        HttpStatus.CONFLICT,
+        'It moves both the sign-in identity and where a recovery ticket is delivered, so it needs '
+        + 're-verification that has not been built. Delete the account and create the new address instead.',
+      );
+    }
+    const actor = await actorOf(request, this.directory);
+    const result = await this.directory.rename({
+      id: userId, fullName: input.fullName!, actor: actor.accountId, actorRole: actor.role,
+    });
+    if (!result.ok) refuse(result);
+    return { ...result.user };
   }
 
   @Post(':userId/roles')
@@ -264,6 +283,28 @@ export class StaffDirectoryController {
     });
     if (!result.ok) refuse(result);
     return { ...result.user };
+  }
+
+  /**
+   * A super admin deleting a staff account. See `StaffDirectoryService.remove`
+   * for what "deleted" and "retired" each mean; the answer says which happened.
+   */
+  @Delete(':userId')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('staff:administer')
+  async remove(
+    @Req() request: AuthenticatedRequest, @Param('userId') userId: string,
+  ): Promise<Record<string, unknown>> {
+    const actor = await actorOf(request, this.directory);
+    const result = await this.directory.remove({ id: userId, actor: actor.accountId, actorRole: actor.role });
+    if (!result.ok) refuse(result);
+    return {
+      mode: result.mode,
+      detail: result.mode === 'deleted'
+        ? 'The account was deleted. Its address can be used for a new account.'
+        : 'The account made decisions on record, so it was retired rather than deleted: it can never sign in '
+          + 'again and is gone from the staff list, but its name stays on the decisions it made.',
+    };
   }
 
   @Get(':userId/sessions')

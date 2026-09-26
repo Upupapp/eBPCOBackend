@@ -115,6 +115,7 @@ export const ERASE_IN_ORDER: ReadonlyArray<{ table: string; column: string }> = 
   // member's act, retained under NPC Circular 16-01, and erasing them would
   // remove the evidence of who gave somebody else authority.
   { table: 'staff_permit_access', column: 'account_id' },
+  { table: 'staff_evaluation_stages', column: 'account_id' },
   { table: 'staff_access', column: 'account_id' },
 ];
 

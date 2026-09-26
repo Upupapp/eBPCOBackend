@@ -5,6 +5,7 @@ import { AuditService } from '../../compliance/application/audit.service';
 import { ROLE_SCOPES, StaffRole, requiresMfa } from '../domain/account';
 import { mayRemoveSuperAdmin } from '../domain/super-admin-floor';
 import { normaliseEmail } from './account.repository';
+import { SUPER_ADMIN_ONLY, holdsSuperAdmin } from './super-admin-guard';
 
 /**
  * The staff directory an administrator manages.
@@ -42,11 +43,19 @@ import { normaliseEmail } from './account.repository';
  * role that skips MFA because nobody had enrolled yet — and it is asserted
  * rather than assumed, because it is the kind of property that quietly stops
  * holding when someone "fixes" the null case.
+ *
+ * ── 4. ONLY A SUPER ADMIN ACTS ON A SUPER ADMIN ─────────────────────────
+ *
+ * Granting or removing `super-admin`, and disabling or enabling an account
+ * that holds it. See `super-admin-guard.ts`: without it an administrator is a
+ * super admin one request away, by way of a second account.
  */
 
 export interface StaffUser {
   readonly id: string;
   readonly email: string;
+  /** The officer's own name, as the office entered it. Null when never recorded. */
+  readonly fullName: string | null;
   readonly roles: readonly StaffRole[];
   readonly status: 'Active' | 'Disabled' | 'Pending';
   readonly mfaRequired: boolean;
@@ -66,11 +75,20 @@ export type DirectoryRefusal =
   | { readonly ok: false; readonly reason: 'not-found'; readonly detail: string }
   | { readonly ok: false; readonly reason: 'email-taken'; readonly detail: string }
   | { readonly ok: false; readonly reason: 'self'; readonly detail: string }
-  | { readonly ok: false; readonly reason: 'not-staff'; readonly detail: string };
+  | { readonly ok: false; readonly reason: 'not-staff'; readonly detail: string }
+  | { readonly ok: false; readonly reason: 'not-permitted'; readonly detail: string };
+
+/**
+ * What removing a staff account did: `deleted` — it had never acted, so the
+ * row is gone and its address is free again — or `retired` — its name is on
+ * decisions, so it is kept, disabled for good and hidden from the directory.
+ */
+export type RemovalMode = 'deleted' | 'retired';
 
 interface UserRow {
-  id: string; email: string; disabled_at: Date | null; totp_secret_encrypted: string | null;
-  created_at: Date; password_hash: string; roles: StaffRole[] | null; last_sign_in_at: Date | null;
+  id: string; email: string; full_name: string | null; disabled_at: Date | null;
+  totp_secret_encrypted: string | null; created_at: Date; password_hash: string;
+  roles: StaffRole[] | null; last_sign_in_at: Date | null;
 }
 
 const ALL_ROLES = new Set(Object.keys(ROLE_SCOPES));
@@ -103,6 +121,7 @@ export class StaffDirectoryService {
     return {
       id: row.id,
       email: row.email,
+      fullName: row.full_name,
       roles,
       // Pending, not Active: an account whose officer has never signed in has
       // not been claimed, and showing it as Active would tell an administrator
@@ -117,13 +136,15 @@ export class StaffDirectoryService {
     };
   }
 
+  // A removed account (migration 057) is not in the directory: it can never
+  // sign in again, and it is kept only so its decisions stay attributed.
   private readonly SELECT = `
-    select a.id, a.email, a.disabled_at, a.totp_secret_encrypted, a.created_at, a.password_hash,
-           a.last_sign_in_at,
+    select a.id, a.email, a.full_name, a.disabled_at, a.totp_secret_encrypted, a.created_at,
+           a.password_hash, a.last_sign_in_at,
            array_remove(array_agg(r.role), null) as roles
       from accounts a
       left join account_roles r on r.account_id = a.id
-     where a.kind = 'staff'`;
+     where a.kind = 'staff' and a.removed_at is null`;
 
   async list(filter: { role?: StaffRole; status?: string } = {}): Promise<readonly StaffUser[]> {
     const result = await this.db.query<UserRow>(
@@ -145,8 +166,12 @@ export class StaffDirectoryService {
   }
 
   async create(options: {
-    email: string; roles: readonly StaffRole[]; actor: string; actorRole: string;
+    email: string; fullName?: string; roles: readonly StaffRole[]; actor: string; actorRole: string;
   }): Promise<{ ok: true; user: StaffUser } | DirectoryRefusal> {
+    const fullName = options.fullName?.trim() || null;
+    if (options.roles.includes('super-admin') && !(await holdsSuperAdmin(this.db, options.actor))) {
+      return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
+    }
     const normalised = normaliseEmail(options.email);
     const existing = await this.db.query<{ id: string }>(
       'select id from accounts where email_normalised = $1', [normalised],
@@ -158,9 +183,9 @@ export class StaffDirectoryService {
     const id = randomUUID();
     await this.db.transaction(async (tx) => {
       await tx.query(
-        `insert into accounts (id, kind, email, email_normalised, password_hash, created_at)
-         values ($1, 'staff', $2, $3, $4, $5)`,
-        [id, options.email.trim(), normalised, unusablePasswordHash(), this.clock()],
+        `insert into accounts (id, kind, email, email_normalised, password_hash, full_name, created_at)
+         values ($1, 'staff', $2, $3, $4, $5, $6)`,
+        [id, options.email.trim(), normalised, unusablePasswordHash(), fullName, this.clock()],
       );
       for (const role of options.roles) {
         await tx.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
@@ -172,7 +197,7 @@ export class StaffDirectoryService {
         outcome: 'allowed',
         actorAccountId: options.actor,
         actorRole: options.actorRole,
-        afterState: { email: options.email.trim(), roles: options.roles },
+        afterState: { email: options.email.trim(), fullName, roles: options.roles },
       }, tx);
     });
 
@@ -223,12 +248,16 @@ export class StaffDirectoryService {
     if (before === null) {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
     }
-
     // Demotion is one of the three ways to remove the last super admin, and
-    // they must answer identically — see `survivesWithout`.
+    // they must answer identically — see `survivesWithout`. Asked first: it is
+    // the more fundamental refusal, whoever is asking.
     if (before.roles.includes('super-admin') && !options.roles.includes('super-admin')) {
       const floor = await this.survivesWithout(options.id);
       if (!floor.ok) return floor;
+    }
+    if ((before.roles.includes('super-admin') || options.roles.includes('super-admin'))
+      && !(await holdsSuperAdmin(this.db, options.actor))) {
+      return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
     }
 
     await this.db.transaction(async (tx) => {
@@ -270,12 +299,14 @@ export class StaffDirectoryService {
     if (before === null) {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
     }
-
     // Disabling is the second way. ENABLING is not: it can only add an
     // administrator, never remove the last one.
     if (options.disabled) {
       const floor = await this.survivesWithout(options.id);
       if (!floor.ok) return floor;
+    }
+    if (before.roles.includes('super-admin') && !(await holdsSuperAdmin(this.db, options.actor))) {
+      return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
     }
 
     await this.db.transaction(async (tx) => {
@@ -305,6 +336,127 @@ export class StaffDirectoryService {
     return user === null
       ? { ok: false, reason: 'not-found', detail: 'No such staff account.' }
       : { ok: true, user };
+  }
+
+  /**
+   * Correcting the name an officer's decisions are shown under.
+   *
+   * Unlike the address it moves no credential — nobody signs in with a name or
+   * receives a recovery ticket at one — so it needs none of the re-verification
+   * that keeps the address fixed. A super admin's name is still the super
+   * admin's to change (rule 4), except their own.
+   */
+  async rename(options: {
+    id: string; fullName: string; actor: string; actorRole: string;
+  }): Promise<{ ok: true; user: StaffUser } | DirectoryRefusal> {
+    const before = await this.byId(options.id);
+    if (before === null) {
+      return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+    if (before.roles.includes('super-admin') && options.id !== options.actor
+      && !(await holdsSuperAdmin(this.db, options.actor))) {
+      return { ok: false, reason: 'not-permitted', detail: SUPER_ADMIN_ONLY };
+    }
+    const fullName = options.fullName.trim();
+    if (fullName === before.fullName) return { ok: true, user: before };
+
+    await this.db.transaction(async (tx) => {
+      await tx.query(
+        'update accounts set full_name = $1, updated_at = now() where id = $2', [fullName, options.id]);
+      await this.audit.append({
+        action: 'staff.account.renamed',
+        subjectType: 'account',
+        subjectId: options.id,
+        outcome: 'allowed',
+        actorAccountId: options.actor,
+        actorRole: options.actorRole,
+        beforeState: { fullName: before.fullName },
+        afterState: { fullName },
+      }, tx);
+    });
+
+    const user = await this.byId(options.id);
+    return user === null
+      ? { ok: false, reason: 'not-found', detail: 'No such staff account.' }
+      : { ok: true, user };
+  }
+
+  /**
+   * A super admin removing a staff account from the directory (owner request,
+   * 2026-09-26).
+   *
+   * The same two refusals as disabling — not yourself, not the last super
+   * admin — plus one more: only a super admin may do it. An administrator can
+   * already disable an account; removing it for good is a step further, and
+   * the owner gave it to the super admin alone.
+   *
+   * An account that never acted (no audit entry of its own) is deleted, which
+   * also frees its address for a correctly spelled replacement. One that did
+   * act is RETIRED instead: its name is on sign-ins, evaluations or decisions,
+   * and deleting it would leave those attributed to nobody — the reason
+   * erasure refuses staff accounts. A foreign key the account turns out to be
+   * named on is treated the same way: the delete is rolled back to a savepoint
+   * and the account retired.
+   */
+  async remove(options: {
+    id: string; actor: string; actorRole: string;
+  }): Promise<{ ok: true; mode: RemovalMode } | DirectoryRefusal> {
+    if (options.id === options.actor) {
+      return { ok: false, reason: 'self', detail: 'You cannot delete your own account.' };
+    }
+    if (!(await holdsSuperAdmin(this.db, options.actor))) {
+      return { ok: false, reason: 'not-permitted', detail: 'Only a super admin can delete a staff account.' };
+    }
+    const before = await this.byId(options.id);
+    if (before === null) {
+      return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
+    }
+    // Removal is the third way to lose the last super admin — see
+    // `survivesWithout`.
+    if (before.roles.includes('super-admin')) {
+      const floor = await this.survivesWithout(options.id);
+      if (!floor.ok) return floor;
+    }
+
+    const acted = await this.db.query<{ acted: boolean }>(
+      'select exists (select 1 from audit_events where actor_account_id = $1) as acted', [options.id]);
+
+    const mode = await this.db.transaction<RemovalMode>(async (tx) => {
+      let outcome: RemovalMode = 'retired';
+      if (acted.rows[0]?.acted !== true) {
+        await tx.query('savepoint remove_staff_account');
+        try {
+          await tx.query('delete from accounts where id = $1', [options.id]);
+          outcome = 'deleted';
+        } catch (error) {
+          // 23503: something still names this account. Keep it, retired.
+          if ((error as { code?: string }).code !== '23503') throw error;
+          await tx.query('rollback to savepoint remove_staff_account');
+        }
+      }
+      if (outcome === 'retired') {
+        const now = this.clock();
+        await tx.query(
+          `update accounts
+              set disabled_at = coalesce(disabled_at, $2), removed_at = $2, removed_by = $3, updated_at = now()
+            where id = $1`,
+          [options.id, now, options.actor],
+        );
+      }
+      await this.audit.append({
+        action: 'staff.account.removed',
+        subjectType: 'account',
+        subjectId: options.id,
+        outcome: 'allowed',
+        actorAccountId: options.actor,
+        actorRole: options.actorRole,
+        beforeState: { email: before.email, fullName: before.fullName, roles: before.roles, status: before.status },
+        afterState: { mode: outcome },
+      }, tx);
+      return outcome;
+    });
+
+    return { ok: true, mode };
   }
 
   /**

@@ -58,6 +58,11 @@ beforeEach(async () => {
   await db.query(
     `insert into staff_permit_access (account_id, permit_type, granted_by)
      select $1, permit_type, $1 from permit_types`, [OFFICER_ACCOUNT]);
+  // Every evaluation stage too (migration 057): this fixture stands for a fully
+  // assigned officer, the one these tests were written against.
+  await db.query(
+    `insert into staff_evaluation_stages (account_id, stage, granted_by)
+     select $1, stage, $1 from unnest(array['Initial','Zoning','Fire Safety','OBO','Final Approval']) as stage`, [OFFICER_ACCOUNT]);
   await db.query(
     `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
                                lifecycle_status, submitted_at, created_by)
