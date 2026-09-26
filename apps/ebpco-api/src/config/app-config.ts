@@ -103,6 +103,20 @@ const schema = z
     BODY_LIMIT_BYTES: intFromEnv(1_024, 52_428_800, 1_048_576),
     RATE_LIMIT_MAX: intFromEnv(1, 100_000, 300),
 
+    // The routes that carry a file (`@UploadRoute()`), and only those. The
+    // 1MB above is right for JSON and was left on the upload routes too, so
+    // the real ceiling on an attachment was ~750KB while the documents
+    // service's own per-file cap is 20MB (content-inspection MAX_BYTES) — a
+    // phone photo or a scanned plan was refused with a bare 413 the phone
+    // could not even read, as the connection closed mid-send.
+    //
+    // The default fits that 20MB cap: base64 is 4/3 of it (~26.7MB) plus the
+    // JSON envelope. The time budget is separate for the same reason — it runs
+    // from the first byte, so it includes receiving the file, and a large file
+    // over a phone's mobile data takes minutes, not the 20s a JSON call gets.
+    UPLOAD_BODY_LIMIT_BYTES: intFromEnv(1_024, 67_108_864, 29_360_128),
+    UPLOAD_TIMEOUT_MS: intFromEnv(1_000, 900_000, 300_000),
+
     // Connection pool. Fixed at 10 in code until now, which is a number that
     // was right for nothing in particular: too many for a small managed
     // Postgres shared by several replicas, too few for one instance under load.

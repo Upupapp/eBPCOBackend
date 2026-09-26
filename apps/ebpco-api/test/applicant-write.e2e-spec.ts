@@ -826,18 +826,15 @@ describe('answering a Letter of Instruction', () => {
 
 describe('the size of a real building-permit attachment', () => {
   /**
-   * Measured because the mobile lane is about to send 24 attachments on one
-   * filing, and the numbers here are not the ones the request schema suggests.
+   * Measured because the mobile lane sends 24 attachments on one filing.
    *
-   * `contentBase64` is capped at 40,000,000 characters by the Zod shape, which
-   * reads like a 30MB file is acceptable. It is not: the Fastify adapter's
-   * `bodyLimit` is `BODY_LIMIT_BYTES`, which defaults to 1MB and is 1MB in
-   * `.env.example`. Base64 inflates by about a third, so the real ceiling on a
-   * FILE is roughly 750KB -- and a scanned building plan is routinely larger.
-   *
-   * The gap matters because of WHERE it is enforced. The adapter refuses the
-   * body before any handler runs, so an applicant does not get the upload
-   * route's careful problem document; they get a bare 413.
+   * The upload routes used to share the JSON routes' 1MB `BODY_LIMIT_BYTES`.
+   * Base64 inflates by about a third, so the real ceiling on a FILE was
+   * roughly 750KB -- and a scanned building plan, or any photo off a phone, is
+   * routinely larger. Caught live, 2026-09-26: a citizen's phone was refused
+   * with a bare 413 it could not even read, the connection closing mid-send.
+   * Upload routes now have `UPLOAD_BODY_LIMIT_BYTES`, sized for the documents
+   * service's own 20MB per-file cap.
    */
   const pdfOf = (kilobytes: number): Buffer => Buffer.concat([
     Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\n'),
@@ -853,19 +850,26 @@ describe('the size of a real building-permit attachment', () => {
     expect(response.statusCode).toBe(201);
   });
 
-  it('refuses a file whose BASE64 exceeds the body limit, before the handler', async () => {
-    // ~900KB of PDF is ~1.2MB of base64, over the 1MB default. The refusal
-    // comes from the adapter, so it is not the upload route's problem document
-    // -- worth knowing before a client tries to parse it as one.
+  it('accepts a scanned plan far bigger than a JSON body may be', async () => {
+    // ~3MB of PDF is ~4MB of base64: refused 413 before the upload routes got
+    // their own limit.
     const response = await post('/documents', maria, {
-      fileName: 'plan.pdf', label: 'Plan', contentBase64: pdfOf(900).toString('base64'),
+      fileName: 'scanned-plan.pdf', label: 'Plan', contentBase64: pdfOf(3 * 1024).toString('base64'),
+    });
+
+    expect(response.statusCode).toBe(201);
+    expect(await count(
+      "select count(*) as n from documents where file_name = 'scanned-plan.pdf' and byte_size > 3000000",
+    )).toBe(1);
+  });
+
+  it('still refuses the same size on a route that carries no file', async () => {
+    // Raising what a file may weigh must not raise what any request may.
+    const response = await post('/applications', maria, {
+      ...submission(), padding: 'A'.repeat(1_200_000),
     });
 
     expect(response.statusCode).toBe(413);
-    // Nothing was stored: the body never reached the handler.
-    expect(await count(
-      "select count(*) as n from documents where file_name = 'plan.pdf' and byte_size > 900000",
-    )).toBe(0);
   });
 });
 
@@ -1207,17 +1211,19 @@ describe('the limits a client must not exceed', () => {
     expect(response.statusCode).toBe(200);
   });
 
-  it('derives the file ceiling from the body limit rather than stating a constant', async () => {
+  it('derives the file ceiling from the upload body limit rather than stating a constant', async () => {
     // The citizen web lane had hard-coded 750,000 -- correct for a 1MB body
     // limit and wrong the moment it is raised, because a constant on the client
     // refuses files the server would accept. This moves with the config.
     const body = (await app.inject({ method: 'GET', url: '/limits' }))
       .json<{ upload: { maxRequestBytes: number; maxFileBytes: number; encoding: string } }>();
 
-    expect(body.upload.maxRequestBytes).toBe(1_048_576);
-    // A third smaller than the body limit, because base64 inflates by a third.
+    // The upload routes' limit, not the 1MB every other route keeps.
+    expect(body.upload.maxRequestBytes).toBe(29_360_128);
+    // A third smaller than the body limit, because base64 inflates by a third
+    // -- and never more than the documents service takes per file.
     expect(body.upload.maxFileBytes).toBeLessThan(body.upload.maxRequestBytes);
-    expect(body.upload.maxFileBytes).toBeGreaterThan(700_000);
+    expect(body.upload.maxFileBytes).toBe(20 * 1024 * 1024);
     expect(body.upload.encoding).toBe('base64-in-json');
   });
 

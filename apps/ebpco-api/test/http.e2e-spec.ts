@@ -173,6 +173,44 @@ describe('error shape', () => {
       await small.close();
     }
   });
+
+  it('lets a route that carries a file take a body the JSON limit refuses', async () => {
+    // The JSON limit used to apply to uploads as well, so a phone photo or a
+    // scanned plan got a bare 413 — which a phone still sending when it came
+    // never even saw, only a dropped connection. Upload routes have their own.
+    const { app: sized } = await build(baseEnv({ BODY_LIMIT_BYTES: '1024', UPLOAD_BODY_LIMIT_BYTES: '16384' }));
+    const body = { blob: 'x'.repeat(4096) };
+    try {
+      // Past the adapter on every upload route: refused for having no token,
+      // not for its size.
+      for (const [method, url] of [
+        ['POST', '/documents'],
+        ['POST', '/applications/00000000-0000-4000-8000-000000000000/documents/00000000-0000-4000-8000-000000000001/resubmit'],
+        ['POST', '/staff/applications/00000000-0000-4000-8000-000000000000/documents/00000000-0000-4000-8000-000000000001/resubmit'],
+        ['PUT', '/me/photo'],
+      ] as const) {
+        const response = await sized.inject({ method, url, payload: body });
+        expect({ url, status: response.statusCode }).toEqual({ url, status: 401 });
+      }
+
+      // A JSON route keeps the small limit.
+      const json = await sized.inject({ method: 'POST', url: '/applications', payload: body });
+      expect(json.statusCode).toBe(413);
+    } finally {
+      await sized.close();
+    }
+  });
+
+  it('still refuses an upload over the upload limit, before the handler', async () => {
+    const { app: sized } = await build(baseEnv({ BODY_LIMIT_BYTES: '1024', UPLOAD_BODY_LIMIT_BYTES: '16384' }));
+    try {
+      const response = await sized.inject({ method: 'POST', url: '/documents', payload: { blob: 'x'.repeat(32_768) } });
+
+      expect(response.statusCode).toBe(413);
+    } finally {
+      await sized.close();
+    }
+  });
 });
 
 describe('correlation', () => {

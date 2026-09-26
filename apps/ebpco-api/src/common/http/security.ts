@@ -12,6 +12,7 @@ import {
 } from '../correlation/correlation';
 import { StructuredLogger } from '../logging/logger';
 import { PROBLEM_CONTENT_TYPE, ProblemType } from '../problem/problem';
+import { isUploadRoute } from './upload-route';
 
 /**
  * The baseline every request passes through, applied to the Fastify instance
@@ -121,10 +122,19 @@ export async function applySecurity(
     runWithCorrelationId(correlationId, done, request.ip);
   });
 
+  // A route that carries a file (`@UploadRoute()`) gets the upload body limit;
+  // every other route keeps the adapter's JSON-sized one. Set as each route is
+  // registered — Nest registers them after this runs.
+  app.addHook('onRoute', (route) => {
+    if (isUploadRoute(route.config)) route.bodyLimit = config.UPLOAD_BODY_LIMIT_BYTES;
+  });
+
   // A request that has not finished within the configured budget is abandoned
   // with a well-formed error rather than being allowed to hold a connection
-  // open indefinitely.
+  // open indefinitely. The budget runs from the first byte, so an upload
+  // route's includes receiving the file — its own, longer one.
   app.addHook('onRequest', (request: FastifyRequest, reply: FastifyReply, done: () => void) => {
+    const budget = isUploadRoute(request.routeOptions.config) ? config.UPLOAD_TIMEOUT_MS : config.REQUEST_TIMEOUT_MS;
     const timer = setTimeout(() => {
       if (!reply.sent) {
         void reply
@@ -137,7 +147,7 @@ export async function applySecurity(
             instance: request.url,
           });
       }
-    }, config.REQUEST_TIMEOUT_MS);
+    }, budget);
     timer.unref();
     void reply.raw.on('finish', () => clearTimeout(timer));
     done();

@@ -2,6 +2,7 @@ import { Controller, Get, Inject } from '@nestjs/common';
 
 import { CONFIG, type AppConfig } from '../../../config/app-config';
 import { Public } from '../../identity/transport/guards/public.decorator';
+import { MAX_BYTES } from '../domain/content-inspection';
 
 /**
  * What a client must not exceed, read from the server's own configuration.
@@ -30,14 +31,17 @@ export class LimitsController {
   @Public()
   @Get()
   limits(): Record<string, unknown> {
-    const bodyLimit = this.config.BODY_LIMIT_BYTES;
+    // The upload routes' own limit (`@UploadRoute()`), not the JSON routes'.
+    const bodyLimit = this.config.UPLOAD_BODY_LIMIT_BYTES;
 
     return {
       upload: {
         /**
-         * The largest request body the server will read, in bytes. Anything
-         * over it is refused by the HTTP adapter BEFORE any handler runs, so
-         * the answer is a bare 413 and NOT an RFC 9457 problem document.
+         * The largest request body an upload route will read, in bytes.
+         * Anything over it is refused by the HTTP adapter BEFORE any handler
+         * runs, so the answer is a bare 413 and NOT an RFC 9457 problem
+         * document — and a client still sending when it comes may never see
+         * it, only a dropped connection.
          */
         maxRequestBytes: bodyLimit,
         /**
@@ -51,10 +55,12 @@ export class LimitsController {
          * that computes this itself has to know the envelope, and a client that
          * guesses it will guess low every time.
          *
-         * Derived, never stored. It moves with BODY_LIMIT_BYTES, which is the
-         * whole point of serving it.
+         * Derived, never stored. It moves with UPLOAD_BODY_LIMIT_BYTES, which
+         * is the whole point of serving it — and it never promises more than
+         * the documents service accepts per file (content-inspection
+         * MAX_BYTES), whatever the body limit would allow.
          */
-        maxFileBytes: Math.max(0, Math.floor((bodyLimit - ENVELOPE_BYTES) * 3 / 4)),
+        maxFileBytes: Math.min(MAX_BYTES, Math.max(0, Math.floor((bodyLimit - ENVELOPE_BYTES) * 3 / 4))),
         /**
          * How the file is carried. Named so a client is not left to infer it
          * from an example: this service takes base64 in a JSON body, not

@@ -9,6 +9,7 @@ import { Caller } from '../../applications/domain/application';
 import { DocumentService } from '../application/document.service';
 import { SQL_CLIENT } from '../../../persistence/persistence.module';
 import { SqlClient } from '../../../persistence/sql-client';
+import { UploadRoute } from '../../../common/http/upload-route';
 
 /**
  * Uploading, and reading back, an applicant's documents.
@@ -139,6 +140,7 @@ export class DocumentsController {
   @Post()
   @HttpCode(HttpStatus.CREATED)
   @RequireScopes('documents:write')
+  @UploadRoute()
   async upload(
     @Req() request: AuthenticatedRequest,
     @Body() body: unknown,

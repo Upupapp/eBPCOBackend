@@ -18,6 +18,7 @@ import { AccountRecoveryMailer } from '../application/account-recovery-mailer';
 import { RegistrationVerificationService } from '../application/registration-verification.service';
 import { ContactVerificationMailer } from '../application/contact-verification-mailer';
 import { StructuredLogger } from '../../../common/logging/logger';
+import { UploadRoute } from '../../../common/http/upload-route';
 import { CASTILLA_BARANGAYS, CASTILLA_CITY, CASTILLA_PROVINCE } from '../../businesses/castilla-barangays';
 
 /**
@@ -706,6 +707,7 @@ export class MeController {
   @Put('photo')
   @HttpCode(HttpStatus.OK)
   @RequireScopes('profile:write')
+  @UploadRoute()
   async uploadPhoto(@Req() request: AuthenticatedRequest, @Body() body: unknown): Promise<Record<string, unknown>> {
     const caller = request.caller;
     if (caller === undefined) throw new ProblemException(ProblemType.unauthorized, 'Authentication is required', 401);

@@ -14,6 +14,7 @@ import { PaymentService } from '../../payments/application/payment.service';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
 import { StructuredLogger } from '../../../common/logging/logger';
+import { UploadRoute } from '../../../common/http/upload-route';
 import { refusalToProblem } from './refusal-to-problem';
 
 /**
@@ -433,6 +434,7 @@ export class ApplicantWriteController {
   @Post('applications/:applicationId/documents/:documentId/resubmit')
   @HttpCode(HttpStatus.CREATED)
   @RequireScopes('documents:write')
+  @UploadRoute()
   async resubmitDocument(
     @Req() request: AuthenticatedRequest,
     @Param('applicationId') applicationId: string,

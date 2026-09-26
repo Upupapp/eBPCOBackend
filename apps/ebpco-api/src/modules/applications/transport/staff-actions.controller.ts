@@ -14,6 +14,7 @@ import { PaymentService } from '../../payments/application/payment.service';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
 import { StructuredLogger } from '../../../common/logging/logger';
+import { UploadRoute } from '../../../common/http/upload-route';
 
 /**
  * The things an officer DOES to an application, as opposed to reading it.
@@ -271,6 +272,7 @@ export class StaffActionsController {
   @Post('documents/:documentId/resubmit')
   @HttpCode(HttpStatus.CREATED)
   @RequireScopes('documents:write')
+  @UploadRoute()
   async resubmitDocument(
     @Req() request: AuthenticatedRequest,
     @Param('applicationId') applicationId: string,
