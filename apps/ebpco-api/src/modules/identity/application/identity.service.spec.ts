@@ -6,18 +6,21 @@ import { InMemorySessionRepository } from '../infrastructure/in-memory-session.r
 import { LocalBreachedPasswordScreen } from '../infrastructure/breached-password-screen';
 import { Account, StaffRole } from '../domain/account';
 import { IdentityService } from './identity.service';
+import { mfaExemptTestAccount } from '../domain/test-accounts';
 import { TokenService } from './token.service';
 
 const GOOD_PASSWORD = 'The quiet Barangay hall, on Tuesday at 3pm!';
 
-function build() {
+function build(mfaExempt?: (account: Account) => boolean) {
   const accounts = new InMemoryAccountRepository();
   const sessions = new InMemorySessionRepository();
   const hasher = new PasswordHasher(TEST_SCRYPT_COST);
   const tokens = new TokenService({ signingKey: new Uint8Array(32).fill(3), sessions });
   const policy = new PasswordPolicy(new LocalBreachedPasswordScreen());
   const resetTickets = new InMemoryPasswordResetRepository();
-  const identity = new IdentityService(accounts, tokens, hasher, policy, resetTickets);
+  const identity = new IdentityService(
+    accounts, tokens, hasher, policy, resetTickets, undefined, undefined, undefined, undefined, mfaExempt,
+  );
   return { identity, accounts, sessions, tokens, hasher, resetTickets };
 }
 
@@ -26,11 +29,12 @@ async function seedStaff(
   hasher: PasswordHasher,
   roles: StaffRole[],
   totpSecret: string | null = null,
+  email = 'officer@lgu.gov.ph',
 ): Promise<Account> {
   const account: Account = {
     id: 'staff-1',
     kind: 'staff',
-    email: 'officer@lgu.gov.ph',
+    email,
     passwordHash: await hasher.hash(GOOD_PASSWORD),
     roles,
     emailVerifiedAt: new Date(),
@@ -200,6 +204,41 @@ describe('scopes', () => {
     expect(outcome.tokens.scopes).toContain('staff:evaluate');
     expect(outcome.tokens.scopes).not.toContain('staff:verify-payment');
     expect(outcome.tokens.scopes).not.toContain('staff:approve');
+  });
+});
+
+describe('the test-account exemption', () => {
+  const exempt = (account: Account) => mfaExemptTestAccount(account);
+
+  it('signs a .test officer in on the password alone when switched on', async () => {
+    const { identity, accounts, hasher } = build(exempt);
+    await seedStaff(accounts, hasher, ['cashier'], '123456', 'grace.bautista@castilla.test');
+
+    expect((await identity.authenticate('grace.bautista@castilla.test', GOOD_PASSWORD)).ok).toBe(true);
+  });
+
+  it('still asks a real address for its code', async () => {
+    const { identity, accounts, hasher } = build(exempt);
+    await seedStaff(accounts, hasher, ['cashier'], '123456');
+
+    expect(await identity.authenticate('officer@lgu.gov.ph', GOOD_PASSWORD))
+      .toEqual({ ok: false, reason: 'mfa-required' });
+  });
+
+  it('still asks a .test super admin for its code', async () => {
+    const { identity, accounts, hasher } = build(exempt);
+    await seedStaff(accounts, hasher, ['super-admin'], '123456', 'boss@castilla.test');
+
+    expect(await identity.authenticate('boss@castilla.test', GOOD_PASSWORD))
+      .toEqual({ ok: false, reason: 'mfa-required' });
+  });
+
+  it('exempts nobody when switched off, which is the default', async () => {
+    const { identity, accounts, hasher } = build();
+    await seedStaff(accounts, hasher, ['cashier'], '123456', 'grace.bautista@castilla.test');
+
+    expect(await identity.authenticate('grace.bautista@castilla.test', GOOD_PASSWORD))
+      .toEqual({ ok: false, reason: 'mfa-required' });
   });
 });
 

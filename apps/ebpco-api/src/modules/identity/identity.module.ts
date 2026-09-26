@@ -5,6 +5,7 @@ import { AppConfig, CONFIG } from '../../config/app-config';
 import { StructuredLogger } from '../../common/logging/logger';
 import { ACCOUNT_REPOSITORY, AccountRepository } from './application/account.repository';
 import { IdentityService } from './application/identity.service';
+import { mfaExemptTestAccount } from './domain/test-accounts';
 import { SESSION_REPOSITORY, SessionRepository } from './application/session.repository';
 import { TokenService } from './application/token.service';
 import { PasswordHasher } from './domain/password-hasher';
@@ -225,7 +226,7 @@ import { ErasureService } from '../compliance/application/erasure.service';
     {
       provide: IdentityService,
       inject: [ACCOUNT_REPOSITORY, TokenService, PasswordHasher, PasswordPolicy,
-        PASSWORD_RESET_REPOSITORY, TotpService, SQL_CLIENT, StructuredLogger],
+        PASSWORD_RESET_REPOSITORY, TotpService, SQL_CLIENT, StructuredLogger, CONFIG],
       useFactory: (
         accounts: AccountRepository,
         tokens: TokenService,
@@ -235,6 +236,7 @@ import { ErasureService } from '../compliance/application/erasure.service';
         totp: TotpService,
         db: SqlClient,
         logger: StructuredLogger,
+        config: AppConfig,
       ) => new IdentityService(
         accounts, tokens, hasher, policy, resetTickets, () => new Date(), totp,
         new AuditService(db),
@@ -244,6 +246,7 @@ import { ErasureService } from '../compliance/application/erasure.service';
         (action, cause) => logger.error('audit entry could not be written', {
           action, reason: cause instanceof Error ? cause.message : String(cause),
         }),
+        (account) => config.MFA_EXEMPT_TEST_ACCOUNTS && mfaExemptTestAccount(account),
       ),
     },
 

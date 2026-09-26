@@ -1,4 +1,7 @@
 import { Mailer, OutboundEmail } from './mailer';
+import { isReservedTestAddress } from '../domain/test-accounts';
+
+export { isReservedTestAddress };
 
 /**
  * Mail for TEST accounts, delivered to one real inbox.
@@ -32,12 +35,6 @@ export class TestInboxMailer implements Mailer {
       ...(message.html === undefined ? {} : { html: `<p><em>${escapeHtml(note)}</em></p>${message.html}` }),
     });
   }
-}
-
-/** An address on the reserved `.test` top-level domain. */
-export function isReservedTestAddress(address: string): boolean {
-  const at = address.lastIndexOf('@');
-  return at > 0 && /(^|\.)test$/i.test(address.slice(at + 1).trim());
 }
 
 function escapeHtml(text: string): string {

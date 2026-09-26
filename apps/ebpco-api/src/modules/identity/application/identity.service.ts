@@ -103,6 +103,13 @@ export class IdentityService {
      */
     private readonly audit?: AuditService,
     private readonly onAuditFailure: (action: string, cause: unknown) => void = () => undefined,
+    /**
+     * Accounts sign-in does not ask for a second factor even though their role
+     * requires one: test accounts, when the operator has switched that on
+     * (`MFA_EXEMPT_TEST_ACCOUNTS` — see `mfaExemptTestAccount`). Nobody, by
+     * default.
+     */
+    private readonly mfaExempt: (account: Account) => boolean = () => false,
   ) {}
 
   async authenticate(email: string, password: string, totp?: string): Promise<AuthenticationOutcome> {
@@ -130,7 +137,7 @@ export class IdentityService {
       return { ok: false, reason: 'rejected' };
     }
 
-    if (requiresMfa(account)) {
+    if (requiresMfa(account) && !this.mfaExempt(account)) {
       if (totp === undefined) return { ok: false, reason: 'mfa-required' };
       if (!await this.verifyTotp(account, totp)) {
         // Named, unlike the refusals above: reaching here requires the correct

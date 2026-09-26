@@ -292,6 +292,13 @@ const schema = z
      * was for. Every other address is untouched either way.
      */
     MAIL_TEST_INBOX: z.string().email().optional(),
+    /**
+     * Sign-in stops asking TEST accounts — staff on the reserved `.test`
+     * domain, never a super admin — for an authenticator code (see
+     * domain/test-accounts.ts). For testing positions quickly; refused in
+     * production, where every account the role requires it of keeps it.
+     */
+    MFA_EXEMPT_TEST_ACCOUNTS: boolFromEnv(false),
 
     /**
      * Where the admin portal is reachable, for building a link a browser can
@@ -412,6 +419,14 @@ const schema = z
           });
         }
       }
+    }
+
+    if (config.EBPCO_ENVIRONMENT === 'production' && config.MFA_EXEMPT_TEST_ACCOUNTS) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['MFA_EXEMPT_TEST_ACCOUNTS'],
+        message: 'must be false in production — every account whose role requires a second factor keeps it',
+      });
     }
 
     if (config.EBPCO_ENVIRONMENT === 'production' && config.DOCS_ENABLED) {

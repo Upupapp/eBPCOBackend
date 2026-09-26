@@ -37,6 +37,13 @@ async function main(): Promise<void> {
   // The object store half is conditional now that the S3 adapter exists --
   // warning about local disk while documents go to Linode would be the same
   // kind of wrong in the other direction.
+  if (config.MFA_EXEMPT_TEST_ACCOUNTS) {
+    logger.warn('test accounts sign in without an authenticator code', {
+      accounts: 'staff on reserved .test addresses, except super admins',
+      consequence: 'those accounts are protected by their password alone',
+    });
+  }
+
   if (config.EBPCO_ENVIRONMENT !== 'development') {
     logger.warn('uploads are scanned by a stub, not by a malware scanner', {
       malwareScanner: 'local-signature-stub',
