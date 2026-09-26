@@ -7,6 +7,7 @@ import { MFA_REQUIRED_ROLES } from '../src/modules/identity/domain/account';
 import { SecretBox } from '../src/modules/identity/domain/secret-box';
 import { TotpService } from '../src/modules/identity/application/totp.service';
 import { codeFor, stepAt } from '../src/modules/identity/domain/totp';
+import { AuditService } from '../src/modules/compliance/application/audit.service';
 
 /**
  * Creates the first super admin.
@@ -129,11 +130,19 @@ async function main(): Promise<number> {
       // On the security stream, like every other access event. The actor is the
       // seed itself: nobody was signed in, and naming a person would put a
       // falsehood in an append-only chain.
-      await tx.query(
-        `insert into audit_events (actor_account_id, actor_role, action, subject_type,
-                                   subject_id, outcome, after_state, entry_hash)
-         values (null, 'seed', 'access.approved', 'account', $1, 'allowed', $2, 'seed')`,
-        [id, JSON.stringify({ role: ROLE, level: 'view-edit', seeded: true })]);
+      // Through AuditService, so the entry is sequenced and hash-chained like
+      // every other. This used to insert the row directly (no sequence, hash
+      // 'seed'), outside the chain — which the daily chain verification then
+      // reports as a break the first time it runs.
+      await new AuditService(tx).append({
+        actorAccountId: null,
+        actorRole: 'seed',
+        action: 'access.approved',
+        subjectType: 'account',
+        subjectId: id,
+        outcome: 'allowed',
+        afterState: { role: ROLE, level: 'view-edit', seeded: true },
+      }, tx);
     });
 
     // The second factor, completed here because nothing else can complete it.
