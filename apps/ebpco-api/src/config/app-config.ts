@@ -285,6 +285,13 @@ const schema = z
     SMTP_USER: z.string().optional().transform((v) => v ?? ''),
     SMTP_PASS: z.string().optional().transform((v) => v ?? ''),
     MAIL_FROM: z.string().optional().transform((v) => v ?? 'E-BPCO <no-reply@ebpco.local>'),
+    /**
+     * Where mail for TEST accounts goes — accounts on the reserved `.test`
+     * domain, which no real inbox can have (see test-inbox-mailer.ts). Unset,
+     * such mail goes nowhere; set, it is delivered here, marked with who it
+     * was for. Every other address is untouched either way.
+     */
+    MAIL_TEST_INBOX: z.string().email().optional(),
 
     /**
      * Where the admin portal is reachable, for building a link a browser can

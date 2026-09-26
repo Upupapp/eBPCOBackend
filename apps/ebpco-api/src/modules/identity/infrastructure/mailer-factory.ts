@@ -3,6 +3,7 @@ import { StructuredLogger } from '../../../common/logging/logger';
 import { ConsoleMailer } from './console-mailer';
 import { Mailer } from './mailer';
 import { SmtpMailer } from './smtp-mailer';
+import { TestInboxMailer } from './test-inbox-mailer';
 
 /**
  * Which mailer the service runs on.
@@ -13,6 +14,13 @@ import { SmtpMailer } from './smtp-mailer';
  * said `smtp` would pass the whole suite otherwise.
  */
 export function mailerFor(config: AppConfig, logger: StructuredLogger): Mailer {
+  const mailer = deliveringMailerFor(config, logger);
+  // Mail for reserved `.test` addresses (the owner's test accounts) goes to
+  // one real inbox when one is configured; nothing else is ever redirected.
+  return config.MAIL_TEST_INBOX === undefined ? mailer : new TestInboxMailer(mailer, config.MAIL_TEST_INBOX);
+}
+
+function deliveringMailerFor(config: AppConfig, logger: StructuredLogger): Mailer {
   if (config.MAIL_DRIVER === 'smtp') {
     return new SmtpMailer({
       host: config.SMTP_HOST,
