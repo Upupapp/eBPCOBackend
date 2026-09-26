@@ -3,6 +3,18 @@ import { CalendarRepository } from '../../compliance/application/calendar.reposi
 import { Classification, computePledge } from '../../compliance/domain/pledge-clock';
 import { parseCentavos } from '../../payments/domain/money';
 import { ApplicationRecord, toApplicantView } from './applicant-view';
+import { RenewalRefusal, resolveRenewal } from './resolve-renewal';
+
+/**
+ * What the wizard is told about the permit number typed into a Renewal or
+ * Amendment, before it lets the citizen continue. See `renewalCheck()`.
+ */
+export type RenewalCheck =
+  | {
+      valid: true;
+      permit: { permitNumber: string; permitType: string; businessName: string | null; issuedDate: string };
+    }
+  | { valid: false; reason: RenewalRefusal; message: string };
 
 /**
  * An applicant's own applications, and nothing else's.
@@ -505,6 +517,73 @@ export class ApplicantQueryService {
       evaluationStage: null,
       renewsPermitNumber: (row.renews_permit_number as string | null) ?? null,
       priorPermitClaim: (row.prior_permit_claim as string | null) ?? null,
+    };
+  }
+  /**
+   * Whether `permitNumber` may be renewed or amended on a filing for this
+   * business and permit type — asked by the wizard at the step where the
+   * number is typed, so a wrong one is caught under the field instead of at
+   * the final submit.
+   *
+   * The SAME rule filing enforces (`resolveRenewal()`), not a second copy of
+   * it: a check that could say yes to a number the filing then refuses, or
+   * the reverse, is worse than no check. Filing still re-checks — this is a
+   * courtesy to the citizen, never the gate.
+   *
+   * The wording is the citizen's, where `resolveRenewal()`'s own detail is
+   * written to serve staff walk-in filing too. "Not found" still does not
+   * distinguish "no such permit" from "someone else's" — see there.
+   */
+  async renewalCheck(accountId: string, query: {
+    permitNumber: string; permitType: string | null; businessId: string | null;
+  }): Promise<RenewalCheck | null> {
+    const applicant = await this.db.query<{ id: string }>(
+      'select id from applicants where account_id = $1', [accountId],
+    );
+    const applicantId = applicant.rows[0]?.id;
+    if (applicantId === undefined) return null;
+
+    const permitNumber = query.permitNumber.trim().toUpperCase();
+    const resolved = await resolveRenewal(this.db, {
+      action: 'Renewal', permitNumber, priorPermitClaim: null, applicantId,
+      businessId: query.businessId, permitType: query.permitType,
+    });
+
+    if (!resolved.ok) {
+      const message = resolved.reason === 'permit-not-found'
+        ? `Permit number "${permitNumber}" does not exist under your account. Check the number printed on `
+          + 'your permit. If it was issued on paper before eBPCO, use the paper permit option instead.'
+        : resolved.reason === 'permit-business-mismatch'
+          ? `Permit number "${permitNumber}" was issued to a different business. Select the business it was `
+            + 'issued to, or check the number.'
+          : resolved.reason === 'permit-type-mismatch'
+            ? `Permit number "${permitNumber}" is a ${resolved.issuedAs ?? 'different permit type'}, not a `
+              + `${query.permitType ?? 'the permit type chosen'}. Check the number, or apply under the matching `
+              + 'permit type.'
+            : resolved.detail;
+      return { valid: false, reason: resolved.reason, message };
+    }
+
+    const permit = await this.db.query<{
+      permit_number: string; permit_type: string; business_name: string | null; issued_date: Date;
+    }>(
+      `select g.permit_number, a.permit_type, b.name as business_name, g.issued_date
+         from generated_permits g
+         join applications a on a.id = g.application_id
+         left join businesses b on b.id = a.business_id
+        where g.application_id = $1`,
+      [resolved.permitId],
+    );
+    const row = permit.rows[0];
+    if (row === undefined) return null;
+    return {
+      valid: true,
+      permit: {
+        permitNumber: row.permit_number,
+        permitType: row.permit_type,
+        businessName: row.business_name,
+        issuedDate: row.issued_date.toISOString(),
+      },
     };
   }
 }

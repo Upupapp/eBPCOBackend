@@ -256,6 +256,8 @@ export class RecordsService {
           permitNumber: patch.renewsPermitNumber ?? null,
           priorPermitClaim: patch.priorPermitClaim ?? null,
           applicantId: before.applicant_id,
+          businessId: patch.businessId !== undefined ? patch.businessId : before.business_id,
+          permitType: patch.permitType ?? before.permit_type,
           tolerateNoReferenceYet: before.lifecycle_status === 'Draft',
         });
         if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };

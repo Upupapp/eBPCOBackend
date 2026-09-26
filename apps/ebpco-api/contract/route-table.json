@@ -12,6 +12,7 @@
     "GET /applications/:applicationId/permit",
     "GET /applications/:applicationId/requirements",
     "GET /applications/:applicationId/timeline",
+    "GET /applications/renewal-check",
     "GET /businesses",
     "GET /documents/:documentId/content",
     "GET /documents/content",

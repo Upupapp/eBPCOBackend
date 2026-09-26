@@ -254,6 +254,74 @@ paths:
           description: This account has no applicant profile to correct (a staff account).
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
+  /applications/renewal-check:
+    get:
+      operationId: checkRenewalPermit
+      summary: Whether a permit number may be renewed or amended on this filing
+      description: |
+        Asked by the wizard at the step where a Renewal/Amendment's permit
+        number is typed, so a wrong number is caught under that field rather
+        than at the final submit. The SAME rule filing enforces
+        (`resolveRenewal`) — filing re-checks regardless; this is a courtesy,
+        never the gate.
+
+        The number must be a permit eBPCO issued to the CALLER, for
+        `businessId`, and — when given — of `permitType`. It is compared
+        trimmed and upper-cased. A permit issued on paper before eBPCO is not
+        checked here at all: it is filed as the separate, unverified
+        `priorPermitClaim` with a `prior-permit-proof` document.
+
+        200 whether or not it matches, with `valid` saying which: a
+        non-matching number is the answer to the question asked, not a failed
+        request. `permit-not-found` does not distinguish "no such permit" from
+        "someone else's", deliberately; the two mismatch reasons are only ever
+        given for the caller's own permit.
+      security: [{ bearerAuth: [applications:read] }]
+      parameters:
+        - { name: permitNumber, in: query, required: true, schema: { type: string, minLength: 1, maxLength: 60 } }
+        - name: permitType
+          in: query
+          required: false
+          description: Omitted by the portal's generic flow, which learns the type from the permit; the answer carries it.
+          schema: { type: string, minLength: 1, maxLength: 80 }
+        - { name: businessId, in: query, required: false, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: The verdict. `message` is written for the citizen and shown as-is.
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: object
+                    additionalProperties: false
+                    required: [valid, permit]
+                    properties:
+                      valid: { type: boolean, enum: [true] }
+                      permit:
+                        type: object
+                        additionalProperties: false
+                        required: [permitNumber, permitType, businessName, issuedDate]
+                        properties:
+                          permitNumber: { type: string }
+                          permitType: { type: string }
+                          businessName: { type: [string, 'null'] }
+                          issuedDate: { type: string, format: date-time }
+                  - type: object
+                    additionalProperties: false
+                    required: [valid, reason, message]
+                    properties:
+                      valid: { type: boolean, enum: [false] }
+                      reason:
+                        type: string
+                        enum: [permit-not-found, permit-business-mismatch, permit-type-mismatch]
+                      message: { type: string }
+        '400':
+          description: A missing or over-long `permitNumber`, or a `businessId` that is not a UUID.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '404':
+          description: This account has no applicant profile (a staff account).
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /applications/{applicationId}/permit:
     get:
       operationId: getPermit

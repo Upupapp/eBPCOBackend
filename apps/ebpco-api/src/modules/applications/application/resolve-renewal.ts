@@ -1,5 +1,10 @@
 import { SqlClient } from '../../../persistence/sql-client';
 
+/** Every way a Renewal/Amendment reference can be refused — see resolveRenewal(). */
+export type RenewalRefusal =
+  | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found' | 'renewal-reference-conflict'
+  | 'permit-business-mismatch' | 'permit-type-mismatch';
+
 /**
  * The permit a Renewal or Amendment is about — a verified link, an
  * unverified claim, or neither, depending which (if either) field the
@@ -11,6 +16,19 @@ import { SqlClient } from '../../../persistence/sql-client';
  * only build on records that are already theirs. Resolved from the permit
  * NUMBER the applicant quotes, because that is what is printed on the
  * instrument in their hand; the column stores the key.
+ *
+ * Theirs is necessary but not sufficient: the permit must also have been
+ * issued to the BUSINESS this filing names, and be the same PERMIT TYPE.
+ * Renewing the bakery's permit on the hardware store's filing, or quoting a
+ * Fencing Permit on a Building Permit renewal, links the officer to the
+ * wrong original just as surely as a stranger's number would — and before
+ * this check the only thing that caught it was an officer noticing.
+ *
+ * The number is compared trimmed and case-insensitively. Every number eBPCO
+ * issues is `SERIES-YYYY-NNNNNN` in capitals (migration 010), so
+ * `bp-2026-000001` typed on a phone keyboard is the same permit, not a
+ * missing one — and upper-casing both sides, rather than only the input,
+ * keeps it right for any number not in that shape.
  *
  * `priorPermitClaim` exists for the permit eBPCO never issued: launched
  * into a Municipality with decades of paper permits already outstanding, so
@@ -29,6 +47,15 @@ export async function resolveRenewal(
   tx: SqlClient,
   options: {
     action: string; permitNumber: string | null; priorPermitClaim: string | null; applicantId: string;
+    /** The business this filing names — the permit must have been issued to the same one. */
+    businessId: string | null;
+    /**
+     * The permit type being applied for — the permit must be of the same
+     * type. Null only from the wizard's pre-check in the portal's generic
+     * flow, which does not know the type until the permit tells it; filing
+     * always names one.
+     */
+    permitType: string | null;
     /**
      * A Draft may legitimately name neither reference yet — the citizen
      * has picked Renewal/Amendment but hasn't settled on which permit.
@@ -42,11 +69,14 @@ export async function resolveRenewal(
   | { ok: true; permitId: string | null; priorPermitClaim: string | null }
   | {
       ok: false;
-      reason: 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found' | 'renewal-reference-conflict';
+      reason: RenewalRefusal;
       detail: string;
+      /** On `permit-type-mismatch` only: what the quoted permit actually is. */
+      issuedAs?: string;
     }
 > {
-  const { action, permitNumber, priorPermitClaim, applicantId, tolerateNoReferenceYet } = options;
+  const { action, priorPermitClaim, applicantId, businessId, permitType, tolerateNoReferenceYet } = options;
+  const permitNumber = options.permitNumber === null ? null : options.permitNumber.trim();
 
   if (action === 'New') {
     if (permitNumber !== null || priorPermitClaim !== null) {
@@ -83,15 +113,15 @@ export async function resolveRenewal(
     };
   }
 
-  const found = await tx.query<{ application_id: string }>(
-    `select g.application_id
+  const found = await tx.query<{ application_id: string; business_id: string | null; permit_type: string }>(
+    `select g.application_id, a.business_id, a.permit_type
        from generated_permits g
        join applications a on a.id = g.application_id
-      where g.permit_number = $1 and a.applicant_id = $2`,
+      where upper(g.permit_number) = upper($1) and a.applicant_id = $2`,
     [permitNumber, applicantId],
   );
-  const permitId = found.rows[0]?.application_id;
-  if (permitId === undefined) {
+  const permit = found.rows[0];
+  if (permit === undefined) {
     // One answer for "no such permit" and "not yours", deliberately. Telling
     // them apart would let anyone test whether a permit number exists.
     return {
@@ -99,5 +129,20 @@ export async function resolveRenewal(
       detail: `No permit numbered "${permitNumber}" is registered to this applicant.`,
     };
   }
-  return { ok: true, permitId, priorPermitClaim: null };
+  // Past this point the permit is the applicant's own, so saying WHY it does
+  // not fit discloses nothing they could not read off their own permit.
+  if (permit.business_id !== businessId) {
+    return {
+      ok: false, reason: 'permit-business-mismatch',
+      detail: `Permit "${permitNumber}" was issued to a different business than the one selected.`,
+    };
+  }
+  if (permitType !== null && permit.permit_type !== permitType) {
+    return {
+      ok: false, reason: 'permit-type-mismatch',
+      detail: `Permit "${permitNumber}" is a ${permit.permit_type}, not a ${permitType}.`,
+      issuedAs: permit.permit_type,
+    };
+  }
+  return { ok: true, permitId: permit.application_id, priorPermitClaim: null };
 }

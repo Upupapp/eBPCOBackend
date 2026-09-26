@@ -79,6 +79,7 @@ interface Seeded {
   cashier: string;
   releasing: string;
   applicantAccount: string;
+  business: string;
   detailed: string;
   fresh: string;
   completed: string;
@@ -383,7 +384,7 @@ async function seed(db: SqlClient): Promise<Seeded> {
 
   return {
     official, records, evaluator, assessor, cashier, releasing, receiving,
-    applicantAccount, detailed, fresh, completed, assessable, approved, payment,
+    applicantAccount, business, detailed, fresh, completed, assessable, approved, payment,
     rejectedDocument,
   };
 }
@@ -625,6 +626,20 @@ async function main(): Promise<void> {
   // generation rather than a fixture shaped like one.
   await record('applicant.applications.permit', 'GET',
     `/applications/${seeded.approved}/permit`, applicantToken);
+  // The wizard's check on a Renewal/Amendment's typed permit number, before
+  // step 1 lets the citizen continue. One sample per branch a client renders:
+  // a match (the seeded FP-2026-000212, issued to this business), a number
+  // that is not a permit at all, and the citizen's own permit quoted under
+  // the wrong permit type.
+  await record('applicant.applications.renewalCheck.valid', 'GET',
+    `/applications/renewal-check?permitNumber=fp-2026-000212&permitType=Fencing%20Permit&businessId=${seeded.business}`,
+    applicantToken);
+  await record('applicant.applications.renewalCheck.notFound', 'GET',
+    `/applications/renewal-check?permitNumber=BP&permitType=Fencing%20Permit&businessId=${seeded.business}`,
+    applicantToken);
+  await record('applicant.applications.renewalCheck.typeMismatch', 'GET',
+    `/applications/renewal-check?permitNumber=FP-2026-000212&permitType=Building%20Permit&businessId=${seeded.business}`,
+    applicantToken);
   // The office's verdict on each document, in the applicant's view (C-2). Also
   // the only recorded response that carries a document id at all.
   await record('applicant.applications.documents', 'GET',

@@ -8,7 +8,7 @@ import { normaliseEmail } from '../../identity/application/account.repository';
 import { unusablePasswordHash } from '../../identity/application/staff-directory.service';
 import { RequirementDocument, RequirementsService } from './requirements.service';
 import { RegistrationVerificationService } from '../../identity/application/registration-verification.service';
-import { resolveRenewal } from './resolve-renewal';
+import { RenewalRefusal, resolveRenewal } from './resolve-renewal';
 
 /**
  * Filing an application, exactly once.
@@ -38,8 +38,7 @@ export type SubmitResult =
       readonly ok: false;
       readonly reason: 'no-applicant-record' | 'unknown-permit-type' | 'business-not-yours'
         | 'documents-not-yours' | 'requirement-unknown' | 'key-reused' | 'form-rejected'
-        | 'not-a-renewal' | 'renewal-needs-a-permit' | 'permit-not-found'
-        | 'renewal-reference-conflict' | 'prior-permit-proof-required';
+        | RenewalRefusal | 'prior-permit-proof-required';
       readonly detail: string;
       /** Present for `form-rejected`, so a client can point at the field. */
       readonly violations?: readonly FormViolation[];
@@ -100,8 +99,7 @@ export type UpdateDraftResult =
   | {
       readonly ok: false;
       readonly reason: 'not-found' | 'not-a-draft' | 'unknown-permit-type' | 'business-not-yours'
-        | 'documents-not-yours' | 'requirement-unknown' | 'not-a-renewal' | 'renewal-needs-a-permit'
-        | 'permit-not-found' | 'renewal-reference-conflict';
+        | 'documents-not-yours' | 'requirement-unknown' | RenewalRefusal;
       readonly detail: string;
     };
 
@@ -263,6 +261,8 @@ export class SubmissionService {
         permitNumber: submission.renewsPermitNumber ?? null,
         priorPermitClaim: submission.priorPermitClaim ?? null,
         applicantId,
+        businessId: submission.businessId ?? null,
+        permitType: submission.permitType,
         tolerateNoReferenceYet: submission.saveAsDraft ?? false,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
@@ -393,9 +393,9 @@ export class SubmissionService {
       // applicant-facing route already enforces.
       const found = await tx.query<{
         id: string; lifecycle_status: string; applicant_id: string; permit_type: string;
-        application_action: 'New' | 'Renewal' | 'Amendment';
+        application_action: 'New' | 'Renewal' | 'Amendment'; business_id: string | null;
       }>(
-        `select a.id, a.lifecycle_status, a.applicant_id, a.permit_type, a.application_action
+        `select a.id, a.lifecycle_status, a.applicant_id, a.permit_type, a.application_action, a.business_id
            from applications a
            join applicants ap on ap.id = a.applicant_id
           where a.id = $1 and ap.account_id = $2
@@ -453,6 +453,8 @@ export class SubmissionService {
           permitNumber: patch.renewsPermitNumber ?? null,
           priorPermitClaim: patch.priorPermitClaim ?? null,
           applicantId: before.applicant_id,
+          businessId: patch.businessId !== undefined ? patch.businessId : before.business_id,
+          permitType: nextPermitType,
           tolerateNoReferenceYet: true,
         });
         if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };
@@ -730,6 +732,8 @@ export class SubmissionService {
         permitNumber: options.renewsPermitNumber ?? null,
         priorPermitClaim: options.priorPermitClaim ?? null,
         applicantId,
+        businessId: businessId ?? null,
+        permitType: submission.permitType,
         tolerateNoReferenceYet: options.saveAsDraft ?? false,
       });
       if (!renewal.ok) return { ok: false, reason: renewal.reason, detail: renewal.detail };

@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { ProblemException, ProblemType } from '../../../common/problem/problem';
 import { RequireScopes } from '../../identity/transport/guards/public.decorator';
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
-import { ApplicantQueryService } from '../application/applicant-query.service';
+import { ApplicantQueryService, RenewalCheck } from '../application/applicant-query.service';
 
 /**
  * The applicant's own applications.
@@ -22,6 +22,17 @@ import { ApplicantQueryService } from '../application/applicant-query.service';
 const listQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
+
+/**
+ * The same bounds `POST /applications` puts on `renewsPermitNumber` and
+ * `permitType`. `permitType` is optional for the portal's generic flow, which
+ * learns the type from the permit itself — the answer then carries it.
+ */
+const renewalCheckQuery = z.object({
+  permitNumber: z.string().trim().min(1).max(60),
+  permitType: z.string().min(1).max(80).optional(),
+  businessId: z.string().uuid().optional(),
+}).strict();
 
 function callerAccount(request: AuthenticatedRequest): string {
   const claims = request.caller;
@@ -65,6 +76,32 @@ export class ApplicantApplicationsController {
     // so `items` would have been a crash on a handset, not a warning in a log.
     // Caught by validating a recorded response against the contract.
     return { data, nextCursor: null };
+  }
+
+  /**
+   * Whether a permit number may be renewed or amended on a filing for this
+   * business and permit type — the wizard asks before letting the citizen
+   * past the step where the number is typed. See
+   * `ApplicantQueryService.renewalCheck()`.
+   *
+   * 200 either way, with `valid` saying which: a number that does not match
+   * is the answer to the question asked, not a failed request. A GET because
+   * it changes nothing — and so it needs no Idempotency-Key and is never
+   * queued for replay by the mobile client. Declared before
+   * `:applicationId` for the reader; the router already prefers the static
+   * segment.
+   */
+  @Get('renewal-check')
+  @RequireScopes('applications:read')
+  async renewalCheck(@Req() request: AuthenticatedRequest, @Query() query: unknown): Promise<RenewalCheck> {
+    const input = parse(renewalCheckQuery, query ?? {});
+    const result = await this.applications.renewalCheck(callerAccount(request), {
+      permitNumber: input.permitNumber,
+      permitType: input.permitType ?? null,
+      businessId: input.businessId ?? null,
+    });
+    if (result === null) throw ProblemException.notFound('No applicant profile for this account.');
+    return result;
   }
 
   @Get(':applicationId')
