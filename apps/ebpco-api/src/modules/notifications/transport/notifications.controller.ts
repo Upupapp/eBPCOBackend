@@ -227,10 +227,16 @@ export class NotificationsController {
   @Delete('devices/:deviceId')
   @HttpCode(HttpStatus.NO_CONTENT)
   @RequireScopes('notifications:write')
-  async removeDevice(@Param('deviceId') deviceId: string): Promise<void> {
+  async removeDevice(
+    @Req() request: AuthenticatedRequest,
+    @Param('deviceId') deviceId: string,
+  ): Promise<void> {
     // Signing out on one handset must stop pushes to it. Not finding it is not
-    // an error: the desired state is "no device", and it already holds.
-    await this.notifications.pruneDevice(deviceId);
+    // an error: the desired state is "no device", and it already holds. Scoped
+    // to the caller: this used to delete by id alone, so any signed-in account
+    // could unregister another citizen's phone.
+    if (!/^[0-9a-f-]{36}$/i.test(deviceId)) return;
+    await this.notifications.removeOwnDevice(deviceId, callerAccount(request));
   }
 }
 

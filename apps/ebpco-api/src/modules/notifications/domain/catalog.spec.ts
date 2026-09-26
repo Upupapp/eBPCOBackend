@@ -136,8 +136,6 @@ describe('every notice in the catalog has something that sends it', () => {
       'the PD 1096 commencement window is not tracked against a clock anywhere',
     'occupancy-now-possible':
       'no Certificate of Occupancy path distinct from the permit lifecycle, which already notifies on release',
-    'account-update':
-      'account changes write audit entries, not notices',
   };
 
   /** Every .ts under src that is not a test and not the catalog itself. */
@@ -178,7 +176,7 @@ describe('every notice in the catalog has something that sends it', () => {
     // Recorded rather than asserted at a threshold: the number should move in
     // one direction, and a threshold would let it sit still.
     const emitted = serverGenerated.length - unemitted.length;
-    expect(emitted).toBe(14);
+    expect(emitted).toBe(15);
     expect(serverGenerated).toHaveLength(23);
   });
 });

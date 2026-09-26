@@ -4,6 +4,7 @@ import { Job } from './job-runner';
 import { AuditService } from '../../modules/compliance/application/audit.service';
 import { DocumentService } from '../../modules/documents/application/document.service';
 import { NotificationService } from '../../modules/notifications/application/notification.service';
+import { PushDeliveryService } from '../../modules/notifications/application/push-delivery.service';
 import { DataExportService } from '../../modules/compliance/application/data-export.service';
 import { deepLinkFor, entryFor } from '../../modules/notifications/domain/catalog';
 import { LifecycleStatus } from '../../modules/applications/domain/lifecycle';
@@ -84,15 +85,15 @@ export function auditVerificationJob(audit: AuditService, logger: StructuredLogg
 }
 
 /**
- * Plans delivery for notifications nobody has planned yet.
+ * Plans delivery for notifications nobody has planned yet, then sends the push
+ * attempts that are due.
  *
- * Planning only. Nothing here sends anything: push, email and SMS all need a
- * provider that has not been chosen (E-1, M-27), and the planned attempts are
- * recorded so that whatever is chosen has a queue to read. Claiming this
- * "dispatches" would be the most consequential lie in this file — an applicant
- * would be recorded as notified and never told.
+ * Push goes out over FCM when a service account is configured. Email and SMS
+ * still have no provider (E-1, M-27): their attempts stay queued, and the
+ * detail line says so on every run — claiming those were "dispatched" would be
+ * the most consequential lie in this file.
  */
-export function notificationDispatchJob(notifications: NotificationService): Job {
+export function notificationDispatchJob(notifications: NotificationService, push: PushDeliveryService): Job {
   return {
     name: 'notification-dispatch',
     // Short: it runs every minute and does bounded work.
@@ -104,8 +105,14 @@ export function notificationDispatchJob(notifications: NotificationService): Job
       // which meant a crash in between marked a notice delivered-planned while
       // recording no attempt — and nothing ever revisits a dispatched row.
       const attempts = await notifications.planPending(200);
-      if (attempts.length === 0) return 'nothing pending';
-      return `${attempts.length} attempt(s) queued; NOT SENT — no delivery provider is configured`;
+      const planned = attempts.length === 0 ? 'nothing new to plan' : `${attempts.length} attempt(s) planned`;
+
+      if (!push.configured) {
+        return `${planned}; push NOT SENT — FCM is not configured; email/SMS NOT SENT — no provider`;
+      }
+      const sent = await push.sendDue(100);
+      return `${planned}; push sent ${sent.sent}, retrying ${sent.retrying}, failed ${sent.failed}, `
+        + `devices pruned ${sent.prunedDevices}; email/SMS NOT SENT — no provider`;
     },
   };
 }

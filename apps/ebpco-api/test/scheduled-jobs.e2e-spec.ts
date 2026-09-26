@@ -19,6 +19,11 @@ import { DataExportService } from '../src/modules/compliance/application/data-ex
 import { dataExportExpiryJob, dataExportJob } from '../src/common/scheduling/jobs';
 import { ObjectStore } from '../src/modules/documents/domain/object-store';
 import { StaffNotificationService } from '../src/modules/notifications/application/staff-notification.service';
+import { PushDeliveryService } from '../src/modules/notifications/application/push-delivery.service';
+import { SecretBox } from '../src/modules/identity/domain/secret-box';
+
+/** Push not configured: attempts queue, nothing is sent. */
+const noPush = (): PushDeliveryService => new PushDeliveryService({} as SqlClient, new SecretBox('x'.repeat(32)), null);
 
 /**
  * The four jobs, driven by the scheduler, against a real database.
@@ -187,7 +192,7 @@ describe('notification dispatch', () => {
       [randomUUID(), ACCOUNT],
     );
 
-    await runner().runIfDue(notificationDispatchJob(new NotificationService(db, () => now)));
+    await runner().runIfDue(notificationDispatchJob(new NotificationService(db, () => now), noPush()));
 
     const row = await jobRow('notification-dispatch');
     expect(row.last_outcome).toBe('succeeded');
@@ -205,10 +210,10 @@ describe('notification dispatch', () => {
     );
     const notifications = new NotificationService(db, () => now);
 
-    await runner().runIfDue(notificationDispatchJob(notifications));
+    await runner().runIfDue(notificationDispatchJob(notifications, noPush()));
     const after = await db.query<{ n: string }>('select count(*) as n from notification_deliveries');
     now = new Date(now.getTime() + 120_000);
-    await runner().runIfDue(notificationDispatchJob(notifications));
+    await runner().runIfDue(notificationDispatchJob(notifications, noPush()));
 
     const again = await db.query<{ n: string }>('select count(*) as n from notification_deliveries');
     expect(again.rows[0]!.n).toBe(after.rows[0]!.n);
@@ -237,7 +242,7 @@ describe('a scheduler tick', () => {
       [
         retentionJob({ runRetention: () => Promise.resolve({ deleted: 0, skippedOpen: 0 }) } as unknown as DocumentService, 3650),
         auditVerificationJob(audit, logger()),
-        notificationDispatchJob(new NotificationService(db, () => now)),
+        notificationDispatchJob(new NotificationService(db, () => now), noPush()),
         operationalPurgeJob(db, () => now),
       ],
       logger(),
@@ -299,7 +304,7 @@ describe('every seeded job has something to run it', () => {
     const registered = [
       retentionJob({ runRetention: () => Promise.resolve({ deleted: 0, skippedOpen: 0 }) } as unknown as DocumentService, null),
       auditVerificationJob(new AuditService(db, () => now), logger()),
-      notificationDispatchJob(new NotificationService(db, () => now)),
+      notificationDispatchJob(new NotificationService(db, () => now), noPush()),
       operationalPurgeJob(db, () => now),
       dataExportJob(new DataExportService(db, store, () => now), db),
       dataExportExpiryJob(new DataExportService(db, store, () => now)),

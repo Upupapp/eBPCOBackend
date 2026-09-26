@@ -91,6 +91,12 @@ const schema = z
      */
     PUSH_TOKEN_ENCRYPTION_KEY: z.string().optional().transform((v) => v ?? ''),
 
+    // The Firebase service-account JSON (castilla-ebpco project), base64 on one
+    // line so it survives an env file. Unset means push is not sent and the
+    // dispatch job says so on every run — the queue keeps filling regardless,
+    // so setting it later delivers what is still due rather than losing it.
+    FCM_SERVICE_ACCOUNT_JSON_BASE64: z.string().optional().transform((v) => v ?? ''),
+
     // Request handling. Bounded by construction: an unbounded body or an
     // unbounded request lifetime is a denial-of-service surface.
     REQUEST_TIMEOUT_MS: intFromEnv(1_000, 120_000, 20_000),

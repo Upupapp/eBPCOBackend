@@ -263,4 +263,12 @@ export class NotificationService {
     const removed = await this.db.query('delete from devices where id = $1', [deviceId]);
     return removed.rowCount > 0;
   }
+
+  /** Signing out on a handset — only ever the caller's own registration. */
+  async removeOwnDevice(deviceId: string, accountId: string): Promise<boolean> {
+    const removed = await this.db.query(
+      'delete from devices where id = $1 and account_id = $2', [deviceId, accountId],
+    );
+    return removed.rowCount > 0;
+  }
 }
