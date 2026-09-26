@@ -6,6 +6,8 @@ import { StaffRole } from '../domain/account';
 import { AccessLevel } from '../domain/staff-access';
 import { normaliseEmail } from './account.repository';
 import { unusablePasswordHash } from './staff-directory.service';
+import { holdsSuperAdmin } from './super-admin-guard';
+import { EVALUATION_STAGES, isEvaluationStage } from '../../applications/domain/evaluation-stages';
 
 /**
  * Becoming staff is a REQUEST, never a registration.
@@ -52,7 +54,20 @@ export interface ApprovalInput {
   readonly level: AccessLevel;
   /** Internal permit-type keys. Empty is refused: it would create a useless account. */
   readonly permitTypes: readonly string[];
+  /**
+   * The evaluation stages the officer decides (migration 057), granted in the
+   * same transaction — an evaluator approved without one could decide nothing.
+   */
+  readonly stages?: readonly string[];
 }
+
+/**
+ * Deciding a request is the super admin's alone (owner ruling). The portal
+ * only ever showed Access Requests to a super admin; the server did not ask,
+ * so an administrator holding `staff:administer` could approve a request of
+ * their own making for any role — the escalation the ruling exists to stop.
+ */
+const DECIDED_BY_SUPER_ADMIN = 'Only a super admin can decide an access request.';
 
 export type Refusal = { readonly ok: false; readonly reason: string; readonly detail: string };
 export type Decision<T> = { readonly ok: true; readonly value: T } | Refusal;
@@ -192,6 +207,9 @@ export class AccessRequestService {
     requestId: string, approval: ApprovalInput,
     actor: { accountId: string; role: string },
   ): Promise<Decision<{ accountId: string }>> {
+    if (!(await holdsSuperAdmin(this.db, actor.accountId))) {
+      return { ok: false, reason: 'not-permitted', detail: DECIDED_BY_SUPER_ADMIN };
+    }
     if (approval.permitTypes.length === 0) {
       // An empty allow-list fails closed everywhere else in this system, so
       // approving into one would create an account that can reach nothing. Say
@@ -204,6 +222,14 @@ export class AccessRequestService {
     if (approval.roles.length === 0) {
       return {
         ok: false, reason: 'no-roles', detail: 'Assign at least one staff role.',
+      };
+    }
+    const stages = EVALUATION_STAGES.filter((stage) => (approval.stages ?? []).includes(stage));
+    const unknownStages = (approval.stages ?? []).filter((stage) => !isEvaluationStage(stage));
+    if (unknownStages.length > 0) {
+      return {
+        ok: false, reason: 'unknown-stage',
+        detail: `Not evaluation stages: ${unknownStages.join(', ')}. The stages are ${EVALUATION_STAGES.join(', ')}.`,
       };
     }
 
@@ -258,6 +284,11 @@ export class AccessRequestService {
           'insert into staff_permit_access (account_id, permit_type, granted_by) values ($1,$2,$3)',
           [accountId, permitType, actor.accountId]);
       }
+      for (const stage of stages) {
+        await tx.query(
+          'insert into staff_evaluation_stages (account_id, stage, granted_by) values ($1,$2,$3)',
+          [accountId, stage, actor.accountId]);
+      }
       await tx.query(
         `update access_requests
             set status = 'approved', decided_at = $2, decided_by = $3, created_account_id = $4
@@ -274,7 +305,7 @@ export class AccessRequestService {
         beforeState: null,
         afterState: {
           requestId, roles: approval.roles, level: approval.level,
-          permitTypes: [...new Set(approval.permitTypes)],
+          permitTypes: [...new Set(approval.permitTypes)], stages,
         },
       }, tx);
     });
@@ -293,6 +324,9 @@ export class AccessRequestService {
   async reject(
     requestId: string, reason: string, actor: { accountId: string; role: string },
   ): Promise<Decision<void>> {
+    if (!(await holdsSuperAdmin(this.db, actor.accountId))) {
+      return { ok: false, reason: 'not-permitted', detail: DECIDED_BY_SUPER_ADMIN };
+    }
     if (reason.trim().length < 3) {
       return { ok: false, reason: 'reason-required', detail: 'Say why it was refused.' };
     }

@@ -210,6 +210,69 @@ describe('approval creates the account and its assignment together', () => {
   });
 });
 
+describe('only a super admin decides a request', () => {
+  const administrator = async (): Promise<string> => {
+    const [account] = await query<{ id: string }>(
+      `insert into accounts (kind, email, email_normalised, password_hash)
+       values ('staff','rey@castilla.gov.ph','rey@castilla.gov.ph','scrypt$1$1$1$a$b') returning id`);
+    await query("insert into account_roles (account_id, role) values ($1,'administrator')", [account!.id]);
+    return account!.id;
+  };
+
+  it('refuses an administrator approving, and creates nothing', async () => {
+    // The owner's ruling, held by the server and not only by the portal's
+    // menu: an administrator who could approve could approve a request of
+    // their own making, for any role.
+    const admin = await administrator();
+    const id = await raise();
+
+    const result = await requests.approve(id, {
+      roles: ['building-official'], level: 'view-edit', permitTypes: ['Building Permit'],
+    }, { accountId: admin, role: 'administrator' });
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('not-permitted');
+    expect(await query("select 1 from accounts where email_normalised = 'ana@castilla.gov.ph'")).toEqual([]);
+  });
+
+  it('refuses an administrator rejecting', async () => {
+    const admin = await administrator();
+    const id = await raise();
+
+    expect((await requests.reject(id, 'not this time', { accountId: admin, role: 'administrator' })).ok).toBe(false);
+    const [request] = await query<{ status: string }>('select status from access_requests where id = $1', [id]);
+    expect(request!.status).toBe('pending');
+  });
+
+  it('grants an evaluator their stage in the same approval', async () => {
+    const boss = await superAdmin();
+    const id = await raise();
+
+    const result = await requests.approve(id, {
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'], stages: ['Fire Safety'],
+    }, { accountId: boss, role: 'super-admin' });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    const held = await query<{ stage: string }>(
+      'select stage from staff_evaluation_stages where account_id = $1', [result.value.accountId]);
+    expect(held.map((row) => row.stage)).toEqual(['Fire Safety']);
+  });
+
+  it('refuses a stage that is not one, before creating anything', async () => {
+    const boss = await superAdmin();
+    const id = await raise();
+
+    const result = await requests.approve(id, {
+      roles: ['evaluator'], level: 'view-edit', permitTypes: ['Building Permit'], stages: ['Plumbing'],
+    }, { accountId: boss, role: 'super-admin' });
+
+    expect(result.ok).toBe(false);
+    expect(await query("select 1 from accounts where email_normalised = 'ana@castilla.gov.ph'")).toEqual([]);
+  });
+});
+
 describe('rejection is attributable and says nothing', () => {
   it('records who refused it and why', async () => {
     const admin = await superAdmin();

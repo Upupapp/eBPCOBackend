@@ -85,7 +85,7 @@ function refuse(refusal: DirectoryRefusal): never {
  * did this" was wrong on every audit entry a super-admin ever produced --
  * silent, since nothing here re-read what the caller actually held.
  */
-async function actorOf(
+export async function actorOf(
   request: AuthenticatedRequest, directory: StaffDirectoryService,
 ): Promise<{ accountId: string; role: string }> {
   const claims = request.caller;

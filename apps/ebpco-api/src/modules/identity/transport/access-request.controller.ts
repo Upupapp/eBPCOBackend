@@ -8,7 +8,8 @@ import { StaffRole } from '../domain/account';
 import { AccessRequestService, Refusal } from '../application/access-request.service';
 import { ACCESS_LEVELS } from '../domain/staff-access';
 import { StaffAccessService } from '../application/staff-access.service';
-import { isStaffRole } from '../application/staff-directory.service';
+import { StaffDirectoryService, isStaffRole } from '../application/staff-directory.service';
+import { actorOf as actingAs } from './staff-directory.controller';
 import { RequireScopes, Public } from './guards/public.decorator';
 import type { AuthenticatedRequest } from './guards/authentication.guard';
 
@@ -44,23 +45,25 @@ const approvalShape = z.object({
   roles: z.array(z.string().refine(isStaffRole)).min(1).max(6),
   level: z.enum(LEVELS),
   permitTypes: z.array(z.string().min(1).max(120)).min(1).max(30),
+  // The evaluation stages an evaluator decides (migration 057). Optional:
+  // most positions decide none.
+  stages: z.array(z.string().min(1).max(40)).max(10).optional(),
 }).strict();
 
 const rejectionShape = z.object({
   reason: z.string().min(3).max(1000),
 }).strict();
 
-function actorOf(request: AuthenticatedRequest): { accountId: string; role: string } {
-  const claims = request.caller;
-  if (claims === undefined) {
-    throw new ProblemException(
-      ProblemType.unauthorized, 'Authentication is required', HttpStatus.UNAUTHORIZED);
-  }
-  return { accountId: claims.sub, role: 'super-admin' };
-}
+// The acting account's REAL roles for the audit entry (`actingAs`, shared
+// with the staff directory). This used to write 'super-admin' for every
+// caller, which was false for every administrator who changed an officer's
+// forms or level — and an audit trail is only worth what it says truthfully.
 
 function refuse(refusal: Refusal): never {
   if (refusal.reason === 'not-pending') throw ProblemException.notFound(refusal.detail);
+  if (refusal.reason === 'not-permitted') {
+    throw new ProblemException(ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, refusal.detail);
+  }
   throw new ProblemException(
     ProblemType.conflict, 'Cannot approve this request', HttpStatus.CONFLICT, refusal.detail);
 }
@@ -110,7 +113,10 @@ export class AccessRequestController {
  */
 @Controller('staff/access-requests')
 export class StaffAccessRequestsController {
-  constructor(private readonly requests: AccessRequestService) {}
+  constructor(
+    private readonly requests: AccessRequestService,
+    private readonly directory: StaffDirectoryService,
+  ) {}
 
   @Get()
   @RequireScopes('staff:administer')
@@ -151,7 +157,8 @@ export class StaffAccessRequestsController {
       roles: input.roles as StaffRole[],
       level: input.level,
       permitTypes: input.permitTypes,
-    }, actorOf(request));
+      ...(input.stages === undefined ? {} : { stages: input.stages }),
+    }, await actingAs(request, this.directory));
 
     if (!result.ok) refuse(result);
     return {
@@ -168,7 +175,7 @@ export class StaffAccessRequestsController {
     @Param('id') id: string, @Req() request: AuthenticatedRequest, @Body() body: unknown,
   ): Promise<void> {
     const input = parse(rejectionShape, body);
-    const result = await this.requests.reject(id, input.reason, actorOf(request));
+    const result = await this.requests.reject(id, input.reason, await actingAs(request, this.directory));
 
     // The reason is recorded and is NOT sent to the requester. A rejection that
     // explained itself would disclose which addresses are known, which roles
@@ -205,7 +212,10 @@ function accessRefused(title: string, refusal: { reason: string; detail: string 
  */
 @Controller('staff/users')
 export class StaffAccessController {
-  constructor(private readonly access: StaffAccessService) {}
+  constructor(
+    private readonly access: StaffAccessService,
+    private readonly directory: StaffDirectoryService,
+  ) {}
 
   @Get(':userId/access')
   @RequireScopes('staff:administer')
@@ -235,7 +245,7 @@ export class StaffAccessController {
     @Body() body: unknown,
   ): Promise<{ evaluationStages: readonly string[] }> {
     const input = parse(stagesShape, body);
-    const result = await this.access.setStages(userId, input.stages, actorOf(request));
+    const result = await this.access.setStages(userId, input.stages, await actingAs(request, this.directory));
     if (!result.ok) accessRefused('Cannot change these stages', result);
     return { evaluationStages: await this.access.stagesFor(userId) };
   }
@@ -247,7 +257,7 @@ export class StaffAccessController {
     @Body() body: unknown,
   ): Promise<{ level: string }> {
     const input = parse(levelShape, body);
-    const result = await this.access.setLevel(userId, input.level, actorOf(request));
+    const result = await this.access.setLevel(userId, input.level, await actingAs(request, this.directory));
     if (!result.ok) accessRefused('Cannot change this level', result);
     return { level: input.level };
   }
@@ -259,7 +269,7 @@ export class StaffAccessController {
     @Body() body: unknown,
   ): Promise<{ permitTypes: string[] }> {
     const input = parse(formsShape, body);
-    const result = await this.access.setForms(userId, input.permitTypes, actorOf(request));
+    const result = await this.access.setForms(userId, input.permitTypes, await actingAs(request, this.directory));
     if (!result.ok) accessRefused('Cannot change these forms', result);
     return { permitTypes: input.permitTypes };
   }
