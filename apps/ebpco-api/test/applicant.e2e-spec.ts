@@ -469,6 +469,9 @@ describe('an applicant can obtain the permit they were issued (C-1)', () => {
 
     expect(body.release).toEqual({
       status: 'Ready for Release', method: 'Physical Claim', releasedAt: null,
+      // Where, when and with what to collect it — null/empty until the
+      // Releasing Officer fills them in when preparing the release.
+      claimLocation: null, officeHours: null, bringWithYou: [],
     });
   });
 
