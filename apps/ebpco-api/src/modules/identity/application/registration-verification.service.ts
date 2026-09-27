@@ -69,10 +69,15 @@ export class RegistrationVerificationService {
     await this.db.transaction(async (tx) => {
       // The previous live challenge is spent, not left beside the new one —
       // same reasoning as contact-verification.service.ts's own request().
+      // The code being replaced was never confirmed, so it is deleted rather
+      // than marked consumed: `registration_challenge_consumed_implies_confirmed`
+      // (migration 048) refuses consumed-but-unconfirmed rows, and the
+      // one-live-per-email index would refuse the new row while the old one
+      // stayed live. Marking it consumed here was a 500 on every Resend Code.
       await tx.query(
-        `update registration_email_challenges set consumed_at = $1
-          where email = $2 and confirmed_at is null and consumed_at is null`,
-        [now, normalised],
+        `delete from registration_email_challenges
+          where email = $1 and confirmed_at is null and consumed_at is null`,
+        [normalised],
       );
       await tx.query(
         `insert into registration_email_challenges (email, code_digest, issued_at, expires_at)
@@ -106,10 +111,8 @@ export class RegistrationVerificationService {
         };
       }
       if (challenge.expires_at.getTime() <= now.getTime()) {
-        await tx.query(
-          'update registration_email_challenges set consumed_at = $1 where id = $2',
-          [now, challenge.id],
-        );
+        // Retired by deletion, not `consumed_at` — see request() for why.
+        await tx.query('delete from registration_email_challenges where id = $1', [challenge.id]);
         return {
           ok: false, reason: 'expired',
           detail: `That code has expired. Ask for another; they last ${TTL_MINUTES} minutes.`,
@@ -119,9 +122,12 @@ export class RegistrationVerificationService {
       if (!this.matches(challenge.code_digest, code)) {
         const attempts = challenge.attempts + 1;
         const spent = attempts >= MAX_ATTEMPTS;
+        // A spent code is retired by deletion, not `consumed_at` — see request().
         await tx.query(
-          `update registration_email_challenges set attempts = $1, consumed_at = $2 where id = $3`,
-          [attempts, spent ? now : null, challenge.id],
+          spent
+            ? 'delete from registration_email_challenges where id = $1'
+            : 'update registration_email_challenges set attempts = $2 where id = $1',
+          spent ? [challenge.id] : [challenge.id, attempts],
         );
         return {
           ok: false, reason: spent ? 'too-many-attempts' : 'wrong-code',
