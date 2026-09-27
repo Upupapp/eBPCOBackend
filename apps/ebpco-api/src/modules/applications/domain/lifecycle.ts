@@ -42,6 +42,7 @@ export type Precondition =
   | 'identity-document-verified'
   | 'required-documents-present'
   | 'all-instructions-resolved'
+  | 'returned-documents-replaced'
   | 'order-of-payment-issued'
   | 'payment-proof-submitted'
   | 'payment-verified'
@@ -139,7 +140,7 @@ export const TRANSITIONS: readonly TransitionRule[] = [
     preconditions: [], notifies: 'rejected' },
 
   { from: 'Revision Required', to: 'Under Evaluation', actors: ['applicant'], requires: 'applications:write',
-    preconditions: ['all-instructions-resolved'] },
+    preconditions: ['all-instructions-resolved', 'returned-documents-replaced'] },
   { from: 'Revision Required', to: 'Cancelled', actors: ['applicant', 'staff'], requires: 'applications:write',
     preconditions: [] },
   { from: 'Revision Required', to: 'Expired', actors: ['staff'], requires: 'applications:write',

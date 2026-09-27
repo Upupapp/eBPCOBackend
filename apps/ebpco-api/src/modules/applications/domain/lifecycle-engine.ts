@@ -53,6 +53,7 @@ const SATISFIES: Readonly<Record<Precondition, (snapshot: ApplicationSnapshot) =
   'identity-document-verified': (s) => s.identityDocumentVerified,
   'required-documents-present': (s) => s.requiredDocumentsPresent,
   'all-instructions-resolved': (s) => s.openInstructionCount === 0,
+  'returned-documents-replaced': (s) => s.returnedDocumentsOutstanding === 0,
   'order-of-payment-issued': (s) => s.orderOfPaymentIssued,
   'payment-proof-submitted': (s) => s.paymentProofSubmitted,
   'payment-verified': (s) => s.paymentVerified,

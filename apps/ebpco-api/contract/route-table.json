@@ -59,6 +59,7 @@
     "POST /applications/:applicationId/documents/:documentId/resubmit",
     "POST /applications/:applicationId/instructions/:letterId/resubmit",
     "POST /applications/:applicationId/payments",
+    "POST /applications/:applicationId/resubmit",
     "POST /auth/access-request",
     "POST /auth/password/forgot",
     "POST /auth/password/reset",

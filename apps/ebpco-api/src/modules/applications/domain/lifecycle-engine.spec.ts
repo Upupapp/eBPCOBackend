@@ -31,6 +31,7 @@ const satisfied = (status: LifecycleStatus, overrides: Partial<ApplicationSnapsh
   identityDocumentVerified: true,
   requiredDocumentsPresent: true,
   openInstructionCount: 0,
+  returnedDocumentsOutstanding: 0,
   evaluationsComplete: true,
   orderOfPaymentIssued: true,
   paymentProofSubmitted: true,
@@ -246,6 +247,48 @@ describe('preconditions', () => {
     expect(decision.refusal.kind).toBe('precondition-unmet');
     if (decision.refusal.kind !== 'precondition-unmet') return;
     expect(decision.refusal.unmet).toContain('all-instructions-resolved');
+  });
+
+  it('refuses sending a revision back while a returned document is not replaced yet', () => {
+    const decision = decide({
+      rules: TRANSITIONS,
+      snapshot: satisfied('Revision Required', { returnedDocumentsOutstanding: 1 }),
+      caller: applicant(),
+      to: 'Under Evaluation',
+      now: NOW,
+    });
+
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.refusal.kind).toBe('precondition-unmet');
+    if (decision.refusal.kind !== 'precondition-unmet') return;
+    expect(decision.refusal.unmet).toEqual(['returned-documents-replaced']);
+  });
+
+  it('lets the applicant send a revision back once every returned document is replaced', () => {
+    const decision = decide({
+      rules: TRANSITIONS,
+      snapshot: satisfied('Revision Required'),
+      caller: applicant(),
+      to: 'Under Evaluation',
+      now: NOW,
+    });
+
+    expect(decision.ok).toBe(true);
+    if (!decision.ok) return;
+    expect(decision.outcome.to).toBe('Under Evaluation');
+  });
+
+  it("does not let an officer send a revision back on the applicant's behalf", () => {
+    const decision = decide({
+      rules: TRANSITIONS,
+      snapshot: satisfied('Revision Required'),
+      caller: { accountId: 'officer', kind: 'staff', scopes: ['applications:write', 'staff:evaluate'] },
+      to: 'Under Evaluation',
+      now: NOW,
+    });
+
+    expect(decision.ok).toBe(false);
   });
 
   it('refuses filing without a verified identity document', () => {

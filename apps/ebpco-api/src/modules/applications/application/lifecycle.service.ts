@@ -58,6 +58,7 @@ interface SnapshotRow {
   identity_document_verified: boolean;
   required_documents_present: boolean;
   open_instruction_count: number;
+  returned_documents_outstanding: number;
   evaluations_complete: boolean;
   order_of_payment_issued: boolean;
   payment_proof_submitted: boolean;
@@ -104,6 +105,16 @@ const SNAPSHOT_SQL = `
         join letters_of_instruction l on l.id = ii.letter_id
        where l.application_id = a.id and ii.resolved_at is null
     ) as open_instruction_count,
+    (
+      -- Returned by the office and not yet superseded by a replacement.
+      select count(*)::int from documents d
+       where d.application_id = a.id and d.deleted_at is null
+         and d.review_status in ('Revision Required', 'Rejected')
+         and not exists (
+           select 1 from documents n
+            where n.supersedes_document_id = d.id and n.deleted_at is null
+         )
+    ) as returned_documents_outstanding,
     (
       select count(*)::int from evaluations e
        where e.application_id = a.id and e.result = 'Passed'
@@ -158,6 +169,7 @@ export class LifecycleService {
       identityDocumentVerified: row.identity_document_verified,
       requiredDocumentsPresent: row.required_documents_present,
       openInstructionCount: row.open_instruction_count,
+      returnedDocumentsOutstanding: row.returned_documents_outstanding,
       evaluationsComplete: row.evaluations_complete,
       orderOfPaymentIssued: row.order_of_payment_issued,
       paymentProofSubmitted: row.payment_proof_submitted,

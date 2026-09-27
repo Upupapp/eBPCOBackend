@@ -583,6 +583,54 @@ export class ApplicantWriteController {
    * and unwinding it is a treasury operation rather than a button. The
    * lifecycle table enforces this; the endpoint just asks.
    */
+  /**
+   * Sending an application the office returned for changes back to it.
+   *
+   * `Revision Required -> Under Evaluation` is the applicant's move alone
+   * (lifecycle.ts), and until this route the only way to make it was
+   * answering a Letter of Instruction — which nothing in this service ever
+   * issues. Officers return an application by marking documents Revision
+   * Required and moving the status, so every returned application sat at
+   * Revision Required for good: replacing the document changed nothing, and
+   * no officer is allowed to make the move instead.
+   *
+   * The lifecycle engine still decides: every document the office returned
+   * must have a replacement (`returned-documents-replaced`), and any letter
+   * that does exist must be answered first (`all-instructions-resolved`).
+   */
+  @Post('applications/:applicationId/resubmit')
+  @HttpCode(HttpStatus.OK)
+  @RequireScopes('applications:write')
+  async sendBackToOffice(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+    @Headers('idempotency-key') key?: string,
+  ): Promise<Record<string, unknown>> {
+    const caller = applicantCaller(request);
+    const idempotency = idempotencyKey(key);
+    if (await this.applications.byId(caller.accountId, applicationId) === null) {
+      throw ProblemException.notFound('No such application.');
+    }
+
+    const moved = await this.lifecycle.transition({
+      applicationId, caller, to: 'Under Evaluation', idempotencyKey: idempotency,
+    });
+    if (moved.ok) return { status: moved.status, version: moved.version };
+    if ('reused' in moved) {
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+        'This Idempotency-Key was already used for a different request. Use a new key.',
+      );
+    }
+    if (moved.refusal.kind === 'illegal-transition') {
+      throw new ProblemException(
+        ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+        'Only an application the office returned for changes can be sent back to it.',
+      );
+    }
+    throw refusalToProblem(moved.refusal);
+  }
+
   @Post('applications/:applicationId/cancel')
   @HttpCode(HttpStatus.OK)
   @RequireScopes('applications:write')

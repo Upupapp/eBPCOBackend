@@ -23,6 +23,12 @@ export interface ApplicationSnapshot {
   readonly identityDocumentVerified: boolean;
   readonly requiredDocumentsPresent: boolean;
   readonly openInstructionCount: number;
+  /**
+   * Documents the office returned (Revision Required or Rejected) that no
+   * newer upload replaces yet. Non-zero means the applicant still owes the
+   * office a corrected file, so sending the application back is premature.
+   */
+  readonly returnedDocumentsOutstanding: number;
   readonly evaluationsComplete: boolean;
   readonly orderOfPaymentIssued: boolean;
   readonly paymentProofSubmitted: boolean;
