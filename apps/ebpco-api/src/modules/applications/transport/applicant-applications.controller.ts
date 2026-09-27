@@ -209,6 +209,23 @@ export class ApplicantApplicationsController {
       'No permit has been issued for this application yet.');
   }
 
+  /**
+   * The open Letters of Instruction -- what the office asked for when it
+   * returned the application, and the id to resubmit against
+   * (POST /applications/:id/instructions/:letterId/resubmit). An empty array
+   * when nothing is outstanding.
+   */
+  @Get(':applicationId/instructions')
+  @RequireScopes('applications:read')
+  async instructions(
+    @Req() request: AuthenticatedRequest,
+    @Param('applicationId') applicationId: string,
+  ): Promise<ReadonlyArray<Record<string, unknown>>> {
+    const letters = await this.applications.instructions(callerAccount(request), applicationId);
+    if (letters === null) throw ProblemException.notFound('No such application.');
+    return letters;
+  }
+
   @Get(':applicationId/timeline')
   @RequireScopes('applications:read')
   async timeline(

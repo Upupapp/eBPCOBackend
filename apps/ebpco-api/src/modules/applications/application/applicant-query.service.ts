@@ -387,19 +387,62 @@ export class ApplicantQueryService {
     }));
   }
 
+  /**
+   * The Letters of Instruction on this application that still have something
+   * to answer, newest first -- what an applicant reads while the application
+   * is in Revision Required, and the letter id they resubmit against.
+   * Null when the application is not theirs.
+   */
+  async instructions(accountId: string, applicationId: string): Promise<ReadonlyArray<{
+    letterId: string; issuedAt: string;
+    items: ReadonlyArray<{ id: string; subject: string; remark: string; resolvedAt: string | null }>;
+  }> | null> {
+    if (await this.byId(accountId, applicationId) === null) return null;
+    const result = await this.db.query<{
+      letter_id: string; issued_at: Date; item_id: string; subject: string; remark: string; resolved_at: Date | null;
+    }>(
+      `select l.id as letter_id, l.issued_at, i.id as item_id, i.subject, i.remark, i.resolved_at
+         from letters_of_instruction l
+         join instruction_items i on i.letter_id = l.id
+        where l.application_id = $1 and l.closed_at is null
+          and exists (select 1 from instruction_items o where o.letter_id = l.id and o.resolved_at is null)
+        order by l.issued_at desc, i.id`,
+      [applicationId],
+    );
+    const letters = new Map<string, {
+      letterId: string; issuedAt: string;
+      items: { id: string; subject: string; remark: string; resolvedAt: string | null }[];
+    }>();
+    for (const row of result.rows) {
+      const letter = letters.get(row.letter_id)
+        ?? { letterId: row.letter_id, issuedAt: row.issued_at.toISOString(), items: [] };
+      letter.items.push({
+        id: row.item_id, subject: row.subject, remark: row.remark,
+        resolvedAt: row.resolved_at === null ? null : row.resolved_at.toISOString(),
+      });
+      letters.set(row.letter_id, letter);
+    }
+    return [...letters.values()];
+  }
+
   async permit(accountId: string, applicationId: string): Promise<{
     permitNumber: string; issuedDate: string; scope: string | null;
     conditions: readonly string[];
-    release: { status: string; method: string | null; releasedAt: string | null } | null;
+    release: {
+      status: string; method: string | null; releasedAt: string | null;
+      claimLocation: string | null; officeHours: string | null; bringWithYou: readonly string[];
+    } | null;
   } | null> {
     if (await this.byId(accountId, applicationId) === null) return null;
 
     const result = await this.db.query<{
       permit_number: string; issued_date: Date; scope: string | null; conditions: string[];
       release_status: string | null; release_method: string | null; released_at: Date | null;
+      claim_location: string | null; office_hours: string | null; bring_with_you: string[] | null;
     }>(
       `select g.permit_number, g.issued_date, g.scope, g.conditions,
-              r.status as release_status, r.method as release_method, r.released_at
+              r.status as release_status, r.method as release_method, r.released_at,
+              r.claim_location, r.office_hours, r.bring_with_you
          from generated_permits g
          left join permit_releases r on r.application_id = g.application_id
         where g.application_id = $1`,
@@ -421,6 +464,12 @@ export class ApplicantQueryService {
         status: row.release_status,
         method: row.release_method,
         releasedAt: row.released_at === null ? null : row.released_at.toISOString(),
+        // What the Releasing Officer typed when preparing the release. They
+        // were stored and never sent, so the citizen was shown a generic
+        // "bring a valid ID" instead of the office's actual hours and list.
+        claimLocation: row.claim_location,
+        officeHours: row.office_hours,
+        bringWithYou: row.bring_with_you ?? [],
       },
     };
   }

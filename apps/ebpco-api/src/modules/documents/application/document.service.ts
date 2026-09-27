@@ -146,6 +146,13 @@ export class DocumentService {
       };
     }
 
+    // An applicant adding a document to an application already filed (a
+    // missing one, asked for when it was returned) -- the Records Officer
+    // should hear about it. A replacement is announced by `resubmit`.
+    if (caller.kind === 'applicant' && applicationId !== null && supersedes === null) {
+      await this.tellRecordsOfficers(applicationId, label, 'added');
+    }
+
     return { ok: true, documentId, status, removedMetadata: scrubbed.removed };
   }
 
@@ -199,13 +206,22 @@ export class DocumentService {
     if (!row.scan_cleared) return { ok: false, reason: 'not-scan-cleared' };
 
     const now = this.clock();
-    await this.db.query(
-      `update documents
-          set review_status = $1, review_reason_code = $2, review_remark = $3,
-              reviewed_by = $4, reviewed_at = $5
-        where id = $6`,
-      [status, reasonCode, remark, caller.accountId, now, documentId],
-    );
+    await this.db.transaction(async (tx) => {
+      await tx.query(
+        `update documents
+            set review_status = $1, review_reason_code = $2, review_remark = $3,
+                reviewed_by = $4, reviewed_at = $5
+          where id = $6`,
+        [status, reasonCode, remark, caller.accountId, now, documentId],
+      );
+      // A document sent back told the applicant nothing -- found live: the
+      // citizen only learned of it by happening to open the application.
+      // Written in the same transaction as the verdict, so a notice never
+      // describes a verdict that rolled back.
+      if (isAdverse) {
+        await this.tellApplicantDocumentReturned(tx, applicationId, documentId, status, remark);
+      }
+    });
     await this.audit.append({
       action: 'document.reviewed',
       subjectType: 'document',
@@ -408,8 +424,78 @@ export class DocumentService {
       status: 201, body,
     });
 
+    if (caller.kind === 'applicant') {
+      await this.tellRecordsOfficers(applicationId, options.label, 'replaced');
+    }
+
     return { kind: 'created', documentId: uploaded.documentId, status: uploaded.status,
       removedMetadata: uploaded.removedMetadata };
+  }
+
+  /**
+   * The applicant's side of an adverse document verdict. Uses the catalogued
+   * `letter-of-instruction-issued` type (category Document Reminders, so the
+   * applicant's own preferences apply), with the document and the officer's
+   * reason in the body and a link to the application itself.
+   */
+  private async tellApplicantDocumentReturned(
+    tx: SqlClient, applicationId: string, documentId: string,
+    status: 'Rejected' | 'Revision Required', remark: string | null,
+  ): Promise<void> {
+    const found = await tx.query<{ account_id: string; label: string; reference_number: string }>(
+      `select ap.account_id, d.label, a.reference_number
+         from documents d
+         join applications a on a.id = d.application_id
+         join applicants ap on ap.id = a.applicant_id
+        where d.id = $1 and a.id = $2`,
+      [documentId, applicationId],
+    );
+    const row = found.rows[0];
+    if (row === undefined) return;
+    const verb = status === 'Rejected' ? 'was not accepted' : 'needs to be replaced';
+    await tx.query(
+      `insert into notifications (account_id, type, application_id, title, body, deep_link)
+       values ($1, 'letter-of-instruction-issued', $2, $3, $4, $5)`,
+      [
+        row.account_id, applicationId,
+        'A document needs your attention',
+        `"${row.label}" on ${row.reference_number} ${verb}.${remark ? ` Reason: ${remark}` : ''} `
+          + 'Open your application to replace it.',
+        `/applications/${applicationId}`,
+      ],
+    );
+  }
+
+  /**
+   * Tells the Records Officers -- the role that reviews documents -- that an
+   * applicant has sent a new or replacement document on a filed application,
+   * so it does not sit unreviewed until someone happens to open the record.
+   * Names the reference and the document, never the applicant (the staff
+   * catalogue's rule). Best-effort: the upload has already happened.
+   */
+  private async tellRecordsOfficers(
+    applicationId: string, label: string, how: 'replaced' | 'added',
+  ): Promise<void> {
+    const app = await this.db.query<{ reference_number: string; lifecycle_status: string }>(
+      'select reference_number, lifecycle_status from applications where id = $1', [applicationId],
+    );
+    const row = app.rows[0];
+    if (row === undefined || row.lifecycle_status === 'Draft') return;
+    await this.db.query(
+      `insert into staff_notifications
+         (account_id, type, application_id, routed_to_role, title, body, deep_link)
+       select a.id, 'document-resubmitted', $1, 'records-officer', $2, $3, $4
+         from accounts a
+         join account_roles r on r.account_id = a.id
+        where r.role = 'records-officer' and a.kind = 'staff' and a.disabled_at is null
+       on conflict do nothing`,
+      [
+        applicationId,
+        `${row.reference_number}: document ${how}`,
+        `The applicant ${how} "${label}" on ${row.reference_number}. Review it in the Documents tab.`,
+        `/staff/applications/${applicationId}`,
+      ],
+    );
   }
 
   /**

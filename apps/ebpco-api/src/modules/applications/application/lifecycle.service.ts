@@ -347,6 +347,18 @@ export class LifecycleService {
         });
       }
 
+      // Returning an application for revision IS issuing a Letter of
+      // Instruction: the letter is what the applicant answers, and answering it
+      // (`InstructionResponseService`, POST .../instructions/:id/resubmit) is
+      // the ONLY move out of Revision Required an applicant can make. Until
+      // 2026-09-27 nothing in production wrote a letter, so every application
+      // an officer returned was stuck -- found live: the citizen was told to
+      // "open the Letter of Instruction", had none to open, and no officer
+      // could move the application on either.
+      if (to === 'Revision Required' && caller.kind === 'staff') {
+        await this.issueLetter(tx, applicationId, caller.accountId, remarks);
+      }
+
       const result = { status: to, version: decision.outcome.nextVersion };
       if (idempotencyKey !== undefined) {
         // Inside the same transaction as the move. Recorded outside one, a
@@ -360,6 +372,39 @@ export class LifecycleService {
 
       return { ok: true, ...result };
     });
+  }
+
+  /**
+   * One letter, one item: the officer's remarks are what the applicant must
+   * address. An earlier letter still open on this application is closed
+   * first -- a second return supersedes the first, and leaving its items open
+   * would count them against the applicant forever.
+   */
+  private async issueLetter(
+    tx: SqlClient, applicationId: string, officerId: string, remarks: string | undefined,
+  ): Promise<void> {
+    const now = this.clock();
+    await tx.query(
+      `update instruction_items set resolved_at = $2, response = coalesce(response, 'Superseded by a later return.')
+        where resolved_at is null
+          and letter_id in (select id from letters_of_instruction where application_id = $1 and closed_at is null)`,
+      [applicationId, now],
+    );
+    await tx.query(
+      'update letters_of_instruction set closed_at = $2 where application_id = $1 and closed_at is null',
+      [applicationId, now],
+    );
+    const letter = await tx.query<{ id: string }>(
+      `insert into letters_of_instruction (application_id, issued_at, issued_by)
+       values ($1, $2, $3) returning id`,
+      [applicationId, now, officerId],
+    );
+    const remark = (remarks ?? '').trim()
+      || 'The office returned this application for revision. Contact the Office of the Municipal Engineer for what to change.';
+    await tx.query(
+      `insert into instruction_items (letter_id, subject, remark) values ($1, $2, $3)`,
+      [letter.rows[0]!.id, 'What the office needs', remark],
+    );
   }
 
   /**

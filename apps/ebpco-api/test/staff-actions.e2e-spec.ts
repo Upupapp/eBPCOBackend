@@ -951,3 +951,192 @@ describe("the applicant's profile photo, seen by staff", () => {
     expect((await get(`/staff/applications/${randomUUID()}/applicant-photo`, await staffToken('records-officer'))).statusCode).toBe(404);
   });
 });
+
+describe('returning an application, and the applicant answering it (found live 2026-09-27)', () => {
+  const applicantToken = async (): Promise<string> => (await tokens.issueAccessToken({
+    sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+  })).token;
+
+  it('Return for Revision issues a Letter of Instruction the applicant can read and resubmit against', async () => {
+    // Before the fix nothing wrote a letter, so an application an officer
+    // returned could be moved by nobody: the applicant had no letter to
+    // answer, and no officer is allowed Revision Required -> Under Evaluation.
+    const id = await file('RR-LETTER-1', 'Document Verification');
+    const evaluator = await staffToken('evaluator');
+
+    const returned = await post(`/staff/applications/${id}/transitions`, evaluator, {
+      to: 'Revision Required', remarks: 'Add the lot owner’s written consent; the tax declaration is under another name.',
+    });
+    expect(returned.statusCode).toBe(200);
+
+    const citizen = await applicantToken();
+    const letters = await get(`/applications/${id}/instructions`, citizen);
+    expect(letters.statusCode).toBe(200);
+    const [letter] = letters.json<Array<{ letterId: string; items: Array<{ remark: string; resolvedAt: string | null }> }>>();
+    expect(letter?.items).toHaveLength(1);
+    expect(letter?.items[0]?.remark).toContain('written consent');
+    expect(letter?.items[0]?.resolvedAt).toBeNull();
+
+    const resubmitted = await post(`/applications/${id}/instructions/${letter!.letterId}/resubmit`, citizen);
+    expect(resubmitted.statusCode).toBe(200);
+    const status = await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [id]);
+    expect(status.rows[0]?.lifecycle_status).toBe('Under Evaluation');
+
+    const after = await get(`/applications/${id}/instructions`, citizen);
+    expect(after.json<unknown[]>()).toEqual([]);
+  });
+
+  it('a later return closes the earlier letter instead of leaving its item open for ever', async () => {
+    const id = await file('RR-LETTER-2', 'Document Verification');
+    const evaluator = await staffToken('evaluator');
+    await post(`/staff/applications/${id}/transitions`, evaluator, { to: 'Revision Required', remarks: 'First request, please.' });
+    const citizen = await applicantToken();
+    const first = (await get(`/applications/${id}/instructions`, citizen)).json<Array<{ letterId: string }>>()[0]!;
+    await post(`/applications/${id}/instructions/${first.letterId}/resubmit`, citizen);
+    await post(`/staff/applications/${id}/transitions`, evaluator, { to: 'Revision Required', remarks: 'Second request, please.' });
+
+    const open = (await get(`/applications/${id}/instructions`, citizen)).json<Array<{ items: Array<{ remark: string }> }>>();
+    expect(open).toHaveLength(1);
+    expect(open[0]?.items[0]?.remark).toBe('Second request, please.');
+  });
+
+  it('refuses another applicant reading the letters', async () => {
+    const id = await file('RR-LETTER-3', 'Submitted');
+    const strangerId = randomUUID();
+    await db.query(
+      `insert into accounts (id, kind, email, email_normalised, password_hash)
+       values ($1,'applicant','jose@example.ph','jose@example.ph','scrypt$1$1$1$a$b')`, [strangerId]);
+    await db.query(
+      `insert into applicants (id, account_id, first_name, last_name) values ($1,$2,'Jose','Reyes')`,
+      [randomUUID(), strangerId]);
+    const stranger = (await tokens.issueAccessToken({
+      sub: strangerId, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+    expect((await get(`/applications/${id}/instructions`, stranger)).statusCode).toBe(404);
+  });
+});
+
+describe('document decisions reach the other side (found live 2026-09-27)', () => {
+  const PDF = Buffer.from('%PDF-1.4 minimal test file');
+  const applicantToken = async (): Promise<string> => (await tokens.issueAccessToken({
+    sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+  })).token;
+
+  async function clearedDocument(applicationId: string, reviewStatus: string | null): Promise<string> {
+    const id = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type,
+                              byte_size, sha256, storage_key, status, scan_cleared, review_status,
+                              review_remark, reviewed_at)
+       values ($1,$2,$3,'Fence Plan / Site Development Plan','plan.pdf','application/pdf',1024,
+               repeat('b',64),$4,'Approved',true,$5,$6,$7)`,
+      [id, applicationId, APPLICANT_ACCOUNT, `key-${id}`, reviewStatus,
+       reviewStatus === 'Revision Required' ? 'Not signed.' : null,
+       reviewStatus === null ? null : new Date()],
+    );
+    return id;
+  }
+
+  it('tells the applicant, with the reason, when a document is sent back', async () => {
+    const id = await file('DOC-NOTE-1', 'Document Verification');
+    const documentId = await clearedDocument(id, null);
+    const records = await staffToken('records-officer');
+
+    const reviewed = await post(`/staff/applications/${id}/documents/${documentId}/review`, records, {
+      status: 'Revision Required', remark: 'The plan is not signed and sealed by the engineer.',
+    });
+    expect(reviewed.statusCode).toBeLessThan(300);
+
+    const told = await db.query<{ title: string; body: string; deep_link: string }>(
+      `select title, body, deep_link from notifications
+        where account_id = $1 and application_id = $2 and type = 'letter-of-instruction-issued'`,
+      [APPLICANT_ACCOUNT, id],
+    );
+    expect(told.rows).toHaveLength(1);
+    expect(told.rows[0]?.body).toContain('Fence Plan / Site Development Plan');
+    expect(told.rows[0]?.body).toContain('not signed and sealed');
+    expect(told.rows[0]?.deep_link).toBe(`/applications/${id}`);
+  });
+
+  it('does not notify for a favourable verdict', async () => {
+    const id = await file('DOC-NOTE-2', 'Document Verification');
+    const documentId = await clearedDocument(id, null);
+    const records = await staffToken('records-officer');
+    await post(`/staff/applications/${id}/documents/${documentId}/review`, records, { status: 'Accepted' });
+
+    const told = await db.query('select 1 from notifications where application_id = $1', [id]);
+    expect(told.rows).toHaveLength(0);
+  });
+
+  it('tells the Records Officers when the applicant replaces a document', async () => {
+    const id = await file('DOC-NOTE-3', 'Document Verification');
+    const documentId = await clearedDocument(id, 'Revision Required');
+    await staffToken('records-officer');
+
+    const replaced = await post(`/applications/${id}/documents/${documentId}/resubmit`, await applicantToken(), {
+      fileName: 'plan-signed.pdf', label: 'Fence Plan / Site Development Plan', contentBase64: PDF.toString('base64'),
+    });
+    expect(replaced.statusCode).toBe(201);
+
+    const told = await db.query<{ title: string; body: string; routed_to_role: string }>(
+      `select title, body, routed_to_role from staff_notifications
+        where application_id = $1 and type = 'document-resubmitted'`, [id],
+    );
+    expect(told.rows).toHaveLength(1);
+    expect(told.rows[0]?.routed_to_role).toBe('records-officer');
+    expect(told.rows[0]?.body).toContain('replaced "Fence Plan / Site Development Plan"');
+    // The staff catalogue's rule: the reference, never the applicant's name.
+    expect(told.rows[0]?.body).not.toContain('Maria');
+  });
+});
+
+describe('the permit, outside the office (found live 2026-09-27)', () => {
+  async function issued(reference: string, permitNumber: string): Promise<string> {
+    const id = await file(reference, 'Ready for Release');
+    const officer = await staffToken('building-official');
+    const officerId = (await db.query<{ id: string }>(
+      "select id from accounts where kind = 'staff' order by created_at desc limit 1")).rows[0]!.id;
+    void officer;
+    await db.query(
+      `insert into generated_permits (application_id, permit_number, issued_date, scope, generated_by)
+       values ($1,$2,now(),'A perimeter fence',$3)`, [id, permitNumber, officerId]);
+    await db.query(
+      `insert into permit_releases (application_id, status, claim_location, office_hours, bring_with_you)
+       values ($1,'Ready for Release','Office of the Municipal Engineer','Mon–Fri, 8:00 AM – 5:00 PM',
+               array['Valid government-issued ID','Copy of the Official Receipt'])`, [id]);
+    return id;
+  }
+
+  it('gives the applicant the pickup place, hours and what to bring that the officer typed', async () => {
+    const id = await issued('PERMIT-PICKUP-1', 'FP-2026-000901');
+    const citizen = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+
+    const permit = await get(`/applications/${id}/permit`, citizen);
+    expect(permit.statusCode).toBe(200);
+    expect(permit.json<{ release: Record<string, unknown> }>().release).toMatchObject({
+      claimLocation: 'Office of the Municipal Engineer',
+      officeHours: 'Mon–Fri, 8:00 AM – 5:00 PM',
+      bringWithYou: ['Valid government-issued ID', 'Copy of the Official Receipt'],
+    });
+  });
+
+  it('confirms a permit number on record to anyone, without the owner’s details', async () => {
+    await issued('PERMIT-PUBLIC-1', 'FP-2026-000902');
+
+    const found = await app.inject({ method: 'GET', url: '/public/permits/fp-2026-000902' });
+    expect(found.statusCode).toBe(200);
+    const body = found.json<Record<string, unknown>>();
+    expect(body).toMatchObject({ permitNumber: 'FP-2026-000902', permitType: 'Fencing Permit', released: false });
+    expect(JSON.stringify(body)).not.toContain('Maria');
+    expect(JSON.stringify(body)).not.toContain('maria@example.ph');
+  });
+
+  it('answers an unknown or malformed number the same way', async () => {
+    expect((await app.inject({ method: 'GET', url: '/public/permits/FP-1999-000001' })).statusCode).toBe(404);
+    expect((await app.inject({ method: 'GET', url: '/public/permits/%27%3B%20drop' })).statusCode).toBe(404);
+  });
+});
+

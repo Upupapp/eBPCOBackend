@@ -19,6 +19,9 @@ export const STAFF_NOTICE_TYPES: readonly StaffNoticeType[] = [
   { type: 'application-awaiting-you', requiresAct: true },
   { type: 'assessment-overdue', requiresAct: true },
   { type: 'workflow-changed', requiresAct: false },
+  // Migration 058: an applicant sent a new or replacement document on a
+  // filed application -- the Records Officer's worklist, not a progress report.
+  { type: 'document-resubmitted', requiresAct: true },
 ];
 
 export interface StaffNotice {

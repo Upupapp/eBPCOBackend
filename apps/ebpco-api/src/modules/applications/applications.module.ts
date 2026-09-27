@@ -28,6 +28,7 @@ import { ReportsController } from '../compliance/transport/reports.controller';
 import { CALENDAR_REPOSITORY } from '../compliance/application/calendar.repository';
 import { WorkflowConfigService } from './application/workflow-config.service';
 import { WorkflowController } from './transport/workflow.controller';
+import { PublicPermitsController } from './transport/public-permits.controller';
 import { StaffNotificationService } from '../notifications/application/staff-notification.service';
 import { NotificationsModule } from '../notifications/notifications.module';
 
@@ -110,6 +111,7 @@ export { CALENDAR_REPOSITORY };
     StaffApplicationsController, StaffActionsController, RequirementsController,
     StaffEvaluationsController,
     WorkflowController,
+    PublicPermitsController,
     // Compliance code, registered here because the calendar token it needs is
     // provided by this module. Moving the token would mean ComplianceModule
     // importing ApplicationsModule, and ComplianceModule is @Global and already
