@@ -120,8 +120,6 @@ describe('every notice in the catalog has something that sends it', () => {
   // forgotten, which is how the ten below accumulated.
 
   const NOT_YET_EMITTED: Readonly<Record<string, string>> = {
-    'letter-of-instruction-issued':
-      'nothing ISSUES a letter of instruction — the only path is respond(), and there is no create route',
     'fsec-cleared':
       'fire safety is recorded as an evaluation stage; there is no separate FSEC record or clearance route',
     'inspection-scheduled':
@@ -176,7 +174,8 @@ describe('every notice in the catalog has something that sends it', () => {
     // Recorded rather than asserted at a threshold: the number should move in
     // one direction, and a threshold would let it sit still.
     const emitted = serverGenerated.length - unemitted.length;
-    expect(emitted).toBe(15);
+    // 16 since 2026-09-27: a document sent back now sends letter-of-instruction-issued.
+    expect(emitted).toBe(16);
     expect(serverGenerated).toHaveLength(23);
   });
 });

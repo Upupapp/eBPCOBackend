@@ -148,6 +148,20 @@ describe('moving an application', () => {
     );
     expect(suspended.rows[0]?.pledge_suspended_since).not.toBeNull();
 
+    // Returning it issued a Letter of Instruction (2026-09-27), and the
+    // applicant's way back is answering it — the move is refused while it is
+    // still open, exactly as the resubmit route relies on.
+    const letters = await db.query<{ n: number }>(
+      `select count(*)::int as n from instruction_items i
+         join letters_of_instruction l on l.id = i.letter_id
+        where l.application_id = $1 and i.resolved_at is null`, [APPLICATION]);
+    expect(letters.rows[0]?.n).toBe(1);
+    const early = await service.transition({ applicationId: APPLICATION, caller: applicant, to: 'Under Evaluation' });
+    expect(early.ok).toBe(false);
+
+    await db.query(
+      `update instruction_items set resolved_at = now(), response = 'Done.'
+        where letter_id in (select id from letters_of_instruction where application_id = $1)`, [APPLICATION]);
     await service.transition({ applicationId: APPLICATION, caller: applicant, to: 'Under Evaluation' });
 
     const resumed = await db.query<{ pledge_suspended_since: Date | null }>(
