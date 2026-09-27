@@ -573,6 +573,81 @@ describe('withdrawing', () => {
   });
 });
 
+describe('sending a returned application back to the office', () => {
+  // The office returns an application by marking a document Revision Required
+  // and moving the status — it never issues a Letter of Instruction — and only
+  // the applicant may make the move back. Before this route, nothing could.
+  async function returnedApplication(): Promise<{ applicationId: string; returnedId: string }> {
+    const applicationId = (await post('/applications', maria, submission())).json<{ id: string }>().id;
+    for (const status of ['Received', 'Document Verification', 'Revision Required']) {
+      await db.query('update applications set lifecycle_status = $1 where id = $2', [status, applicationId]);
+    }
+    const returnedId = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type, byte_size,
+                              sha256, storage_key, status, requirement_code, review_status, review_remark,
+                              reviewed_at)
+       values ($1,$2,$3,'Survey Plan','plan.pdf','application/pdf',1024,$4,$5,'Pending','survey-plan',
+               'Revision Required','Not signed by a licensed geodetic engineer.',now())`,
+      [returnedId, applicationId, MARIA, 'a'.repeat(64), `objects/${returnedId}.pdf`],
+    );
+    return { applicationId, returnedId };
+  }
+
+  async function replace(applicationId: string, returnedId: string): Promise<void> {
+    const id = randomUUID();
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type, byte_size,
+                              sha256, storage_key, status, requirement_code, supersedes_document_id)
+       values ($1,$2,$3,'Survey Plan','plan-signed.pdf','application/pdf',2048,$4,$5,'Pending','survey-plan',$6)`,
+      [id, applicationId, MARIA, 'b'.repeat(64), `objects/${id}.pdf`, returnedId],
+    );
+  }
+
+  const statusOf = async (applicationId: string): Promise<string> =>
+    (await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    )).rows[0]!.lifecycle_status;
+
+  it('is refused while a returned document has not been replaced, and says what to do', async () => {
+    const { applicationId } = await returnedApplication();
+
+    const response = await post(`/applications/${applicationId}/resubmit`, maria);
+
+    expect(response.statusCode).toBe(422);
+    expect(response.json().detail).toMatch(/not been replaced/i);
+    expect(await statusOf(applicationId)).toBe('Revision Required');
+  });
+
+  it('puts it back in front of an officer once every returned document is replaced', async () => {
+    const { applicationId, returnedId } = await returnedApplication();
+    await replace(applicationId, returnedId);
+
+    const response = await post(`/applications/${applicationId}/resubmit`, maria);
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json<{ status: string }>().status).toBe('Under Evaluation');
+    expect(await statusOf(applicationId)).toBe('Under Evaluation');
+  });
+
+  it('is refused for an application the office has not returned', async () => {
+    const applicationId = (await post('/applications', maria, submission())).json<{ id: string }>().id;
+
+    const response = await post(`/applications/${applicationId}/resubmit`, maria);
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().detail).toMatch(/returned for changes/i);
+  });
+
+  it('is refused for someone else’s application', async () => {
+    const { applicationId, returnedId } = await returnedApplication();
+    await replace(applicationId, returnedId);
+
+    expect((await post(`/applications/${applicationId}/resubmit`, jose)).statusCode).toBe(404);
+    expect(await statusOf(applicationId)).toBe('Revision Required');
+  });
+});
+
 describe('registering a business', () => {
   const business = {
     name: 'Aling Nena Sari-Sari Store', category: 'Retail', street: '12 Rizal Street',

@@ -64,6 +64,8 @@ export const PRECONDITION_MESSAGE: Readonly<Record<Precondition, string>> = {
     'The identity document on this application has not been verified yet.',
   'required-documents-present':
     'Some required documents are missing or have not cleared scanning.',
+  'returned-documents-replaced':
+    'A document the office returned has not been replaced yet. Upload the corrected file first.',
   'all-instructions-resolved':
     'There are unresolved items on the Letter of Instruction. Respond to all of them before resubmitting.',
   'order-of-payment-issued':

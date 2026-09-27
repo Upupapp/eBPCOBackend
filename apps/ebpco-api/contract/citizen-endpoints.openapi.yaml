@@ -395,6 +395,49 @@ paths:
           description: Not the caller's application, or no such application.
           content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
 
+  /applications/{applicationId}/resubmit:
+    post:
+      operationId: sendBackToOffice
+      summary: Send an application the office returned for changes back to it
+      description: |
+        `Revision Required -> Under Evaluation`, the applicant's move alone.
+        The office returns an application by marking documents Revision
+        Required or Rejected; the applicant replaces each one
+        (`POST /applications/{applicationId}/documents/{documentId}/resubmit`)
+        and then calls this to put the application back in front of an
+        officer.
+
+        Refused with 422 while any returned document has no replacement
+        (`returned-documents-replaced`), or while a Letter of Instruction has
+        open items (`all-instructions-resolved`); `detail` names every unmet
+        condition in the applicant's words. Refused with 409 for an
+        application that is not at Revision Required.
+      security: [{ bearerAuth: [applications:write] }]
+      parameters:
+        - { name: applicationId, in: path, required: true, schema: { type: string, format: uuid } }
+        - { name: Idempotency-Key, in: header, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Back with the office.
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: false
+                required: [status, version]
+                properties:
+                  status: { type: string, enum: [Under Evaluation] }
+                  version: { type: integer }
+        '404':
+          description: Not the caller's application, or no such application.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '409':
+          description: The application is not waiting on the applicant, or the Idempotency-Key was reused.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+        '422':
+          description: A returned document is not replaced yet, or a Letter of Instruction has open items.
+          content: { application/problem+json: { schema: { $ref: '#/components/schemas/Problem' } } }
+
   /applications/{applicationId}/documents/{documentId}/resubmit:
     post:
       operationId: resubmitDocument
