@@ -191,8 +191,20 @@ export class LifecycleService {
      * a button always has one, and the transport is where that is enforced.
      */
     idempotencyKey?: string;
+    /**
+     * The applicant is sending a returned application back
+     * (POST /applications/:id/resubmit), and doing so IS their answer to the
+     * Letter of Instruction the return issued. The open letter must not
+     * refuse its own answer, so `all-instructions-resolved` is judged as met
+     * and the items are closed -- but only once the move has succeeded, in
+     * the same transaction, so a refused send-back leaves the letter open.
+     * Every other precondition (returned-documents-replaced included) applies.
+     */
+    answersOpenInstructions?: boolean;
   }): Promise<TransitionResult> {
     const { applicationId, caller, to, expectedVersion, remarks, idempotencyKey } = options;
+    const answering = options.answersOpenInstructions === true && caller.kind === 'applicant'
+      && to === 'Under Evaluation';
     const digest = requestDigest({ applicationId, to, remarks: remarks ?? null });
 
     return this.db.transaction(async (tx) => {
@@ -222,7 +234,10 @@ export class LifecycleService {
         return { ok: false, refusal: { kind: 'stale-version', expected: expectedVersion ?? 0, actual: -1 } };
       }
 
-      const snapshot = await this.snapshot(applicationId, tx);
+      const read = await this.snapshot(applicationId, tx);
+      const snapshot = read !== null && answering && read.status === 'Revision Required'
+        ? { ...read, openInstructionCount: 0 }
+        : read;
       if (snapshot === null) {
         return { ok: false, refusal: { kind: 'stale-version', expected: expectedVersion ?? 0, actual: -1 } };
       }
@@ -334,6 +349,15 @@ export class LifecycleService {
           ok: false,
           refusal: { kind: 'stale-version', expected: snapshot.version, actual: -1 },
         };
+      }
+
+      if (answering && snapshot.status === 'Revision Required') {
+        await tx.query(
+          `update instruction_items set resolved_at = $2, response = coalesce(response, 'Sent back to the office.')
+            where resolved_at is null
+              and letter_id in (select id from letters_of_instruction where application_id = $1)`,
+          [applicationId, this.clock()],
+        );
       }
 
       await this.recordEvents(tx, decision.outcome.events, caller, snapshot);

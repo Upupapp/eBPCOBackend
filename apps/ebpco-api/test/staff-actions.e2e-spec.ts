@@ -987,6 +987,50 @@ describe('returning an application, and the applicant answering it (found live 2
     expect(after.json<unknown[]>()).toEqual([]);
   });
 
+  it('Send Back to the Office answers the letter and moves the application on, in one step', async () => {
+    // Both fixes for the stranded return met here: the office's return issues
+    // a letter (its reason is what the citizen reads), and the citizen's Send
+    // Back (POST /applications/:id/resubmit) is their answer to it. The open
+    // letter must not refuse its own answer.
+    const id = await file('RR-LETTER-SENDBACK', 'Document Verification');
+    const evaluator = await staffToken('evaluator');
+    await post(`/staff/applications/${id}/transitions`, evaluator, {
+      to: 'Revision Required', remarks: 'Add the lot owner’s written consent.',
+    });
+
+    const sent = await post(`/applications/${id}/resubmit`, await applicantToken());
+    expect(sent.statusCode).toBe(200);
+
+    const after = await db.query<{ lifecycle_status: string; open: number }>(
+      `select a.lifecycle_status,
+              (select count(*)::int from instruction_items i join letters_of_instruction l on l.id = i.letter_id
+                where l.application_id = a.id and i.resolved_at is null) as open
+         from applications a where a.id = $1`, [id]);
+    expect(after.rows[0]).toEqual({ lifecycle_status: 'Under Evaluation', open: 0 });
+  });
+
+  it('a refused Send Back leaves the letter open', async () => {
+    // A returned document not yet replaced refuses the move
+    // (returned-documents-replaced); the letter must stay unanswered with it.
+    const id = await file('RR-LETTER-REFUSED', 'Document Verification');
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type, byte_size,
+                              sha256, storage_key, status, scan_cleared, review_status, review_remark, reviewed_at)
+       values ($1,$2,$3,'Fence Plan','plan.pdf','application/pdf',1024,repeat('c',64),$4,'Approved',true,
+               'Revision Required','Not signed.',now())`,
+      [randomUUID(), id, APPLICANT_ACCOUNT, `key-${randomUUID()}`]);
+    const evaluator = await staffToken('evaluator');
+    await post(`/staff/applications/${id}/transitions`, evaluator, { to: 'Revision Required', remarks: 'Sign the plan, please.' });
+
+    const sent = await post(`/applications/${id}/resubmit`, await applicantToken());
+    expect(sent.statusCode).toBeGreaterThanOrEqual(400);
+
+    const open = await db.query<{ n: number }>(
+      `select count(*)::int as n from instruction_items i join letters_of_instruction l on l.id = i.letter_id
+        where l.application_id = $1 and i.resolved_at is null`, [id]);
+    expect(open.rows[0]?.n).toBe(1);
+  });
+
   it('a later return closes the earlier letter instead of leaving its item open for ever', async () => {
     const id = await file('RR-LETTER-2', 'Document Verification');
     const evaluator = await staffToken('evaluator');

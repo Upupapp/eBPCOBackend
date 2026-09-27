@@ -614,6 +614,8 @@ export class ApplicantWriteController {
 
     const moved = await this.lifecycle.transition({
       applicationId, caller, to: 'Under Evaluation', idempotencyKey: idempotency,
+      // Sending it back answers the Letter of Instruction the return issued.
+      answersOpenInstructions: true,
     });
     if (moved.ok) return { status: moved.status, version: moved.version };
     if ('reused' in moved) {
