@@ -87,7 +87,7 @@ export const CATALOG: readonly CatalogEntry[] = [
     requiresAction: true, statutory: true, serverGenerated: true,
     deepLink: `${APPLICATION}/instructions`,
     title: 'Revision required',
-    body: 'The evaluator has returned items for correction. Open the Letter of Instruction to see what is required.' },
+    body: 'The office returned your application for changes. Open it to see what they need.' },
   { type: 'fsec-cleared', dartName: 'fsecCleared', category: 'applicationUpdates', priority: 'progress',
     requiresAction: false, statutory: false, serverGenerated: true,
     deepLink: APPLICATION,
