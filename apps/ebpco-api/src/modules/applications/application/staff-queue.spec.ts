@@ -202,13 +202,14 @@ describe('an officer sees only what their role needs', () => {
     expect(page.rows).toHaveLength(0);
   });
 
-  it('shows a cashier payment-stage applications and NOT freshly filed ones', async () => {
-    // A cashier has no business reading the address and owner of an
-    // application that has not reached assessment.
+  it('shows an assessor assessment-stage applications and NOT freshly filed ones', async () => {
+    // An assessor has no business reading the address and owner of an
+    // application that has not reached evaluation. (A cashier used to be the
+    // example here; the cashier now reads everything -- see below.)
     await file({ reference: 'BP-1', status: 'Submitted' });
-    await file({ reference: 'BP-2', status: 'Payment Submitted' });
+    await file({ reference: 'BP-2', status: 'Assessed' });
 
-    const page = await queue.page(await officer('cashier'));
+    const page = await queue.page(await officer('assessor'));
 
     expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-2']);
   });
@@ -247,9 +248,35 @@ describe('an officer sees only what their role needs', () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Payment Submitted' });
 
-    const page = await queue.page(await officer('cashier'), { statuses: ['Submitted'] });
+    // An assessor: a role that reads only its own stages (a cashier now reads
+    // every status, so it no longer demonstrates a narrowed view).
+    const page = await queue.page(await officer('assessor'), { statuses: ['Submitted'] });
 
     expect(page.rows).toHaveLength(0);
+  });
+
+  it('lets a cashier read every application, approved and rejected included', async () => {
+    // Owner ruling, 29 Sep 2026. Reading only: acting still needs each move's scope.
+    await file({ reference: 'BP-1', status: 'Submitted' });
+    const approved = await file({ reference: 'BP-2', status: 'Approved' });
+    const rejected = await file({ reference: 'BP-3', status: 'Rejected' });
+    await file({ reference: 'BP-4', status: 'Payment Submitted' });
+    const cashier = await officer('cashier');
+
+    const page = await queue.page(cashier);
+
+    expect(page.rows.map((r) => r.referenceNumber).sort()).toEqual(['BP-1', 'BP-2', 'BP-3', 'BP-4']);
+    expect((await queue.metrics(cashier)).total).toBe(4);
+    expect(await queue.detail(cashier, approved)).not.toBeNull();
+    expect(await queue.detail(cashier, rejected)).not.toBeNull();
+  });
+
+  it("still hides a citizen's own draft from a cashier", async () => {
+    const draft = await file({ reference: 'BP-1', status: 'Draft' });
+    const cashier = await officer('cashier');
+
+    expect((await queue.page(cashier)).rows).toHaveLength(0);
+    expect(await queue.detail(cashier, draft)).toBeNull();
   });
 
   it('never shows a citizen\'s own draft to anyone at the LGU', async () => {
@@ -507,9 +534,9 @@ describe('the dashboard is counted by the database, not the browser', () => {
 
   it('counts only what the caller may see', async () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
-    await file({ reference: 'BP-2', status: 'Payment Submitted' });
+    await file({ reference: 'BP-2', status: 'Assessed' });
 
-    expect((await queue.metrics(await officer('cashier'))).total).toBe(1);
+    expect((await queue.metrics(await officer('assessor'))).total).toBe(1);
   });
 
   it('excludes Revision Required from the officer backlog', async () => {

@@ -69,3 +69,27 @@ export function visibleStatusesFor(caller: Caller): readonly LifecycleStatus[] |
   }
   return [...union];
 }
+
+/**
+ * Which statuses a caller may READ in the staff queue: list, open, and count.
+ *
+ * The same as `visibleStatusesFor`, except that a cashier reads the whole
+ * pipeline (owner ruling, 29 Sep 2026: "the cashier can see every
+ * application, including the approved and rejected ones"). Kept separate
+ * rather than widening the `staff:verify-payment` row above, because that
+ * table also decides who is NOTIFIED (staff-recipients.ts treats a role that
+ * sees everything as oversight). Widening it there would change whose inbox a
+ * payment lands in; this changes only what the cashier can look at.
+ *
+ * It grants sight, not authority. Every act still needs its own scope and a
+ * legal move: a cashier can open an approved or rejected application, and can
+ * verify a payment on nothing but a payment. The one thing that follows sight
+ * is an internal note (`staff:annotate`, which the cashier already holds): a
+ * note can be left on any application the cashier can open.
+ */
+export function readableStatusesFor(caller: Caller): readonly LifecycleStatus[] | 'all' {
+  const visible = visibleStatusesFor(caller);
+  if (visible === 'all') return 'all';
+  if (caller.kind === 'staff' && caller.scopes.includes('staff:verify-payment')) return 'all';
+  return visible;
+}

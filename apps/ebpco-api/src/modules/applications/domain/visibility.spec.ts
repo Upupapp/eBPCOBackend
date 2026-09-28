@@ -2,7 +2,8 @@ import {
   ROLE_SCOPES, StaffRole, grantsAuthority, isReadOnlyRole,
 } from '../../identity/domain/account';
 import { LIFECYCLE_STATUSES, TRANSITIONS } from './lifecycle';
-import { visibleStatusesFor } from './visibility';
+import { Caller } from './application';
+import { readableStatusesFor, visibleStatusesFor } from './visibility';
 
 /**
  * Every role can see something, and can see what its own moves need.
@@ -132,5 +133,32 @@ describe('no transition names a scope that confers only sight', () => {
   it('has a read-only role to check against, so neither test is vacuous', () => {
     // Both assertions above pass trivially if `isReadOnlyRole` never matches.
     expect((Object.keys(ROLE_SCOPES) as StaffRole[]).filter(isReadOnlyRole)).toContain('auditor');
+  });
+});
+
+describe('readableStatusesFor: what the staff queue lets a role read', () => {
+  const as = (role: StaffRole): Caller => ({ kind: 'staff', accountId: 'x', scopes: [...ROLE_SCOPES[role]] });
+
+  it('lets a cashier read every status', () => {
+    expect(readableStatusesFor(as('cashier'))).toBe('all');
+  });
+
+  it('leaves what a cashier is notified about at the payment stages', () => {
+    // visibleStatusesFor also decides notification recipients; widening it
+    // would turn the cashier into an oversight role for the whole office.
+    expect(visibleStatusesFor(as('cashier'))).toEqual(
+      ['Assessed', 'Payment Submitted', 'Payment Under Verification', 'Payment Verified'],
+    );
+  });
+
+  it('widens no other narrow role', () => {
+    const narrow: StaffRole[] = ['receiving-officer', 'records-officer', 'evaluator', 'assessor', 'releasing-officer'];
+    for (const role of narrow) {
+      expect(readableStatusesFor(as(role))).toEqual(visibleStatusesFor(as(role)));
+    }
+  });
+
+  it('reads nothing for a citizen', () => {
+    expect(readableStatusesFor({ kind: 'applicant', accountId: 'x', scopes: [] })).toEqual([]);
   });
 });

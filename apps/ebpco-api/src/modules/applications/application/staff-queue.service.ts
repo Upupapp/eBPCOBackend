@@ -5,7 +5,7 @@ import { CalendarRepository } from '../../compliance/application/calendar.reposi
 import { Classification, HolidayCalendar, Pledge, Suspension, computePledge } from '../../compliance/domain/pledge-clock';
 import { LifecycleStatus } from '../domain/lifecycle';
 import { Caller } from '../domain/application';
-import { visibleStatusesFor } from '../domain/visibility';
+import { readableStatusesFor, visibleStatusesFor } from '../domain/visibility';
 import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
 import { EvaluationStage, isEvaluationStage } from '../domain/evaluation-stages';
 import { Responsibility, RosterEntry, responsibilityFor, rosterOf } from './responsibility';
@@ -329,7 +329,7 @@ export class StaffQueueService {
 
 
   async page(caller: Caller, filters: QueueFilters = {}): Promise<QueuePage> {
-    const visible = visibleStatusesFor(caller);
+    const visible = readableStatusesFor(caller);
     if (Array.isArray(visible) && visible.length === 0) return { rows: [], nextCursor: null };
 
     // Archived applications are out of the working queue by default -- that is
@@ -435,7 +435,7 @@ export class StaffQueueService {
 
   async detail(caller: Caller, applicationId: string): Promise<StaffApplicationDetail | null> {
     if (!/^[0-9a-fA-F-]{36}$/.test(applicationId)) return null;
-    const visible = visibleStatusesFor(caller);
+    const visible = readableStatusesFor(caller);
     if (Array.isArray(visible) && visible.length === 0) return null;
 
     const values: unknown[] = [applicationId];
@@ -603,7 +603,7 @@ export class StaffQueueService {
    * queue reports the size of that page and calls it the size of the backlog.
    */
   async metrics(caller: Caller): Promise<QueueMetrics> {
-    const visible = visibleStatusesFor(caller);
+    const visible = readableStatusesFor(caller);
     const forms = await this.formsFor(caller);
     // Every figure below is computed over the caller's VISIBLE SET, not over
     // the table. A dashboard that counts work an officer cannot open is worse

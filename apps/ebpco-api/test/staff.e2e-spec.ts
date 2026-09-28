@@ -633,11 +633,12 @@ describe('opening one application', () => {
   });
 
   it('answers 404, not 403, for one the officer may not read', async () => {
-    // Telling a cashier that this reference exists but is not theirs to open
-    // confirms a neighbour has applied for a permit.
+    // Telling a releasing officer that this reference exists but is not theirs
+    // to open confirms a neighbour has applied for a permit. (A cashier was the
+    // example until the cashier was given the whole pipeline to read.)
     const id = await file('BP-1', 'Submitted');
 
-    const response = await get(`/staff/applications/${id}`, await staffToken('cashier'));
+    const response = await get(`/staff/applications/${id}`, await staffToken('releasing-officer'));
 
     expect(response.statusCode).toBe(404);
   });

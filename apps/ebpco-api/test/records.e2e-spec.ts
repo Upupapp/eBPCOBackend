@@ -637,15 +637,29 @@ describe('the dashboard, over time', () => {
     expect(after.trend.total?.previous).toBe(before.trend.total?.previous);
   });
 
-  it('gives a cashier a trend narrowed to what they may see', async () => {
-    const cashier = await staffToken('cashier');
+  it('gives a narrowed role a trend narrowed to what they may see', async () => {
+    const releasing = await staffToken('releasing-officer');
     await file('Under Evaluation');
 
-    const body = await metrics(cashier.token);
+    const body = await metrics(releasing.token);
 
-    // Under Evaluation is outside a cashier's visibility, so it contributes to
-    // neither their total nor their pending figure.
+    // Under Evaluation is outside a releasing officer's visibility, so it
+    // contributes to neither their total nor their pending figure.
     expect(body.trend.pendingUnderReview?.recent).toBe(0);
+  });
+
+  it('gives a cashier figures over every application, not only the payment stages', async () => {
+    // Earlier tests in this file leave their applications behind, so the
+    // cashier is compared with an administrator rather than with a fixed count.
+    const cashier = await staffToken('cashier');
+    const admin = await staffToken('super-admin');
+    await file('Under Evaluation');
+
+    const seen = await metrics(cashier.token);
+    const all = await metrics(admin.token);
+
+    expect(seen.trend.pendingUnderReview?.recent).toBeGreaterThan(0);
+    expect(seen.trend).toEqual(all.trend);
   });
 });
 
