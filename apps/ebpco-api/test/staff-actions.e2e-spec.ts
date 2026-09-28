@@ -509,6 +509,37 @@ describe('the cashier’s queue', () => {
     expect(item['applicantName']).toBe('Maria Santos');
   });
 
+  it('names the business and the citizen on the row itself, whatever stage the application is at', async () => {
+    // The portal used to join each payment to the application list for these
+    // names, and a cashier cannot list a Completed application — so every
+    // paid-and-finished payment showed "—" and "Not provided".
+    const { applicationId } = await paymentAwaitingVerification();
+    const businessId = randomUUID();
+    await db.query(
+      `insert into businesses (id, owner_applicant_id, name, category, street, barangay, city,
+                               province, registration_number, date_registered)
+       values ($1,$2,'Santos Bakery','Retail','1 Main','Poblacion','Castilla','Sorsogon','DTI-1','2024-01-15')`,
+      [businessId, applicantId],
+    );
+    await db.query('update applications set business_id = $1 where id = $2', [businessId, applicationId]);
+
+    const item = (await get('/staff/payments', await staffToken('cashier')))
+      .json<{ items: Record<string, unknown>[] }>().items[0]!;
+
+    expect(item['applicantName']).toBe('Maria Santos');
+    expect(item['businessName']).toBe('Santos Bakery');
+    expect(item['applicantHasPhoto']).toBe(false);
+  });
+
+  it('gives no business name for an application filed without one', async () => {
+    await paymentAwaitingVerification();
+
+    const item = (await get('/staff/payments', await staffToken('cashier')))
+      .json<{ items: Record<string, unknown>[] }>().items[0]!;
+
+    expect(item['businessName']).toBeNull();
+  });
+
   it('is closed to an evaluator', async () => {
     expect((await get('/staff/payments', await staffToken('evaluator'))).statusCode).toBe(403);
   });
