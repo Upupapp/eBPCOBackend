@@ -13,7 +13,6 @@ import {
 } from '../domain/order-of-payment';
 import { FeeSchedule, FeeScheduleUnavailable, scheduleInForce } from '../domain/fee-schedule';
 import { AssessmentWorkflowService } from './assessment-workflow.service';
-import { EVALUATION_STAGES } from '../../applications/application/evaluation.service';
 
 /**
  * Issuing and correcting Orders of Payment.
@@ -106,11 +105,19 @@ export class AssessmentService {
     // applicant could see and be quoted a fee) while the application was
     // still mid-evaluation, e.g. with Zoning still pending: a real fee, on an
     // application that had not yet cleared the checks that fee was for.
-    const passedStages = await this.db.query<{ n: string }>(
-      `select count(*) as n from evaluations where application_id = $1 and result = 'Passed'`,
+    // "Every stage" is THIS application's stages (migration 060): a Fencing
+    // Permit has no Fire Safety stage, and counting to five would have held
+    // its Order of Payment back forever.
+    const evaluated = await this.db.query<{ complete: boolean }>(
+      `select not exists (
+         select 1 from applications a, unnest(application_evaluation_stages(a.required_documents)) as s(stage)
+          where a.id = $1
+            and not exists (select 1 from evaluations e
+                             where e.application_id = a.id and e.stage = s.stage and e.result = 'Passed')
+       ) as complete`,
       [applicationId],
     );
-    if (Number(passedStages.rows[0]?.n ?? 0) < EVALUATION_STAGES.length) {
+    if (evaluated.rows[0]?.complete !== true) {
       return {
         ok: false,
         reason: 'evaluations-incomplete',

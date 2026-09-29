@@ -101,7 +101,9 @@ const get = (url: string, token: string) =>
 const publicPost = (url: string, payload: Record<string, unknown>) =>
   app.inject({ method: 'POST', url, payload });
 
-const STAGES = ['Initial', 'Zoning', 'Fire Safety', 'OBO', 'Final Approval'] as const;
+// A Fencing Permit's checklist has nothing for the BFP, so it skips Fire
+// Safety (migration 060): these are its stages, filed the real way.
+const STAGES = ['Initial', 'Zoning', 'OBO', 'Final Approval'] as const;
 const SCOPE = 'Perimeter fence, 42 linear metres, hollow block on reinforced concrete footing';
 /** A minimal, valid PDF the malware scanner and inspector will accept — the same fixture applicant-write.e2e-spec.ts uses for a real upload. */
 const PDF = Buffer.from('%PDF-1.4\n1 0 obj<</Type/Catalog>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n');
@@ -210,6 +212,8 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
       const result = await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage, result: 'Passed' });
       expect(result.statusCode).toBe(201);
     }
+    const fireSafety = await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage: 'Fire Safety', result: 'Passed' });
+    expect(fireSafety.statusCode).toBe(409);
 
     // Two DIFFERENT assessors — the same separation of duty
     // staff-actions.e2e-spec.ts's approvedAssessment() exercises: the one

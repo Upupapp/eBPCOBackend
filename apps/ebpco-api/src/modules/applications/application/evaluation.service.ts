@@ -12,7 +12,7 @@ import { Responsibility, responsibilityFor, rosterOf } from './responsibility';
 /**
  * An officer's decision on one stage of an evaluation.
  *
- * Five stages, each decided once. The lifecycle engine asks "are the
+ * Up to five stages (only those its checklist needs, migration 060), each decided once. The lifecycle engine asks "are the
  * evaluations complete" before it will let an application be assessed or
  * approved, and this is what makes that question answerable — until now the
  * precondition could only ever be false, because nothing wrote a row.

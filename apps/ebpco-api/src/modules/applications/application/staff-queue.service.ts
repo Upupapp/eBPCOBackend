@@ -99,7 +99,7 @@ export interface QueueRow {
    */
   readonly completedAt: string | null;
   /**
-   * The stage this application is waiting on, or null once all five are
+   * The stage this application is waiting on, or null once all of its stages are
    * passed (see `QUEUE_SQL`'s own comment on the subquery this comes
    * from). Was entirely absent from the queue before — the Admin
    * Portal's own client-side ApplicationRecord mapper defaulted it to
@@ -261,7 +261,7 @@ const QUEUE_SQL = `
     (select max(t.occurred_at) from application_transitions t
       where t.application_id = a.id
         and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at,
-    -- The stage this application is waiting on, or null once all five are
+    -- The stage this application is waiting on, or null once all of its stages are
     -- passed — the same "first undecided stage, in order" rule
     -- EvaluationService.of()'s own caller applies client-side for one
     -- application at a time (see its ORDER.find(...) there). Replicated
