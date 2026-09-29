@@ -115,6 +115,13 @@ const PUBLIC_ROUTES = new Set([
   // route existed. Adding a line here should always be a deliberate act.
   'GET /documents/content',
 
+  // Verifying a permit from the QR code printed on it. Public BECAUSE whoever
+  // scans a posted permit -- an inspector, a customer, a neighbour -- has no
+  // account, and a QR that asks them to sign in verifies nothing. It answers
+  // only what the paper already shows (number, type, business, whether it was
+  // released) and reads nothing else of the application.
+  'GET /public/permits/:permitNumber',
+
   // Asking to be given staff access. Public BECAUSE the person asking has no
   // account yet — that is the whole point: `/auth/register` mints an applicant
   // and can never mint staff, so there has to be some way to ask, and it cannot
