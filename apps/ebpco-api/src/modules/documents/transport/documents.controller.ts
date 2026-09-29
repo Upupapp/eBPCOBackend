@@ -140,8 +140,11 @@ export class DocumentsController {
    */
   @Get('me')
   @RequireScopes('documents:read')
-  async mine(@Req() request: AuthenticatedRequest): Promise<ReadonlyArray<Record<string, unknown>>> {
-    return this.documents.historyFor(callerOf(request).accountId);
+  async mine(
+    @Req() request: AuthenticatedRequest, @Query('archived') archived?: string,
+  ): Promise<ReadonlyArray<Record<string, unknown>>> {
+    // `?archived=true`: what the citizen has archived (2026-09-29), to restore.
+    return this.documents.historyFor(callerOf(request).accountId, archived === 'true');
   }
 
   @Post()
@@ -309,10 +312,9 @@ export class DocumentsController {
   }
 
   /**
-   * Removes a citizen's own copy from "My Documents" — the reusable
-   * library. For an attached document this is not a deletion at all; see
-   * `DocumentService.deleteMine`'s own doc comment for what actually
-   * happens to each.
+   * Archives a file from the citizen's "My Documents" — never a deletion
+   * (2026-09-29); see `DocumentService.deleteMine`. `DELETE` stays the verb so
+   * an older client still reaches it.
    */
   @Delete(':documentId')
   @HttpCode(HttpStatus.NO_CONTENT)
@@ -324,6 +326,19 @@ export class DocumentsController {
     const outcome = await this.documents.deleteMine(documentId, callerOf(request));
     if (outcome.ok) return;
     throw ProblemException.notFound('No such document.');
+  }
+
+  /** Brings an archived file back into My Documents. */
+  @Post(':documentId/restore')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @RequireScopes('documents:write')
+  async restore(
+    @Req() request: AuthenticatedRequest,
+    @Param('documentId') documentId: string,
+  ): Promise<void> {
+    const outcome = await this.documents.restoreMine(documentId, callerOf(request));
+    if (outcome.ok) return;
+    throw ProblemException.notFound('No such archived document.');
   }
 }
 

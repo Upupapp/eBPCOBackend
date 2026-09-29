@@ -68,12 +68,14 @@ export class RequirementsService {
     const result = applicationAction === undefined
       ? await tx.query<{ code: string; label: string; description: string; required: boolean; stage: ChecklistStage }>(
           `select code, label, description, required, stage from document_requirements
-            where permit_type = $1 and application_action is null order by position, code`,
+            where permit_type = $1 and application_action is null and archived_at is null
+            order by position, code`,
           [permitType],
         )
       : await tx.query<{ code: string; label: string; description: string; required: boolean; stage: ChecklistStage }>(
           `select code, label, description, required, stage from document_requirements
             where permit_type = $1 and (application_action is null or application_action = $2)
+              and archived_at is null
             order by position, code`,
           [permitType, applicationAction],
         );
@@ -128,25 +130,34 @@ export class RequirementsService {
 
       const before = await this.forPermitType(permitType, applicationAction, tx);
 
-      if (applicationAction === undefined) {
-        await tx.query(
-          'delete from document_requirements where permit_type = $1 and application_action is null',
-          [permitType],
-        );
-      } else {
-        await tx.query(
-          'delete from document_requirements where permit_type = $1 and application_action = $2',
-          [permitType, applicationAction],
-        );
-      }
+      // Archive, never delete (2026-09-29): a document the new list leaves out
+      // is set aside, visible in the Archive and restorable there; one saved
+      // back in under the same code comes back as the same row.
+      const now = this.clock();
+      const action = applicationAction ?? null;
+      await tx.query(
+        `update document_requirements set archived_at = $4, archived_by = $5, updated_at = $4, updated_by = $5
+          where permit_type = $1 and application_action is not distinct from $2::text
+            and archived_at is null and not (code = any($3::text[]))`,
+        [permitType, action, documents.map((document) => document.code.trim()), now, officer.accountId],
+      );
       for (const [position, document] of documents.entries()) {
+        const values = [permitType, document.code.trim(), document.label.trim(), document.description ?? '',
+          document.required, position, action, now, officer.accountId, document.stage ?? 'Initial'];
+        const kept = await tx.query(
+          `update document_requirements
+              set label = $3, description = $4, required = $5, position = $6, updated_at = $8, updated_by = $9,
+                  stage = $10, archived_at = null, archived_by = null
+            where permit_type = $1 and code = $2 and application_action is not distinct from $7::text
+            returning id`,
+          values,
+        );
+        if (kept.rows.length > 0) continue;
         await tx.query(
           `insert into document_requirements
              (permit_type, code, label, description, required, position, application_action, updated_at, updated_by, stage)
            values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
-          [permitType, document.code.trim(), document.label.trim(), document.description ?? '',
-           document.required, position, applicationAction ?? null, this.clock(), officer.accountId,
-           document.stage ?? 'Initial'],
+          values,
         );
       }
 

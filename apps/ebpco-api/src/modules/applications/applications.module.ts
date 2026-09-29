@@ -31,6 +31,10 @@ import { WorkflowController } from './transport/workflow.controller';
 import { PublicPermitsController } from './transport/public-permits.controller';
 import { StaffNotificationService } from '../notifications/application/staff-notification.service';
 import { NotificationsModule } from '../notifications/notifications.module';
+import { StepGuard } from './application/step-guard';
+import { TeamService } from './application/team.service';
+import { ArchiveService } from './application/archive.service';
+import { StaffTeamsController } from './transport/staff-teams.controller';
 
 // Re-exported where it used to be declared, so callers that reach for it here
 // keep working. It now lives beside the port -- see calendar.repository.ts for
@@ -105,6 +109,21 @@ export { CALENDAR_REPOSITORY };
       inject: [SQL_CLIENT],
       useFactory: (db: SqlClient) => new EvaluationService(db),
     },
+    {
+      provide: StepGuard,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new StepGuard(db),
+    },
+    {
+      provide: TeamService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new TeamService(db),
+    },
+    {
+      provide: ArchiveService,
+      inject: [SQL_CLIENT],
+      useFactory: (db: SqlClient) => new ArchiveService(db),
+    },
   ],
   controllers: [
     ApplicantApplicationsController, ApplicantWriteController,
@@ -117,7 +136,8 @@ export { CALENDAR_REPOSITORY };
     // importing ApplicationsModule, and ComplianceModule is @Global and already
     // imported by identity — a cycle for the sake of tidier filing.
     ReportsController,
+    StaffTeamsController,
   ],
-  exports: [StaffQueueService, EvaluationService, CALENDAR_REPOSITORY],
+  exports: [StaffQueueService, EvaluationService, StepGuard, CALENDAR_REPOSITORY],
 })
 export class ApplicationsModule {}

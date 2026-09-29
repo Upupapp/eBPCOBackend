@@ -7,7 +7,7 @@ import {
 } from '../domain/evaluation-stages';
 import { visibleStatusesFor } from '../domain/visibility';
 import { LifecycleStatus } from '../domain/lifecycle';
-import { Responsibility, responsibilityFor, rosterOf } from './responsibility';
+import { ASSIGNMENTS_COLUMN, Assignments, Responsibility, responsibilityFor, rosterOf } from './responsibility';
 
 /**
  * An officer's decision on one stage of an evaluation.
@@ -228,6 +228,7 @@ export class EvaluationService {
       business_id: string | null; business_name: string | null;
       required_documents: { code: string; required: boolean }[] | null;
       attached_documents: number;
+      assignments: Assignments | null;
     }>(
       `select a.id, a.reference_number, a.permit_type, a.lifecycle_status,
               a.submitted_at, a.updated_at,
@@ -235,6 +236,7 @@ export class EvaluationService {
               (acc.photo_key is not null) as applicant_has_photo,
               a.business_id, b.name as business_name,
               a.required_documents,
+              ${ASSIGNMENTS_COLUMN},
               (select count(*)::int from documents d
                 where d.application_id = a.id and d.deleted_at is null) as attached_documents
          from applications a
@@ -277,7 +279,9 @@ export class EvaluationService {
         evaluationStages: stages,
         requiredDocumentCount: required.length,
         attachedDocumentCount: row.attached_documents,
-        responsibility: responsibilityFor(row.lifecycle_status as LifecycleStatus, next, row.permit_type, roster),
+        responsibility: responsibilityFor(
+          row.lifecycle_status as LifecycleStatus, next, row.permit_type, roster, row.assignments ?? {},
+        ),
       });
     }
 

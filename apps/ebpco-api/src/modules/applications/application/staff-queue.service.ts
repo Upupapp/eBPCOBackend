@@ -8,7 +8,9 @@ import { Caller } from '../domain/application';
 import { readableStatusesFor, visibleStatusesFor } from '../domain/visibility';
 import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
 import { EvaluationStage, isEvaluationStage } from '../domain/evaluation-stages';
-import { Responsibility, RosterEntry, responsibilityFor, rosterOf } from './responsibility';
+import {
+  ASSIGNMENTS_COLUMN, Assignments, Responsibility, RosterEntry, responsibilityFor, rosterOf,
+} from './responsibility';
 
 const stageOrNull = (value: unknown): EvaluationStage | null =>
   typeof value === 'string' && isEvaluationStage(value) ? value : null;
@@ -281,6 +283,7 @@ const QUEUE_SQL = `
     -- The stages it goes through at all (migration 060), so a screen can say
     -- "Fire Safety: not needed" rather than draw a stage that never comes.
     application_evaluation_stages(a.required_documents) as evaluation_stages,
+    ${ASSIGNMENTS_COLUMN},
     a.prior_permit_claim,
     (select g.permit_number from generated_permits g where g.application_id = a.renews_permit_id)
       as renews_permit_number
@@ -840,6 +843,7 @@ export class StaffQueueService {
         stageOrNull(row['evaluation_stage']),
         row['permit_type'] as string,
         roster,
+        (row['assignments'] as Assignments | null) ?? {},
       ),
     };
   }

@@ -18,6 +18,8 @@ import { BUSINESS_CATEGORIES } from '../../businesses/business-categories';
 import { EditableFields, RecordsService } from '../application/records.service';
 import { NotesService } from '../application/notes.service';
 import { ProfilePhotoService } from '../../identity/application/profile-photo.service';
+import { StepGuard } from '../application/step-guard';
+import { stepRefused } from './staff-teams.controller';
 
 /**
  * The officer's surface.
@@ -174,6 +176,7 @@ export class StaffApplicationsController {
     private readonly records: RecordsService,
     private readonly notes: NotesService,
     private readonly photos: ProfilePhotoService,
+    private readonly steps: StepGuard,
   ) {}
 
   @Get()
@@ -320,15 +323,22 @@ export class StaffApplicationsController {
    * A named list of fields, never `Partial<the whole row>`: the portal's own
    * store offers the latter, which would let a client set `lifecycleStatus`
    * directly and route around the transition table.
+   *
+   * Who (2026-09-29): the Records Officer, as before, at any step; and now the
+   * team whose step the application is at -- an Initial Evaluator corrects an
+   * application while it is at the Initial evaluation, not before or after.
+   * `StepGuard` decides; every other officer only reads it.
    */
   @Patch(':applicationId')
-  @RequireScopes('applications:write')
+  @RequireScopes('applications:read')
   async edit(
     @Req() request: AuthenticatedRequest,
     @Param('applicationId') applicationId: string,
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const parsed = parse(patchShape, body);
+    const may = await this.steps.check(callerOf(request), applicationId, 'edit');
+    if (!may.ok) stepRefused(may);
     // Spread only the keys that are present. Under exactOptionalPropertyTypes an
     // explicit `undefined` is not the same as an absent key, and passing one
     // through would make "field omitted" indistinguishable from "field cleared".
@@ -501,6 +511,9 @@ export class StaffApplicationsController {
     if (await this.queue.detail(caller, applicationId) === null) {
       throw ProblemException.notFound('No such application.');
     }
+    // And whether it is at their team's step, and theirs within the team.
+    const may = await this.steps.check(caller, applicationId, 'act');
+    if (!may.ok) stepRefused(may);
 
     const result = await this.lifecycle.transition({
       applicationId,

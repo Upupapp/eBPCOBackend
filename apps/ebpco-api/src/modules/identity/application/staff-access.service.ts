@@ -238,6 +238,44 @@ export class StaffAccessService {
    * would take `staff:administer` away from the one role that could restore it.
    * See `super-admin-guard.ts`.
    */
+  /** Lead or member of the officer's team (migration 062); null before an access level exists. */
+  async teamRoleFor(accountId: string): Promise<'lead' | 'member' | null> {
+    const { rows } = await this.db.query<{ team_role: 'lead' | 'member' }>(
+      'select team_role from staff_access where account_id = $1', [accountId]);
+    return rows[0]?.team_role ?? null;
+  }
+
+  /**
+   * Makes an officer the lead of their team, or a member again. A team can
+   * have more than one lead (a deputy); the position decides which team.
+   */
+  async setTeamRole(accountId: string, teamRole: 'lead' | 'member', actor: Actor): Promise<Outcome> {
+    const guarded = await this.superAdminGuard(accountId, actor);
+    if (guarded !== null) return guarded;
+    const previous = await this.teamRoleFor(accountId);
+    if (previous === null) {
+      return {
+        ok: false, reason: 'no-access',
+        detail: 'Give this account an access level first; a team role goes with it.',
+      };
+    }
+    if (previous === teamRole) return { ok: true };
+    await this.db.transaction(async (tx) => {
+      await tx.query('update staff_access set team_role = $2 where account_id = $1', [accountId, teamRole]);
+      await this.audit.append({
+        action: 'staff.team-role.changed',
+        subjectType: 'account',
+        subjectId: accountId,
+        outcome: 'allowed',
+        actorAccountId: actor.accountId,
+        actorRole: actor.role,
+        beforeState: { teamRole: previous },
+        afterState: { teamRole },
+      }, tx);
+    });
+    return { ok: true };
+  }
+
   private async superAdminGuard(accountId: string, actor: Actor): Promise<Refusal | null> {
     if (!(await holdsSuperAdmin(this.db, accountId))) return null;
     if (await holdsSuperAdmin(this.db, actor.accountId)) return null;

@@ -191,6 +191,7 @@ const formsShape = z.object({
 const stagesShape = z.object({
   stages: z.array(z.string().min(1).max(40)).max(10),
 }).strict();
+const teamRoleShape = z.object({ teamRole: z.enum(['lead', 'member']) }).strict();
 
 /**
  * A refused access change: 403 when the caller may not touch this account (a
@@ -231,7 +232,21 @@ export class StaffAccessController {
       permitTypes: assigned.permitTypes,
       livePermitTypes: live.permitTypes,
       evaluationStages: await this.access.stagesFor(userId),
+      teamRole: await this.access.teamRoleFor(userId),
     };
+  }
+
+  /** Team lead or team member (migration 062). */
+  @Put(':userId/access/team-role')
+  @RequireScopes('staff:administer')
+  async setTeamRole(
+    @Param('userId') userId: string, @Req() request: AuthenticatedRequest,
+    @Body() body: unknown,
+  ): Promise<{ teamRole: string }> {
+    const input = parse(teamRoleShape, body);
+    const result = await this.access.setTeamRole(userId, input.teamRole, await actingAs(request, this.directory));
+    if (!result.ok) accessRefused('Cannot change the team role', result);
+    return { teamRole: input.teamRole };
   }
 
   /**

@@ -216,7 +216,8 @@ export class CitizenDirectoryService {
     search?: string; status?: 'active' | 'disabled'; verified?: boolean;
     page: number; pageSize: number;
   }): Promise<{ rows: readonly CitizenListRow[]; page: number; pageSize: number; total: number }> {
-    const where: string[] = [];
+    // An archived account (062) is in the Archive, not the working list.
+    const where: string[] = ['a.removed_at is null'];
     const values: unknown[] = [];
     const bind = (value: unknown): string => {
       values.push(value);
@@ -277,7 +278,7 @@ export class CitizenDirectoryService {
          count(*) filter (where a.created_at >= $1)::int as new_last_30_days
        from accounts a
        join applicants ap on ap.account_id = a.id
-      where a.kind = 'applicant'`,
+      where a.kind = 'applicant' and a.removed_at is null`,
       [new Date(this.clock().getTime() - 30 * 24 * 60 * 60 * 1000)],
     );
     const row = result.rows[0]!;

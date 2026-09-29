@@ -21,6 +21,7 @@ import { StructuredLogger } from '../../../common/logging/logger';
 import { UploadRoute } from '../../../common/http/upload-route';
 import { CASTILLA_BARANGAYS, CASTILLA_CITY, CASTILLA_PROVINCE } from '../../businesses/castilla-barangays';
 import { EVALUATION_STAGES } from '../../applications/domain/evaluation-stages';
+import { teamsOf } from '../../applications/domain/teams';
 
 /**
  * The identity endpoints.
@@ -656,6 +657,7 @@ export class MeController {
       // their historical work stays attributable -- but it is not something
       // they can file against today.
       const access = await this.staffAccess.liveAccessFor(account.id);
+      const stages = await this.staffAccess.stagesFor(account.id);
       return {
         ...common,
         fullName: account.fullName,
@@ -666,9 +668,11 @@ export class MeController {
         // The evaluation stages this officer decides (migration 057), so the
         // portal offers Evaluate only on the stage that is theirs. A super
         // admin decides every stage whatever is assigned.
-        evaluationStages: account.roles.includes('super-admin')
-          ? [...EVALUATION_STAGES]
-          : await this.staffAccess.stagesFor(account.id),
+        evaluationStages: account.roles.includes('super-admin') ? [...EVALUATION_STAGES] : stages,
+        // Their team(s) and whether they lead (migration 062), so the portal
+        // offers Assign to a lead and says whose step an application is at.
+        teams: teamsOf(account.roles, stages),
+        teamRole: await this.staffAccess.teamRoleFor(account.id),
       };
     }
 

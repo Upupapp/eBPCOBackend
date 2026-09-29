@@ -356,7 +356,8 @@ export class StaffBusinessesController {
     }
     const filters = result.data;
 
-    const where: string[] = [];
+    // An archived business (062) is in the Archive, not the working list.
+    const where: string[] = ['b.archived_at is null'];
     const values: unknown[] = [];
     const bind = (value: unknown): string => {
       values.push(value);

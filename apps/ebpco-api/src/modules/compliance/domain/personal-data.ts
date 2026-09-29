@@ -187,6 +187,18 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     level: none('account-lifetime'),
     assigned_by: linkable('audit', ACCOUNTABILITY),
     assigned_at: none('audit'),
+    // Lead or member of the officer's team (062): a fact about the job.
+    team_role: none('account-lifetime'),
+  },
+
+  // Who is working an application, per team (062). The officers are named for
+  // accountability, like an evaluation's evaluator.
+  application_assignments: {
+    application_id: structural,
+    team: none('statutory'),
+    assigned_to: linkable('statutory', ACCOUNTABILITY),
+    assigned_by: linkable('audit', ACCOUNTABILITY),
+    assigned_at: none('statutory'),
   },
 
   accounts: {
@@ -238,6 +250,8 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     // does.
     removed_at: none('account-lifetime'),
     removed_by: linkable('audit', ACCOUNTABILITY),
+    // Why it was archived (062), in the officer's words: may describe the person.
+    removed_reason: content('account-lifetime', ACCOUNTABILITY),
     created_at: none('account-lifetime'),
     updated_at: none('account-lifetime'),
     created_by: linkable('account-lifetime', ACCOUNTABILITY),
@@ -322,6 +336,10 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     status: none('statutory'),
     created_at: none('statutory'),
     updated_at: none('statutory'),
+    // Archived (062): when, by whom, and why in the officer's words.
+    archived_at: none('statutory'),
+    archived_by: linkable('audit', ACCOUNTABILITY),
+    archive_reason: content('statutory', ACCOUNTABILITY),
   },
 
   applications: {
@@ -577,6 +595,11 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     application_action: none('statutory'),
     updated_at: none('statutory'),
     updated_by: linkable('audit', ACCOUNTABILITY),
+    // The evaluation stage that checks it (060).
+    stage: none('statutory'),
+    // Archived instead of deleted when a checklist is saved without it (062).
+    archived_at: none('statutory'),
+    archived_by: linkable('audit', ACCOUNTABILITY),
   },
 
   /**
@@ -843,7 +866,11 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
 
   // `retired_at` records that the LGU stopped issuing a permit type. About the
   // municipality's services, not about any person.
-  permit_types: { permit_type: none(), service_domain: none(), retired_at: none() },
+  permit_types: {
+    permit_type: none(), service_domain: none(), retired_at: none(),
+    // Who retired it (062), for the Archive list.
+    retired_by: linkable('audit', ACCOUNTABILITY),
+  },
   lifecycle_statuses: {
     status: none(), sequence: none(), terminal: none(),
     applicant_status: none(), requires_applicant_action: none(),

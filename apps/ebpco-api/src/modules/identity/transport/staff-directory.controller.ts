@@ -286,24 +286,26 @@ export class StaffDirectoryController {
   }
 
   /**
-   * A super admin deleting a staff account. See `StaffDirectoryService.remove`
-   * for what "deleted" and "retired" each mean; the answer says which happened.
+   * A super admin archiving a staff account — never deleting it (2026-09-29).
+   * `DELETE` stays the route so an older portal still reaches it; the body may
+   * carry the reason. Restored from `POST /staff/archive/staff/:id/restore`.
    */
   @Delete(':userId')
   @HttpCode(HttpStatus.OK)
   @RequireScopes('staff:administer')
   async remove(
-    @Req() request: AuthenticatedRequest, @Param('userId') userId: string,
+    @Req() request: AuthenticatedRequest, @Param('userId') userId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
+    const input = parse(disableShape, body ?? {});
     const actor = await actorOf(request, this.directory);
-    const result = await this.directory.remove({ id: userId, actor: actor.accountId, actorRole: actor.role });
+    const result = await this.directory.remove({
+      id: userId, actor: actor.accountId, actorRole: actor.role, reason: input.reason ?? null,
+    });
     if (!result.ok) refuse(result);
     return {
       mode: result.mode,
-      detail: result.mode === 'deleted'
-        ? 'The account was deleted. Its address can be used for a new account.'
-        : 'The account made decisions on record, so it was retired rather than deleted: it can never sign in '
-          + 'again and is gone from the staff list, but its name stays on the decisions it made.',
+      detail: 'The account was archived: it cannot sign in and is out of the staff list, its name stays on '
+        + 'everything it did, and a super admin can restore it from the Archive.',
     };
   }
 

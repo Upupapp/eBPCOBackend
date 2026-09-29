@@ -88,8 +88,10 @@ export function visibleStatusesFor(caller: Caller): readonly LifecycleStatus[] |
  * note can be left on any application the cashier can open.
  */
 export function readableStatusesFor(caller: Caller): readonly LifecycleStatus[] | 'all' {
-  const visible = visibleStatusesFor(caller);
-  if (visible === 'all') return 'all';
-  if (caller.kind === 'staff' && caller.scopes.includes('staff:verify-payment')) return 'all';
-  return visible;
+  // Every officer reads every application (owner request, 2026-09-29: "it can
+  // see all the applications but of course they can just view it"). Working on
+  // one is `StepGuard`'s question -- its team's step, and theirs within the
+  // team -- and every act still needs its own scope and a legal move.
+  if (caller.kind === 'staff') return 'all';
+  return visibleStatusesFor(caller);
 }

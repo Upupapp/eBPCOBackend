@@ -15,6 +15,8 @@ import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
 import { StructuredLogger } from '../../../common/logging/logger';
 import { UploadRoute } from '../../../common/http/upload-route';
+import { StepGuard, WorkKind } from '../application/step-guard';
+import { stepRefused } from './staff-teams.controller';
 
 /**
  * The things an officer DOES to an application, as opposed to reading it.
@@ -168,7 +170,14 @@ export class StaffActionsController {
     private readonly documents: DocumentService,
     private readonly lifecycle: LifecycleService,
     private readonly logger: StructuredLogger,
+    private readonly steps: StepGuard,
   ) {}
+
+  /** Whether the application is at this officer's team's step, and theirs within it (2026-09-29). */
+  private async mayWork(caller: Caller, applicationId: string, kind: WorkKind): Promise<void> {
+    const may = await this.steps.check(caller, applicationId, kind);
+    if (!may.ok) stepRefused(may);
+  }
 
   /** Readable and actionable are different questions; this answers the first. */
   private async visible(caller: Caller, applicationId: string): Promise<void> {
@@ -202,6 +211,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(evaluationShape, body);
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'act');
 
     const result = await this.evaluations.record({
       applicationId,
@@ -223,9 +233,13 @@ export class StaffActionsController {
    * mutation of the document itself, the same authority `resubmitDocument`
    * acts under, not a lifecycle transition (nothing here moves
    * `lifecycle_status`).
+   *
+   * Who (2026-09-29): the Records Officer (`documents:write`), as before, and
+   * the team whose step the application is at: an evaluator reviews the
+   * documents of an application at their stage. `StepGuard` decides.
    */
   @Post('documents/:documentId/review')
-  @RequireScopes('documents:write')
+  @RequireScopes('documents:read')
   async reviewDocument(
     @Req() request: AuthenticatedRequest,
     @Param('applicationId') applicationId: string,
@@ -235,6 +249,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(documentReviewShape, body);
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'edit');
 
     const result = await this.documents.review({
       applicationId,
@@ -349,6 +364,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(orderOfPaymentShape, body ?? {});
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'act');
 
     const result = await this.assessment.issue({
       applicationId,
@@ -477,6 +493,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(permitShape, body);
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'act');
 
     const result = await this.permits.generate({
       applicationId, officer: caller, scope: input.scope, conditions: input.conditions ?? [],
@@ -505,6 +522,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(preparationShape, body);
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'act');
 
     const result = await this.permits.prepareRelease({
       applicationId, officer: caller,
@@ -533,6 +551,7 @@ export class StaffActionsController {
     const caller = callerOf(request);
     const input = parse(releaseShape, body);
     await this.visible(caller, applicationId);
+    await this.mayWork(caller, applicationId, 'act');
 
     const result = await this.permits.release({
       applicationId, officer: caller, claimantName: input.claimantName, method: input.method,

@@ -287,7 +287,7 @@ export class DocumentService {
    * currently attached to — a citizen's full history, and the reuse source
    * for a new filing, in one list.
    */
-  async historyFor(accountId: string): Promise<ReadonlyArray<Record<string, unknown>>> {
+  async historyFor(accountId: string, archived = false): Promise<ReadonlyArray<Record<string, unknown>>> {
     // One entry per FILE, not per copy (owner request, 2026-09-29). Reusing a
     // document on another application uploads a copy of it (a document
     // belongs to one application), and every copy used to be its own card in
@@ -326,7 +326,8 @@ export class DocumentService {
                                  order by (d.application_id is null) desc, d.uploaded_at desc, d.id) as rank
          from documents d
          left join applications a on a.id = d.application_id
-        where d.uploaded_by = $1 and d.deleted_at is null and d.removed_from_library_at is null
+        where d.uploaded_by = $1 and d.deleted_at is null
+          and (d.removed_from_library_at is not null) = $2
        ), used as (
        select sha256, count(*)::text as copies,
               jsonb_agg(distinct jsonb_build_object('id', application_id, 'referenceNumber', application_reference))
@@ -337,7 +338,7 @@ export class DocumentService {
          from library join used using (sha256)
         where library.rank = 1
         order by library.uploaded_at desc, library.id`,
-      [accountId],
+      [accountId, archived],
     );
 
     return result.rows.map((row) => ({
@@ -681,34 +682,18 @@ export class DocumentService {
   }
 
   /**
-   * A citizen removing their own copy from "My Documents".
+   * A citizen archiving a file from "My Documents" (archive only, 2026-09-29).
    *
-   * Two different things happen underneath the one action, depending on
-   * whether the document is currently attached:
+   * Never a deletion. It used to purge the bytes of an unattached document;
+   * the owner's rule is that nothing is deleted, and a citizen who archives a
+   * valid ID by mistake should get it back. Every copy of the file is set
+   * aside (`removed_from_library_at`, migration 052) — the bytes, the rows, and
+   * everything an officer sees on an application are untouched — and the file
+   * leaves My Documents and the reuse list until the citizen restores it.
    *
-   * UNATTACHED: a real deletion. Nothing else references it, so the object
-   * bytes are purged from the store and `deleted_at` is set — the same soft
-   * delete `runRetention` already uses, the citizen-initiated case of the
-   * one mechanism that already exists.
-   *
-   * ATTACHED: only `removed_from_library_at` is set (migration 052). The
-   * bytes, the row, and everything an officer sees on that application are
-   * untouched — an attached document is evidence on a real permit record
-   * (RA 8792), and `GET /applications/:id/documents` must keep showing it
-   * exactly as filed. This only stops it being OFFERED again: excluded from
-   * `historyFor` (the library listing "My Documents" and document-reuse are
-   * both built from), so there is nothing left for the citizen to pick it
-   * back up from. A citizen who wants it gone from the filing itself has to
-   * withdraw or resubmit on the application, not here.
-   *
-   * Both branches always succeed once ownership is confirmed — there used
-   * to be a third, 'attached', refusal here; an attached document is no
-   * longer refused, it takes the softer path instead.
-   *
-   * Every copy of the file goes (2026-09-29): My Documents shows a file once
-   * however many copies stand behind it (see `historyFor`), so removing one
-   * copy would only bring the next one into view. Each copy takes its own
-   * branch above; copies on applications stay exactly as filed.
+   * Every copy, because My Documents shows a file once however many copies
+   * stand behind it (see `historyFor`): archiving one copy would only bring
+   * the next into view.
    */
   async deleteMine(documentId: string, caller: Caller): Promise<
     { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' }
@@ -720,47 +705,43 @@ export class DocumentService {
     if (document === null || !ownedBy(document, caller.accountId)) {
       return { ok: false, reason: 'not-found' };
     }
-
-    const copies = await this.db.query<{ id: string }>(
-      `select id from documents
-        where uploaded_by = $1 and sha256 = $2 and id <> $3
-          and deleted_at is null and removed_from_library_at is null`,
-      [caller.accountId, document.sha256, document.id],
-    );
-    for (const copy of copies.rows) {
-      const loaded = await this.load(copy.id);
-      if (loaded !== null) await this.removeOne(loaded, caller);
-    }
-    await this.removeOne(document, caller);
+    await this.setArchived(document.sha256, caller, true, document.id);
     return { ok: true };
   }
 
-  /** One copy out of My Documents: deleted when unattached, only hidden when it is on an application. */
-  private async removeOne(document: DocumentRow, caller: Caller): Promise<void> {
-    if (document.application_id === null) {
-      await this.store.delete(document.storage_key);
-      await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
-      await this.audit.append({
-        action: 'document.deleted-by-citizen',
-        subjectType: 'document',
-        subjectId: document.id,
-        outcome: 'allowed',
-        actorAccountId: caller.accountId,
-        actorRole: caller.kind,
-      });
-      return;
+  /** Brings an archived file back into My Documents: every copy of it. */
+  async restoreMine(documentId: string, caller: Caller): Promise<
+    { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' }
+  > {
+    const document = await this.load(documentId);
+    if (document === null || !ownedBy(document, caller.accountId)) {
+      return { ok: false, reason: 'not-found' };
     }
+    const restored = await this.setArchived(document.sha256, caller, false, document.id);
+    return restored > 0 ? { ok: true } : { ok: false, reason: 'not-found' };
+  }
 
-    await this.db.query(
-      'update documents set removed_from_library_at = $1 where id = $2', [this.clock(), document.id],
-    );
-    await this.audit.append({
-      action: 'document.removed-from-library',
-      subjectType: 'document',
-      subjectId: document.id,
-      outcome: 'allowed',
-      actorAccountId: caller.accountId,
-      actorRole: caller.kind,
+  private async setArchived(digest: string, caller: Caller, archived: boolean, named: string): Promise<number> {
+    return this.db.transaction(async (tx) => {
+      const changed = await tx.query<{ id: string }>(
+        `update documents set removed_from_library_at = $3
+          where uploaded_by = $1 and sha256 = $2 and deleted_at is null
+            and (removed_from_library_at is null) = $4
+          returning id`,
+        [caller.accountId, digest, archived ? this.clock() : null, archived],
+      );
+      if (changed.rows.length > 0) {
+        await this.audit.append({
+          action: archived ? 'document.archived-by-citizen' : 'document.restored-by-citizen',
+          subjectType: 'document',
+          subjectId: named,
+          outcome: 'allowed',
+          actorAccountId: caller.accountId,
+          actorRole: caller.kind,
+          afterState: { copies: changed.rows.map((row) => row.id) },
+        }, tx);
+      }
+      return changed.rows.length;
     });
   }
 

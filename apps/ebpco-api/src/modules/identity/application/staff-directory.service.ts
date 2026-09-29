@@ -62,6 +62,8 @@ export interface StaffUser {
   readonly mfaEnrolled: boolean;
   readonly createdAt: string;
   readonly lastSignInAt: string | null;
+  /** Lead or member of their team (migration 062); null before an access level is set. */
+  readonly teamRole: 'lead' | 'member' | null;
 }
 
 export interface StaffSession {
@@ -83,9 +85,11 @@ export type DirectoryRefusal =
  * row is gone and its address is free again — or `retired` — its name is on
  * decisions, so it is kept, disabled for good and hidden from the directory.
  */
-export type RemovalMode = 'deleted' | 'retired';
+/** Always 'archived' since 2026-09-29: nothing is deleted. */
+export type RemovalMode = 'archived';
 
 interface UserRow {
+  team_role?: string | null;
   id: string; email: string; full_name: string | null; disabled_at: Date | null;
   totp_secret_encrypted: string | null; created_at: Date; password_hash: string;
   roles: StaffRole[] | null; last_sign_in_at: Date | null;
@@ -133,6 +137,7 @@ export class StaffDirectoryService {
       mfaEnrolled: row.totp_secret_encrypted !== null,
       createdAt: row.created_at.toISOString(),
       lastSignInAt: row.last_sign_in_at === null ? null : row.last_sign_in_at.toISOString(),
+      teamRole: row.team_role === 'lead' || row.team_role === 'member' ? row.team_role : null,
     };
   }
 
@@ -141,6 +146,7 @@ export class StaffDirectoryService {
   private readonly SELECT = `
     select a.id, a.email, a.full_name, a.disabled_at, a.totp_secret_encrypted, a.created_at,
            a.password_hash, a.last_sign_in_at,
+           (select sa.team_role from staff_access sa where sa.account_id = a.id) as team_role,
            array_remove(array_agg(r.role), null) as roles
       from accounts a
       left join account_roles r on r.account_id = a.id
@@ -382,81 +388,60 @@ export class StaffDirectoryService {
   }
 
   /**
-   * A super admin removing a staff account from the directory (owner request,
-   * 2026-09-26).
+   * A super admin archiving a staff account (owner request, 2026-09-26; archive
+   * only, 2026-09-29).
    *
    * The same two refusals as disabling — not yourself, not the last super
-   * admin — plus one more: only a super admin may do it. An administrator can
-   * already disable an account; removing it for good is a step further, and
-   * the owner gave it to the super admin alone.
+   * admin — plus one more: only a super admin may do it.
    *
-   * An account that never acted (no audit entry of its own) is deleted, which
-   * also frees its address for a correctly spelled replacement. One that did
-   * act is RETIRED instead: its name is on sign-ins, evaluations or decisions,
-   * and deleting it would leave those attributed to nobody — the reason
-   * erasure refuses staff accounts. A foreign key the account turns out to be
-   * named on is treated the same way: the delete is rolled back to a savepoint
-   * and the account retired.
+   * Never a delete. It used to delete an account that had never acted, to free
+   * its address; the owner's rule is that nothing is deleted, a super admin
+   * included. The account is disabled and taken out of the directory, keeps its
+   * name on everything it did, and can be restored from the Archive.
    */
   async remove(options: {
-    id: string; actor: string; actorRole: string;
+    id: string; actor: string; actorRole: string; reason?: string | null;
   }): Promise<{ ok: true; mode: RemovalMode } | DirectoryRefusal> {
     if (options.id === options.actor) {
-      return { ok: false, reason: 'self', detail: 'You cannot delete your own account.' };
+      return { ok: false, reason: 'self', detail: 'You cannot archive your own account.' };
     }
     if (!(await holdsSuperAdmin(this.db, options.actor))) {
-      return { ok: false, reason: 'not-permitted', detail: 'Only a super admin can delete a staff account.' };
+      return { ok: false, reason: 'not-permitted', detail: 'Only a super admin can archive a staff account.' };
     }
     const before = await this.byId(options.id);
     if (before === null) {
       return { ok: false, reason: 'not-found', detail: 'No such staff account.' };
     }
-    // Removal is the third way to lose the last super admin — see
+    // Archiving is the third way to lose the last super admin — see
     // `survivesWithout`.
     if (before.roles.includes('super-admin')) {
       const floor = await this.survivesWithout(options.id);
       if (!floor.ok) return floor;
     }
 
-    const acted = await this.db.query<{ acted: boolean }>(
-      'select exists (select 1 from audit_events where actor_account_id = $1) as acted', [options.id]);
-
-    const mode = await this.db.transaction<RemovalMode>(async (tx) => {
-      let outcome: RemovalMode = 'retired';
-      if (acted.rows[0]?.acted !== true) {
-        await tx.query('savepoint remove_staff_account');
-        try {
-          await tx.query('delete from accounts where id = $1', [options.id]);
-          outcome = 'deleted';
-        } catch (error) {
-          // 23503: something still names this account. Keep it, retired.
-          if ((error as { code?: string }).code !== '23503') throw error;
-          await tx.query('rollback to savepoint remove_staff_account');
-        }
-      }
-      if (outcome === 'retired') {
-        const now = this.clock();
-        await tx.query(
-          `update accounts
-              set disabled_at = coalesce(disabled_at, $2), removed_at = $2, removed_by = $3, updated_at = now()
-            where id = $1`,
-          [options.id, now, options.actor],
-        );
-      }
+    const reason = options.reason?.trim() || null;
+    await this.db.transaction(async (tx) => {
+      const now = this.clock();
+      await tx.query(
+        `update accounts
+            set disabled_at = coalesce(disabled_at, $2), removed_at = $2, removed_by = $3, removed_reason = $4,
+                updated_at = now()
+          where id = $1`,
+        [options.id, now, options.actor, reason],
+      );
       await this.audit.append({
-        action: 'staff.account.removed',
+        action: 'staff.account.archived',
         subjectType: 'account',
         subjectId: options.id,
         outcome: 'allowed',
         actorAccountId: options.actor,
         actorRole: options.actorRole,
         beforeState: { email: before.email, fullName: before.fullName, roles: before.roles, status: before.status },
-        afterState: { mode: outcome },
+        afterState: { mode: 'archived', reason },
       }, tx);
-      return outcome;
     });
 
-    return { ok: true, mode };
+    return { ok: true, mode: 'archived' };
   }
 
   /**
