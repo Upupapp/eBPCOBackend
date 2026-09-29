@@ -53,7 +53,7 @@ export async function applySecurity(
     referrerPolicy: { policy: 'no-referrer' },
   });
 
-  // The two real browser clients this API serves, and nothing else. Neither
+  // The real browser clients this API serves, and nothing else. Neither
   // is inferred or wildcarded: `PORTAL_BASE_URL`/`USER_PORTAL_BASE_URL`
   // already exist for building the links a password-reset email sends, so
   // they are also already the operator's own statement of exactly which two
@@ -86,7 +86,13 @@ export async function applySecurity(
   // browser console reports. Local development never saw it because the dev
   // server proxies same-origin and no preflight is ever sent.
   await app.register(cors, {
-    origin: [...new Set([config.PORTAL_BASE_URL, config.USER_PORTAL_BASE_URL])],
+    origin: [...new Set([
+      config.PORTAL_BASE_URL,
+      config.USER_PORTAL_BASE_URL,
+      // Keep the existing citizen address working while custom-domain DNS
+      // propagates. This alias is validated as one exact HTTPS origin.
+      ...(config.USER_PORTAL_ALIAS_URL ? [config.USER_PORTAL_ALIAS_URL] : []),
+    ])],
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: false,
     exposedHeaders: [CORRELATION_HEADER],
