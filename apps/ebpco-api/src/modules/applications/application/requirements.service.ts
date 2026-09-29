@@ -1,6 +1,7 @@
 import { SqlClient } from '../../../persistence/sql-client';
 import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
+import { ChecklistStage, isChecklistStage } from '../domain/evaluation-stages';
 
 /**
  * The checklist each permit type asks an applicant for.
@@ -20,12 +21,12 @@ import { Caller } from '../domain/application';
  *
  * ── What is deliberately not here ───────────────────────────────────────
  *
- * The portal's catalogue also names a reviewing department per document and an
- * evaluation sequence per permit type. Departments do not exist in this service
- * at all; inventing a vocabulary to satisfy a field would create a list the LGU
- * never asked for and would then have to maintain, which is how the
- * notification catalogue acquired twenty-four invented types. The evaluation
- * sequence belongs to the lifecycle.
+ * Departments. The portal's catalogue names a reviewing department per
+ * document; this service does not — it names the evaluation STAGE that checks
+ * each document (migration 060), a vocabulary the lifecycle already has. That
+ * is what decides which stages an application goes through at all: a stage
+ * with no required document on the checklist is skipped (see
+ * `stagesForChecklist`).
  */
 
 export interface RequirementDocument {
@@ -33,6 +34,8 @@ export interface RequirementDocument {
   readonly label: string;
   readonly description: string;
   readonly required: boolean;
+  /** The evaluation stage that checks it (migration 060). Absent from a caller that predates it: Initial. */
+  readonly stage?: ChecklistStage | undefined;
 }
 
 export type RequirementsResult =
@@ -63,13 +66,13 @@ export class RequirementsService {
     permitType: string, applicationAction?: string, tx: SqlClient = this.db,
   ): Promise<readonly RequirementDocument[]> {
     const result = applicationAction === undefined
-      ? await tx.query<{ code: string; label: string; description: string; required: boolean }>(
-          `select code, label, description, required from document_requirements
+      ? await tx.query<{ code: string; label: string; description: string; required: boolean; stage: ChecklistStage }>(
+          `select code, label, description, required, stage from document_requirements
             where permit_type = $1 and application_action is null order by position, code`,
           [permitType],
         )
-      : await tx.query<{ code: string; label: string; description: string; required: boolean }>(
-          `select code, label, description, required from document_requirements
+      : await tx.query<{ code: string; label: string; description: string; required: boolean; stage: ChecklistStage }>(
+          `select code, label, description, required, stage from document_requirements
             where permit_type = $1 and (application_action is null or application_action = $2)
             order by position, code`,
           [permitType, applicationAction],
@@ -105,6 +108,15 @@ export class RequirementsService {
       };
     }
 
+    const badStage = documents.find((document) => document.stage !== undefined && !isChecklistStage(document.stage));
+    if (badStage !== undefined) {
+      return {
+        ok: false, reason: 'unknown-stage',
+        detail: `"${badStage.label}" names the stage "${String(badStage.stage)}". A document is checked at `
+          + 'Initial, Zoning, Fire Safety or OBO.',
+      };
+    }
+
     return this.db.transaction(async (tx) => {
       const known = await tx.query('select permit_type from permit_types where permit_type = $1', [permitType]);
       if (known.rows.length === 0) {
@@ -130,10 +142,11 @@ export class RequirementsService {
       for (const [position, document] of documents.entries()) {
         await tx.query(
           `insert into document_requirements
-             (permit_type, code, label, description, required, position, application_action, updated_at, updated_by)
-           values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+             (permit_type, code, label, description, required, position, application_action, updated_at, updated_by, stage)
+           values ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)`,
           [permitType, document.code.trim(), document.label.trim(), document.description ?? '',
-           document.required, position, applicationAction ?? null, this.clock(), officer.accountId],
+           document.required, position, applicationAction ?? null, this.clock(), officer.accountId,
+           document.stage ?? 'Initial'],
         );
       }
 

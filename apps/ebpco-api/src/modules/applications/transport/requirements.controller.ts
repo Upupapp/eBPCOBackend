@@ -22,6 +22,8 @@ const documentShape = z.object({
   label: z.string().min(1).max(200),
   description: z.string().max(1000).default(''),
   required: z.boolean(),
+  // The evaluation stage that checks it (migration 060). Omitted: Initial.
+  stage: z.enum(['Initial', 'Zoning', 'Fire Safety', 'OBO']).optional(),
 }).strict();
 
 const replaceShape = z.object({

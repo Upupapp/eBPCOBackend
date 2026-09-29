@@ -3,7 +3,7 @@ import { AuditService } from '../../compliance/application/audit.service';
 import { deepLinkFor, entryFor } from '../../notifications/domain/catalog';
 import { Caller } from '../domain/application';
 import {
-  EVALUATION_STAGES, EvaluationStage, describeHeld, evaluationStagesOf, holdsStage,
+  EvaluationStage, describeHeld, evaluationStagesOf, holdsStage, stagesForChecklist,
 } from '../domain/evaluation-stages';
 import { visibleStatusesFor } from '../domain/visibility';
 import { LifecycleStatus } from '../domain/lifecycle';
@@ -36,7 +36,8 @@ export type RecordResult =
   | {
       readonly ok: false;
       readonly reason:
-        | 'not-found' | 'already-decided' | 'remarks-required' | 'self-review' | 'out-of-order' | 'not-your-stage';
+        | 'not-found' | 'already-decided' | 'remarks-required' | 'self-review' | 'out-of-order' | 'not-your-stage'
+        | 'stage-not-applicable';
       readonly detail: string;
     };
 
@@ -49,7 +50,6 @@ export type RecordResult =
  * from the admin's own EVALUATION_STAGE_ORDER, and an out-of-order attempt is
  * refused with the stage that is actually next.
  */
-const ORDER: readonly EvaluationStage[] = EVALUATION_STAGES;
 
 export interface EvaluationQueueRow {
   readonly applicationId: string;
@@ -65,8 +65,14 @@ export interface EvaluationQueueRow {
   readonly evaluations: ReadonlyArray<{
     id: string; stage: EvaluationStage; result: string; remarks: string | null; evaluatedAt: string | null;
   }>;
-  /** The stage this application is waiting on, or null when all six are decided. */
+  /** The stage this application is waiting on, or null when all of its stages are passed. */
   readonly nextStage: EvaluationStage | null;
+  /**
+   * The stages this application goes through (migration 060): Initial and
+   * Final Approval always, the others only when its checklist has a required
+   * document checked there.
+   */
+  readonly evaluationStages: readonly EvaluationStage[];
   /** Both sides, never the difference — see `queue()` for why. */
   readonly requiredDocumentCount: number;
   readonly attachedDocumentCount: number;
@@ -251,7 +257,8 @@ export class EvaluationService {
       // verdict keeps showing that stage as next rather than the queue
       // reporting it as waiting on whatever comes after.
       const passed = new Set(evaluations.filter((evaluation) => evaluation.result === 'Passed').map((evaluation) => evaluation.stage));
-      const next = ORDER.find((stage) => !passed.has(stage)) ?? null;
+      const stages = stagesForChecklist(row.required_documents);
+      const next = stages.find((stage) => !passed.has(stage)) ?? null;
       if (filters.stage !== undefined && next !== filters.stage) continue;
 
       const required = (row.required_documents ?? []).filter((document) => document.required);
@@ -267,6 +274,7 @@ export class EvaluationService {
         submittedAt: row.submitted_at === null ? null : row.submitted_at.toISOString(),
         evaluations,
         nextStage: next,
+        evaluationStages: stages,
         requiredDocumentCount: required.length,
         attachedDocumentCount: row.attached_documents,
         responsibility: responsibilityFor(row.lifecycle_status as LifecycleStatus, next, row.permit_type, roster),
@@ -322,8 +330,10 @@ export class EvaluationService {
     }
 
     return this.db.transaction(async (tx) => {
-      const application = await tx.query<{ id: string; applicant_account_id: string }>(
-        `select a.id, acc.id as applicant_account_id
+      const application = await tx.query<{
+        id: string; applicant_account_id: string; permit_type: string; required_documents: unknown;
+      }>(
+        `select a.id, acc.id as applicant_account_id, a.permit_type, a.required_documents
            from applications a
            join applicants ap on ap.id = a.applicant_id
            join accounts acc on acc.id = ap.account_id
@@ -356,6 +366,19 @@ export class EvaluationService {
         };
       }
 
+      // Only the stages this application goes through (migration 060): a
+      // Fencing Permit has nothing for the BFP to check, so it has no Fire
+      // Safety stage to decide.
+      const stages = stagesForChecklist(row.required_documents);
+      if (!stages.includes(stage)) {
+        return {
+          ok: false,
+          reason: 'stage-not-applicable',
+          detail: `This ${row.permit_type} application does not go through the ${stage} stage — nothing on its `
+            + `checklist is checked there. Its stages are: ${stages.join(', ')}.`,
+        };
+      }
+
       const existing = await tx.query<{ stage: EvaluationStage; result: string }>(
         'select stage, result from evaluations where application_id = $1',
         [applicationId],
@@ -374,7 +397,7 @@ export class EvaluationService {
       // PASSED — an adverse verdict still occupies its row (see the doc
       // comment above) but must keep blocking every stage after it until it
       // is corrected, the same as a never-decided stage would.
-      const next = ORDER.find((candidate) => decided.get(candidate) !== 'Passed');
+      const next = stages.find((candidate) => decided.get(candidate) !== 'Passed');
       if (next !== stage) {
         return {
           ok: false,
@@ -453,7 +476,7 @@ export class EvaluationService {
       // above, but must not report the evaluation cycle as complete, since
       // that flag is what the lifecycle asks before letting an application
       // move on to Assessed or Approved.
-      const complete = ORDER.every((candidate) => decided.get(candidate) === 'Passed');
+      const complete = stages.every((candidate) => decided.get(candidate) === 'Passed');
 
       return { ok: true, evaluationId: inserted.rows[0]?.id ?? '', complete };
     });

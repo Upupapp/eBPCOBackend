@@ -108,6 +108,8 @@ export interface QueueRow {
    * This is that.
    */
   readonly evaluationStage: string | null;
+  /** The stages this application goes through (migration 060) — Initial and Final Approval always, the others when its checklist needs them. */
+  readonly evaluationStages: readonly string[];
   /**
    * The permit number a Renewal or Amendment names, when it resolved to a
    * real permit eBPCO itself issued (`applications.renews_permit_id`, see
@@ -269,13 +271,16 @@ const QUEUE_SQL = `
     -- (the Admin Portal's Business Application Stages board) had nothing
     -- to filter on and treated every row as stageless.
     (select stage
-       from unnest(array['Initial','Zoning','Fire Safety','OBO','Final Approval']) with ordinality as s(stage, ord)
+       from unnest(application_evaluation_stages(a.required_documents)) with ordinality as s(stage, ord)
       where not exists (
         select 1 from evaluations e
          where e.application_id = a.id and e.stage = s.stage and e.result = 'Passed'
       )
       order by s.ord
       limit 1) as evaluation_stage,
+    -- The stages it goes through at all (migration 060), so a screen can say
+    -- "Fire Safety: not needed" rather than draw a stage that never comes.
+    application_evaluation_stages(a.required_documents) as evaluation_stages,
     a.prior_permit_claim,
     (select g.permit_number from generated_permits g where g.application_id = a.renews_permit_id)
       as renews_permit_number
@@ -827,6 +832,7 @@ export class StaffQueueService {
       pledge: pledgeOf(row, calendar, this.clock()),
       completedAt: completed === null || completed === undefined ? null : new Date(completed as string).toISOString(),
       evaluationStage: (row['evaluation_stage'] as string | null) ?? null,
+      evaluationStages: (row['evaluation_stages'] as string[] | null) ?? [],
       renewsPermitNumber: (row['renews_permit_number'] as string | null) ?? null,
       priorPermitClaim: (row['prior_permit_claim'] as string | null) ?? null,
       responsibility: responsibilityFor(

@@ -131,6 +131,18 @@ function sameName(a: { firstName: string; lastName: string }, b: { firstName: st
   return key(a) === key(b);
 }
 
+/**
+ * Why a retired permit type is refused, in the applicant's terms. The FSEC and
+ * FSIC are the BFP's (migration 060): the applicant is told where to get them.
+ */
+export function retiredPermitDetail(permitType: string): string {
+  return permitType.includes('(BFP)')
+    ? `The ${permitType} is issued by the Bureau of Fire Protection, not the Municipality. Apply online at `
+      + 'BFP-FSIS (fsis.e-bfp.com) or at the Castilla Fire Station, then upload it with your Building Permit or '
+      + 'Certificate of Occupancy application.'
+    : `The Municipality no longer issues a "${permitType}" permit through eBPCO.`;
+}
+
 export class SubmissionService {
   private readonly audit: AuditService;
 
@@ -194,8 +206,8 @@ export class SubmissionService {
         };
       }
 
-      const permitType = await tx.query<{ permit_type: string }>(
-        'select permit_type from permit_types where permit_type = $1',
+      const permitType = await tx.query<{ permit_type: string; retired_at: Date | null }>(
+        'select permit_type, retired_at from permit_types where permit_type = $1',
         [submission.permitType],
       );
       if (permitType.rows.length === 0) {
@@ -203,6 +215,9 @@ export class SubmissionService {
           ok: false, reason: 'unknown-permit-type',
           detail: `The LGU does not issue a "${submission.permitType}" permit.`,
         };
+      }
+      if (permitType.rows[0]!.retired_at !== null) {
+        return { ok: false, reason: 'unknown-permit-type', detail: retiredPermitDetail(submission.permitType) };
       }
 
       if (submission.businessId !== null) {
@@ -414,14 +429,17 @@ export class SubmissionService {
       }
 
       if (patch.permitType !== undefined) {
-        const known = await tx.query(
-          'select permit_type from permit_types where permit_type = $1', [patch.permitType],
+        const known = await tx.query<{ retired_at: Date | null }>(
+          'select retired_at from permit_types where permit_type = $1', [patch.permitType],
         );
         if (known.rows.length === 0) {
           return {
             ok: false, reason: 'unknown-permit-type',
             detail: `The LGU does not issue a "${patch.permitType}" permit.`,
           };
+        }
+        if (known.rows[0]!.retired_at !== null) {
+          return { ok: false, reason: 'unknown-permit-type', detail: retiredPermitDetail(patch.permitType) };
         }
       }
 
@@ -717,14 +735,17 @@ export class SubmissionService {
         }
       }
 
-      const permitType = await tx.query(
-        'select permit_type from permit_types where permit_type = $1', [submission.permitType],
+      const permitType = await tx.query<{ retired_at: Date | null }>(
+        'select retired_at from permit_types where permit_type = $1', [submission.permitType],
       );
       if (permitType.rows.length === 0) {
         return {
           ok: false, reason: 'unknown-permit-type',
           detail: `The LGU does not issue a "${submission.permitType}" permit.`,
         };
+      }
+      if (permitType.rows[0]!.retired_at !== null) {
+        return { ok: false, reason: 'unknown-permit-type', detail: retiredPermitDetail(submission.permitType) };
       }
 
       const renewal = await resolveRenewal(tx, {

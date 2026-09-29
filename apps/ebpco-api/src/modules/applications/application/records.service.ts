@@ -4,6 +4,7 @@ import { Caller } from '../domain/application';
 import { LifecycleStatus, isTerminal } from '../domain/lifecycle';
 import { RequirementsService } from './requirements.service';
 import { resolveRenewal } from './resolve-renewal';
+import { retiredPermitDetail } from './submission.service';
 
 /**
  * Correcting and putting away a filed application.
@@ -202,14 +203,19 @@ export class RecordsService {
       }
 
       if (patch.permitType !== undefined) {
-        const known = await tx.query(
-          'select permit_type from permit_types where permit_type = $1', [patch.permitType],
+        const known = await tx.query<{ retired_at: Date | null }>(
+          'select retired_at from permit_types where permit_type = $1', [patch.permitType],
         );
         if (known.rows.length === 0) {
           return {
             ok: false, reason: 'unknown-permit-type',
             detail: `The LGU does not issue a "${patch.permitType}" permit.`,
           };
+        }
+        // Moving an application ONTO a retired type is refused; one already on
+        // it (filed before it was retired) keeps it through an edit.
+        if (known.rows[0]!.retired_at !== null && patch.permitType !== before.permit_type) {
+          return { ok: false, reason: 'unknown-permit-type', detail: retiredPermitDetail(patch.permitType) };
         }
       }
 

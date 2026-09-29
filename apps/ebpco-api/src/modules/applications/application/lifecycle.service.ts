@@ -9,7 +9,6 @@ import { Refusal } from '../domain/lifecycle-errors';
 import { loadTransitions } from '../domain/transition-repository';
 import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
 import { evaluationStagesOf, holdsStage, nextStageOf } from '../domain/evaluation-stages';
-import { EVALUATION_STAGES } from './evaluation.service';
 
 /**
  * Moves an application, and records everything that follows, atomically.
@@ -115,10 +114,14 @@ const SNAPSHOT_SQL = `
             where n.supersedes_document_id = d.id and n.deleted_at is null
          )
     ) as returned_documents_outstanding,
-    (
-      select count(*)::int from evaluations e
-       where e.application_id = a.id and e.result = 'Passed'
-    ) = ${EVALUATION_STAGES.length} as evaluations_complete,
+    -- Every stage THIS application goes through has passed (migration 060:
+    -- a stage with nothing on its checklist to check is not one of them).
+    not exists (
+      select 1 from unnest(application_evaluation_stages(a.required_documents)) as s(stage)
+       where not exists (
+         select 1 from evaluations e
+          where e.application_id = a.id and e.stage = s.stage and e.result = 'Passed')
+    ) as evaluations_complete,
     exists (
       select 1 from orders_of_payment o
        where o.application_id = a.id and o.superseded_at is null

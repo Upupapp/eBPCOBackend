@@ -132,7 +132,7 @@ function refusal(reason: string, detail: string): ProblemException {
     ? HttpStatus.NOT_FOUND
     : reason === 'self-review' || reason === 'self-verification' || reason === 'not-your-stage'
       ? HttpStatus.FORBIDDEN
-      : reason === 'already-decided' || reason === 'already-generated'
+      : reason === 'already-decided' || reason === 'already-generated' || reason === 'stage-not-applicable'
         || reason === 'already-released' || reason === 'already-assessed'
         || reason === 'already-verified' || reason === 'conflict'
         ? HttpStatus.CONFLICT
