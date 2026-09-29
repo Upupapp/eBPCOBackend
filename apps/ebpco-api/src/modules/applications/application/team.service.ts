@@ -5,7 +5,7 @@ import { isEvaluationStage, stagesForChecklist } from '../domain/evaluation-stag
 import { LifecycleStatus } from '../domain/lifecycle';
 import { TEAMS, TeamKey, teamForStep, teamsOf } from '../domain/teams';
 import { stepFor } from './responsibility';
-import { assigneeOf, officerOf, placementOf, teamPhrase } from './step-guard';
+import { assigneeOf, neverWorks, neverWorksDetail, officerOf, placementOf, teamPhrase } from './step-guard';
 
 /**
  * The teams of the permit office, their leads and members, and the work
@@ -119,9 +119,22 @@ export class TeamService {
    *   - A member may take an UNASSIGNED one for themselves, and hand back one
    *     that is theirs. Anything else is the lead's call.
    */
+  /**
+   * Why this caller can assign nothing at all, or null when they might. Asked
+   * before the request is even read, so an officer who never works is refused
+   * the same way whatever they send.
+   */
+  async refusesOutright(caller: Caller): Promise<string | null> {
+    const officer = await officerOf(this.db, caller.accountId);
+    return officer !== null && neverWorks(officer, false) ? neverWorksDetail(officer) : null;
+  }
+
   async assign(options: { caller: Caller; applicationId: string; assigneeId: string | null }): Promise<AssignResult> {
     const { caller, applicationId, assigneeId } = options;
     const officer = await officerOf(this.db, caller.accountId);
+    if (officer !== null && neverWorks(officer, false)) {
+      return { ok: false, reason: 'not-permitted', detail: neverWorksDetail(officer) };
+    }
     const place = await placementOf(this.db, applicationId);
     if (officer === null || place === null) return { ok: false, reason: 'not-found', detail: 'No such application.' };
     if (place.team === null) {
@@ -132,7 +145,8 @@ export class TeamService {
       };
     }
     const team = place.team;
-    const leads = officer.superAdmin || (officer.lead && officer.teams.includes(team));
+    // A lead with view-only access leads nobody's work: handing it out is working on it.
+    const leads = officer.superAdmin || (officer.lead && officer.canWork && officer.teams.includes(team));
     const member = officer.teams.includes(team) && officer.canWork;
     const current = await assigneeOf(this.db, applicationId, team);
 

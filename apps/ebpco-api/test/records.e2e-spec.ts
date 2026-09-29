@@ -637,15 +637,19 @@ describe('the dashboard, over time', () => {
     expect(after.trend.total?.previous).toBe(before.trend.total?.previous);
   });
 
-  it('gives a narrowed role a trend narrowed to what they may see', async () => {
+  it("gives every officer the whole office's trend, now that every officer reads every application", async () => {
+    // Owner request, 2026-09-29: every officer views every application, so a
+    // releasing officer's figures are the office's, not only the release
+    // stages'. Compared with a super admin: earlier tests leave rows behind.
     const releasing = await staffToken('releasing-officer');
+    const admin = await staffToken('super-admin');
     await file('Under Evaluation');
 
-    const body = await metrics(releasing.token);
+    const seen = await metrics(releasing.token);
+    const all = await metrics(admin.token);
 
-    // Under Evaluation is outside a releasing officer's visibility, so it
-    // contributes to neither their total nor their pending figure.
-    expect(body.trend.pendingUnderReview?.recent).toBe(0);
+    expect(seen.trend.pendingUnderReview?.recent).toBeGreaterThan(0);
+    expect(seen.trend).toEqual(all.trend);
   });
 
   it('gives a cashier figures over every application, not only the payment stages', async () => {

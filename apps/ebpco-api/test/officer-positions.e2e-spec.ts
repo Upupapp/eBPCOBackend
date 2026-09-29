@@ -138,7 +138,7 @@ describe('an evaluator decides only the stages assigned to them', () => {
     const other = await send('POST', `/staff/applications/${atInitial}/evaluations`, fire.token,
       { stage: 'Initial', result: 'Passed' });
     expect(other.statusCode).toBe(403);
-    expect(other.json<{ detail: string }>().detail).toContain('The Initial stage is not assigned to your account');
+    expect(other.json<{ detail: string }>().detail).toContain("the Initial Evaluation team's");
 
     const own = await send('POST', `/staff/applications/${atFireSafety}/evaluations`, fire.token,
       { stage: 'Fire Safety', result: 'Passed' });
@@ -153,7 +153,7 @@ describe('an evaluator decides only the stages assigned to them', () => {
       { stage: 'Initial', result: 'Passed' });
 
     expect(response.statusCode).toBe(403);
-    expect(response.json<{ detail: string }>().detail).toContain('no evaluation stage assigned');
+    expect(response.json<{ detail: string }>().detail).toContain('does not work on any step');
   });
 
   it('keeps the super admin able to decide every stage', async () => {
@@ -175,7 +175,7 @@ describe('an evaluator decides only the stages assigned to them', () => {
     const refused = await send('POST', `/staff/applications/${id}/transitions`, zoning.token,
       { to: 'Revision Required', remarks });
     expect(refused.statusCode).toBe(403);
-    expect(refused.json<{ detail: string }>().detail).toContain('at the Fire Safety evaluation stage');
+    expect(refused.json<{ detail: string }>().detail).toContain("the Fire Safety team's");
 
     const allowed = await send('POST', `/staff/applications/${id}/transitions`, fire.token,
       { to: 'Revision Required', remarks });
@@ -241,20 +241,21 @@ describe('assigning stages', () => {
   });
 });
 
-describe('a super admin deleting a staff account', () => {
-  it('deletes an account that never acted, freeing its address', async () => {
+describe('a super admin archiving a staff account', () => {
+  it('archives even an account that never acted -- nothing is deleted (2026-09-29)', async () => {
     const admin = await officer(['super-admin']);
     const unused = await officer(['cashier']);
 
     const response = await send('DELETE', `/staff/users/${unused.id}`, admin.token);
 
     expect(response.statusCode).toBe(200);
-    expect(response.json<{ mode: string }>().mode).toBe('deleted');
-    const gone = await db.query('select 1 from accounts where id = $1', [unused.id]);
-    expect(gone.rows).toHaveLength(0);
+    expect(response.json<{ mode: string }>().mode).toBe('archived');
+    const kept = await db.query<{ removed_at: Date | null }>('select removed_at from accounts where id = $1', [unused.id]);
+    expect(kept.rows).toHaveLength(1);
+    expect(kept.rows[0]!.removed_at).not.toBeNull();
   });
 
-  it('retires an account whose name is on a decision, keeping the name on it', async () => {
+  it('archives an account whose name is on a decision, keeping the name on it', async () => {
     const admin = await officer(['super-admin']);
     const fire = await officer(['evaluator'], ['Fire Safety'], 'Juan Dela Cruz');
     const id = await file('Under Evaluation', ['Initial', 'Zoning']);
@@ -264,7 +265,7 @@ describe('a super admin deleting a staff account', () => {
 
     const response = await send('DELETE', `/staff/users/${fire.id}`, admin.token);
 
-    expect(response.json<{ mode: string }>().mode).toBe('retired');
+    expect(response.json<{ mode: string }>().mode).toBe('archived');
     const row = await db.query<{ removed_at: Date | null; disabled_at: Date | null; full_name: string }>(
       'select removed_at, disabled_at, full_name from accounts where id = $1', [fire.id]);
     expect(row.rows[0]!.removed_at).not.toBeNull();

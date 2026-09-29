@@ -39,7 +39,8 @@ function callerOf(request: AuthenticatedRequest): Caller {
 export function stepRefused(check: Exclude<StepCheck, { ok: true }>): never {
   if (check.reason === 'not-found') throw ProblemException.notFound(check.detail);
   throw new ProblemException(
-    ProblemType.forbidden, check.reason === 'assigned-to-other' ? 'Assigned to someone else' : 'Not your stage',
+    ProblemType.forbidden,
+    check.reason === 'assigned-to-other' ? 'Assigned to someone else' : check.reason === 'view-only' ? 'View only' : 'Not your stage',
     HttpStatus.FORBIDDEN, check.detail, undefined, { reason: check.reason },
   );
 }
@@ -69,6 +70,15 @@ export class StaffTeamsController {
     private readonly archives: ArchiveService,
   ) {}
 
+  private async mayArchive(request: AuthenticatedRequest): Promise<void> {
+    if (!(await this.archives.handlesAny(callerOf(request)))) {
+      throw new ProblemException(
+        ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN,
+        'Your position cannot archive or restore records. You can still open the Archive to see what is in it.',
+      );
+    }
+  }
+
   /** Every team: its lead and members, and the work waiting on it. */
   @Get('teams')
   async overview(): Promise<Record<string, unknown>> {
@@ -86,6 +96,8 @@ export class StaffTeamsController {
   async assign(
     @Req() request: AuthenticatedRequest, @Param('applicationId') applicationId: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
+    const outright = await this.teams.refusesOutright(callerOf(request));
+    if (outright !== null) throw new ProblemException(ProblemType.forbidden, 'Not permitted', HttpStatus.FORBIDDEN, outright);
     const input = parse(assignShape, body);
     const result = await this.teams.assign({ caller: callerOf(request), applicationId, assigneeId: input.assigneeId });
     if (!result.ok) {
@@ -112,6 +124,7 @@ export class StaffTeamsController {
   async archive(
     @Req() request: AuthenticatedRequest, @Param('kind') kind: string, @Param('id') id: string, @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
+    await this.mayArchive(request);
     const which = parse(z.enum(['citizen', 'business']), kind);
     const input = parse(archiveShape, body);
     const outcome = await this.archives.archive({ caller: callerOf(request), kind: which, id, reason: input.reason });
@@ -125,6 +138,7 @@ export class StaffTeamsController {
   async restore(
     @Req() request: AuthenticatedRequest, @Param('kind') kind: string, @Param('id') id: string,
   ): Promise<Record<string, unknown>> {
+    await this.mayArchive(request);
     const which = parse(kindShape, kind);
     const outcome = await this.archives.restore({ caller: callerOf(request), kind: which, id });
     if (!outcome.ok) archiveRefused(outcome);

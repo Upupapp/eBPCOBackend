@@ -72,6 +72,18 @@ export class ArchiveService {
     }
   }
 
+  /**
+   * Whether this caller may archive or restore anything at all. Asked before
+   * the request is read, so a role with no archive rights (an auditor, an
+   * evaluator) is refused the same way whatever kind or id they send.
+   */
+  async handlesAny(caller: Caller): Promise<boolean> {
+    for (const kind of ARCHIVE_KINDS) {
+      if (await this.mayHandle(caller, kind)) return true;
+    }
+    return false;
+  }
+
   async list(caller: Caller): Promise<readonly ArchivedItem[]> {
     const may = new Map<ArchiveKind, boolean>();
     for (const kind of ARCHIVE_KINDS) may.set(kind, await this.mayHandle(caller, kind));

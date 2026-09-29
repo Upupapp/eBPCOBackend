@@ -59,14 +59,17 @@ let tokens: TokenService;
 // anything actually wrong with it.
 jest.setTimeout(60_000);
 
-async function staffToken(role: StaffRole): Promise<string> {
+async function staffToken(role: StaffRole | readonly StaffRole[]): Promise<string> {
+  const roles: readonly StaffRole[] = typeof role === 'string' ? [role] : role;
   const id = randomUUID();
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
      values ($1,'staff',$2,$2,'scrypt$1$1$1$a$b')`,
-    [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
+    [id, `${roles.join('-')}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
-  await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  for (const each of roles) {
+    await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, each]);
+  }
   await db.query(
     'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
     [id, 'view-edit']);
@@ -80,7 +83,7 @@ async function staffToken(role: StaffRole): Promise<string> {
      select $1, stage, $1 from unnest(array['Initial','Zoning','Fire Safety','OBO','Final Approval']) as stage`, [id]);
   const issued = await tokens.issueAccessToken({
     sub: id, sid: randomUUID(), kind: 'staff',
-    scopes: [...scopesFor({ kind: 'staff', roles: [role] })],
+    scopes: [...scopesFor({ kind: 'staff', roles: [...roles] })],
   });
   return issued.token;
 }
@@ -194,7 +197,11 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     const preparer = await staffToken('assessor');
     const approver = await staffToken('assessor');
     const cashier = await staffToken('cashier');
-    const official = await staffToken('building-official');
+    // The Building Official position holds both roles (officer-positions): it
+    // decides the Final Approval evaluation and then approves. Since teams
+    // (062) that must be the same office -- whoever decides Final Approval has
+    // the application for the Building Official team.
+    const official = await staffToken(['evaluator', 'building-official']);
     const releasing = await staffToken('releasing-officer');
 
     expect((await post(`/staff/applications/${applicationId}/transitions`, receiving, { to: 'Received' }))
@@ -209,11 +216,15 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     expect(verified.statusCode).toBe(200);
 
     for (const stage of STAGES) {
-      const result = await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage, result: 'Passed' });
+      const by = stage === 'Final Approval' ? official : evaluator;
+      const result = await post(`/staff/applications/${applicationId}/evaluations`, by, { stage, result: 'Passed' });
       expect(result.statusCode).toBe(201);
     }
     const fireSafety = await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage: 'Fire Safety', result: 'Passed' });
-    expect(fireSafety.statusCode).toBe(409);
+    // Refused: the application has moved on from Fire Safety, so that stage is
+    // no longer the step anyone works on (StepGuard answers before the
+    // evaluation service would have said "already decided").
+    expect(fireSafety.statusCode).toBe(403);
 
     // Two DIFFERENT assessors — the same separation of duty
     // staff-actions.e2e-spec.ts's approvedAssessment() exercises: the one

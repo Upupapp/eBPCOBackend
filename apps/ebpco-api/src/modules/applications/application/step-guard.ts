@@ -3,7 +3,7 @@ import { AuditService } from '../../compliance/application/audit.service';
 import { Caller } from '../domain/application';
 import { EvaluationStage, isEvaluationStage, stagesForChecklist } from '../domain/evaluation-stages';
 import { LifecycleStatus } from '../domain/lifecycle';
-import { TeamKey, teamByKey, teamForStep, teamsOf } from '../domain/teams';
+import { STEP_TEAMS, TeamKey, teamByKey, teamForStep, teamsOf } from '../domain/teams';
 import { Step, stepFor } from './responsibility';
 
 /**
@@ -38,7 +38,11 @@ export type WorkKind =
 
 export type StepCheck =
   | { readonly ok: true }
-  | { readonly ok: false; readonly reason: 'not-found' | 'not-your-stage' | 'assigned-to-other'; readonly detail: string };
+  | {
+      readonly ok: false;
+      readonly reason: 'not-found' | 'view-only' | 'not-your-stage' | 'assigned-to-other';
+      readonly detail: string;
+    };
 
 /** One officer, as the guard needs them. */
 export interface Officer {
@@ -131,6 +135,27 @@ export async function assigneeOf(db: SqlClient, applicationId: string, team: Tea
   return rows[0] ?? null;
 }
 
+/**
+ * Whether this officer can work on NO application, at any step: their access
+ * is view-only, or no team they are in owns a step (an auditor, an
+ * administrator, an evaluator with no stage). Asked before the application is
+ * looked up, so such an officer is told "not permitted" rather than learning
+ * from a 404 whether an id exists -- and so the answer is the same for every
+ * id, which is what makes it checkable at all. A super admin stands above the
+ * teams, and a Records Officer keeps record-keeping at any step.
+ */
+export function neverWorks(officer: Officer, keepsRecords: boolean): boolean {
+  if (officer.superAdmin || keepsRecords) return false;
+  return !officer.canWork || !officer.teams.some((team) => STEP_TEAMS.includes(team));
+}
+
+/** Why `neverWorks` said so, in the officer's terms. */
+export function neverWorksDetail(officer: Officer): string {
+  return officer.canWork
+    ? 'Your position does not work on any step of an application. You can open every application, but not change or move one.'
+    : 'Your access is view only. You can open every application, but not change or move one.';
+}
+
 /** The team a step is, in words: "the Zoning team". */
 export function teamPhrase(team: TeamKey | null): string {
   const found = team === null ? null : teamByKey(team);
@@ -154,11 +179,12 @@ export class StepGuard {
     const officer = await officerOf(this.db, caller.accountId);
     if (officer === null) return { ok: false, reason: 'not-found', detail: 'No such officer.' };
     if (officer.superAdmin) return { ok: true };
+    const keepsRecords = caller.scopes.includes('applications:write');
+    if (neverWorks(officer, keepsRecords)) return { ok: false, reason: 'view-only', detail: neverWorksDetail(officer) };
 
     const place = await placementOf(this.db, applicationId);
     if (place === null) return { ok: false, reason: 'not-found', detail: 'No such application.' };
 
-    const keepsRecords = caller.scopes.includes('applications:write');
     const inTeam = place.team !== null && officer.teams.includes(place.team) && officer.canWork;
 
     if (!inTeam) {

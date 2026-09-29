@@ -151,10 +151,14 @@ describe('readableStatusesFor: what the staff queue lets a role read', () => {
     );
   });
 
-  it('widens no other narrow role', () => {
-    const narrow: StaffRole[] = ['receiving-officer', 'records-officer', 'evaluator', 'assessor', 'releasing-officer'];
+  it('lets every officer read every status, while each is still notified only about its own stages', () => {
+    // Owner request, 2026-09-29: every officer views every application; working
+    // on one is StepGuard's question. Notifications stay narrow. (The Records
+    // Officer is left out: record-keeping already saw everything.)
+    const narrow: StaffRole[] = ['receiving-officer', 'evaluator', 'assessor', 'releasing-officer'];
     for (const role of narrow) {
-      expect(readableStatusesFor(as(role))).toEqual(visibleStatusesFor(as(role)));
+      expect(readableStatusesFor(as(role))).toBe('all');
+      expect(visibleStatusesFor(as(role))).not.toBe('all');
     }
   });
 

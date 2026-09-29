@@ -247,9 +247,11 @@ export class StaffActionsController {
     @Body() body: unknown,
   ): Promise<Record<string, unknown>> {
     const caller = callerOf(request);
+    // Who may work first: an officer who never works is refused whatever the
+    // id, rather than told by a 404 whether it exists.
+    await this.mayWork(caller, applicationId, 'edit');
     const input = parse(documentReviewShape, body);
     await this.visible(caller, applicationId);
-    await this.mayWork(caller, applicationId, 'edit');
 
     const result = await this.documents.review({
       applicationId,
