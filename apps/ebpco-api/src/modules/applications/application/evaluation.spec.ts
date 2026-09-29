@@ -351,3 +351,70 @@ describe('the applicant is told when a stage passes', () => {
     expect(to.rows[0]?.account_id).not.toBe(EVALUATOR_ACCOUNT);
   });
 });
+
+describe('a stage passes on the documents it checks', () => {
+  // A Building Permit's checklist, cut to one document per stage it goes through.
+  async function fileWithChecklist(): Promise<void> {
+    await db.query(
+      `update applications set permit_type = 'Building Permit', required_documents = $2 where id = $1`,
+      [APPLICATION, JSON.stringify([
+        { code: 'valid-id', label: 'Valid ID', stage: 'Initial', required: true },
+        { code: 'fsec', label: 'Fire Safety Evaluation Clearance', stage: 'Fire Safety', required: true },
+        { code: 'owner-consent', label: "Owner's Consent", stage: 'Initial', required: false },
+      ])],
+    );
+  }
+
+  async function upload(code: string, accepted: boolean): Promise<void> {
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type, byte_size, sha256,
+                              storage_key, status, scan_cleared, requirement_code, review_status, reviewed_at,
+                              reviewed_by)
+       values ($1,$2,$3,$4,$5,'application/pdf',1024,$6,$7,'Approved',true,$4,$8,$9,$10)`,
+      [randomUUID(), APPLICATION, APPLICANT_ACCOUNT, code, `${code}.pdf`, randomUUID().replace(/-/g, '').padEnd(64, '0'),
+        `objects/${randomUUID()}.pdf`, accepted ? 'Accepted' : null, accepted ? NOW : null,
+        accepted ? EVALUATOR_ACCOUNT : null],
+    );
+  }
+
+  beforeEach(async () => {
+    await fileWithChecklist();
+    await upload('valid-id', true);
+  });
+
+  it('refuses to pass Fire Safety before the BFP clearance is accepted, and names it', async () => {
+    await upload('fsec', false);
+    expect((await pass('Initial')).ok).toBe(true);
+
+    const result = await pass('Fire Safety');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.reason).toBe('documents-not-accepted');
+    expect(result.detail).toContain('Fire Safety Evaluation Clearance (not yet reviewed)');
+  });
+
+  it('counts a required document that was never uploaded as not accepted', async () => {
+    await pass('Initial');
+    const result = await pass('Fire Safety');
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.detail).toContain('Fire Safety Evaluation Clearance (not uploaded)');
+  });
+
+  it('passes once it is accepted; an optional document does not hold a stage up', async () => {
+    await upload('fsec', true);
+    expect((await pass('Initial')).ok).toBe(true);
+    expect((await pass('Fire Safety')).ok).toBe(true);
+  });
+
+  it('needs no accepted document to return the application for revision', async () => {
+    await upload('fsec', false);
+    await pass('Initial');
+    const result = await evaluations.record({
+      applicationId: APPLICATION, stage: 'Fire Safety', result: 'Revision Required', evaluator,
+      remarks: 'The FSEC is for a different lot; upload the one for this project.',
+    });
+    expect(result.ok).toBe(true);
+  });
+});

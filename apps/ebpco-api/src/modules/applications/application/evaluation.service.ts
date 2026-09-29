@@ -37,7 +37,7 @@ export type RecordResult =
       readonly ok: false;
       readonly reason:
         | 'not-found' | 'already-decided' | 'remarks-required' | 'self-review' | 'out-of-order' | 'not-your-stage'
-        | 'stage-not-applicable';
+        | 'stage-not-applicable' | 'documents-not-accepted';
       readonly detail: string;
     };
 
@@ -410,6 +410,21 @@ export class EvaluationService {
         };
       }
 
+      // A stage passes on its documents (owner request, 2026-09-30: the Fire
+      // Safety evaluator reviews the BFP's clearance and approves it only if it
+      // is valid). Every required document the stage checks is accepted first.
+      if (result === 'Passed') {
+        const waiting = await documentsNotAccepted(tx, applicationId, row.required_documents, stage);
+        if (waiting.length > 0) {
+          return {
+            ok: false,
+            reason: 'documents-not-accepted',
+            detail: `Review the ${waiting.length === 1 ? 'document' : 'documents'} the ${stage} stage checks before `
+              + `passing it: ${waiting.join('; ')}. Accept each one that is valid, or request a revision.`,
+          };
+        }
+      }
+
       const inserted = await tx.query<{ id: string }>(
         `insert into evaluations (application_id, stage, result, evaluator_id, remarks, evaluated_at)
          values ($1,$2,$3,$4,$5,$6)
@@ -485,4 +500,42 @@ export class EvaluationService {
       return { ok: true, evaluationId: inserted.rows[0]?.id ?? '', complete };
     });
   }
+}
+
+/**
+ * The required documents a stage checks, from the application's own checklist
+ * snapshot, that are not accepted yet, each with where it stands. A snapshot
+ * without stages (filed before migration 060) names none, so an application
+ * filed under the old rule is not held up by this one.
+ */
+export async function documentsNotAccepted(
+  db: SqlClient, applicationId: string, checklist: unknown, stage: EvaluationStage,
+): Promise<string[]> {
+  const entries = (Array.isArray(checklist) ? checklist : []).filter(
+    (entry): entry is { code: string; label?: string } =>
+      typeof entry === 'object' && entry !== null
+      && (entry as Record<string, unknown>)['stage'] === stage
+      && (entry as Record<string, unknown>)['required'] !== false
+      && typeof (entry as Record<string, unknown>)['code'] === 'string',
+  );
+  if (entries.length === 0) return [];
+  // The current copy of each document: not archived, not replaced by a resubmission.
+  const { rows } = await db.query<{ requirement_code: string | null; label: string; review_status: string | null }>(
+    `select d.requirement_code, d.label, d.review_status
+       from documents d
+      where d.application_id = $1 and d.deleted_at is null
+        and not exists (
+          select 1 from documents n where n.supersedes_document_id = d.id and n.deleted_at is null)`,
+    [applicationId],
+  );
+  return entries.flatMap((entry) => {
+    // By its requirement code; a document sent without one (an older upload, a
+    // walk-in) by the checklist label it was filed under.
+    const copies = rows.filter((copy) => copy.requirement_code === entry.code
+      || (copy.requirement_code === null && entry.label !== undefined && copy.label === entry.label));
+    if (copies.some((copy) => copy.review_status === 'Accepted')) return [];
+    const latest = copies[0];
+    const standing = latest === undefined ? 'not uploaded' : (latest.review_status ?? 'not yet reviewed').toLowerCase();
+    return [`${entry.label ?? entry.code} (${standing})`];
+  });
 }

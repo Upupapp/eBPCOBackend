@@ -178,11 +178,26 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     const documentId = uploaded.json<{ documentId: string; status: string }>().documentId;
     expect(uploaded.json<{ status: string }>().status).toBe('Approved');
 
+    // The rest of the checklist, each its own file: a stage passes only once the
+    // documents it checks are accepted (2026-09-30), so they have to be there.
+    const checklist = await get(`/requirements/${encodeURIComponent('Fencing Permit')}?applicationAction=New`, citizen);
+    const documentIds = [documentId];
+    for (const entry of checklist.json<{ documents: { code: string; label: string; required: boolean }[] }>().documents) {
+      if (!entry.required || /valid/i.test(entry.label)) continue;
+      const other = await post('/documents', citizen, {
+        fileName: `${entry.code}.pdf`, label: entry.label, requirementCode: entry.code,
+        contentBase64: Buffer.concat([PDF, Buffer.from(`% ${entry.code}
+`)]).toString('base64'),
+      });
+      expect(other.statusCode).toBe(201);
+      documentIds.push(other.json<{ documentId: string }>().documentId);
+    }
+
     const filed = await post('/applications', citizen, {
       permitType: 'Fencing Permit',
       applicationAction: 'New',
       location: '12 Rizal Street, Poblacion Uno, Castilla, Sorsogon',
-      documentIds: [documentId],
+      documentIds,
     });
     expect(filed.statusCode).toBe(201);
     const application = filed.json<{ id: string; referenceNumber: string }>();
@@ -214,6 +229,14 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     // actually uploads.
     const verified = await post(`/staff/applications/${applicationId}/transitions`, evaluator, { to: 'Under Evaluation' });
     expect(verified.statusCode).toBe(200);
+
+    // The evaluator checks each document and accepts it: no stage passes before.
+    const underReview = await get(`/staff/applications/${applicationId}`, evaluator);
+    for (const document of underReview.json<{ documents: { id: string }[] }>().documents) {
+      const accepted = await post(
+        `/staff/applications/${applicationId}/documents/${document.id}/review`, evaluator, { status: 'Accepted' });
+      expect(accepted.statusCode).toBeLessThan(300);
+    }
 
     for (const stage of STAGES) {
       const by = stage === 'Final Approval' ? official : evaluator;

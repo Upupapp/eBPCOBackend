@@ -46,12 +46,15 @@ let tokens: TokenService;
 let requirements: RequirementsService;
 let applicantId: string;
 let evaluatorToken: string;
+let evaluatorAccount: string;
 const APPLICANT_ACCOUNT = randomUUID();
 
 const PATH: readonly LifecycleStatus[] = ['Submitted', 'Received', 'Document Verification', 'Under Evaluation'];
 
 /** Filed the way the service files: the checklist snapshotted onto the application. */
-async function file(permitType: string, action: 'New' | 'Renewal' | 'Amendment' = 'New'): Promise<string> {
+async function file(
+  permitType: string, action: 'New' | 'Renewal' | 'Amendment' = 'New', { accepted = true } = {},
+): Promise<string> {
   const checklist = await requirements.forPermitType(permitType, action);
   const id = randomUUID();
   await db.query(
@@ -62,6 +65,19 @@ async function file(permitType: string, action: 'New' | 'Renewal' | 'Amendment' 
   );
   for (const next of PATH.slice(1)) {
     await db.query('update applications set lifecycle_status = $1 where id = $2', [next, id]);
+  }
+  // Every required document uploaded; accepted by the office unless a test says not, since a stage
+  // passes only on the documents it checks (2026-09-30).
+  for (const document of checklist.filter((entry) => entry.required)) {
+    await db.query(
+      `insert into documents (id, application_id, uploaded_by, label, file_name, content_type, byte_size, sha256,
+                              storage_key, status, scan_cleared, requirement_code, review_status, reviewed_at,
+                              reviewed_by)
+       values ($1,$2,$3,$4,$5,'application/pdf',1024,$6,$7,'Approved',true,$8,$9,$10,$11)`,
+      [randomUUID(), id, APPLICANT_ACCOUNT, document.label, `${document.code}.pdf`,
+        randomUUID().replace(/-/g, '').padEnd(64, '0'), `objects/${randomUUID()}.pdf`, document.code,
+        accepted ? 'Accepted' : null, accepted ? new Date() : null, accepted ? evaluatorAccount : null],
+    );
   }
   return id;
 }
@@ -106,6 +122,7 @@ beforeEach(async () => {
 
   // An evaluator holding every stage, so only the stage rules are under test.
   const evaluator = randomUUID();
+  evaluatorAccount = evaluator;
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
      values ($1,'staff','eval@lgu.gov.ph','eval@lgu.gov.ph','scrypt$1$1$1$a$b')`, [evaluator]);
@@ -203,6 +220,26 @@ describe('evaluating an application with fewer stages', () => {
     expect(last.statusCode).toBe(201);
     expect(last.json<{ evaluationsComplete: boolean }>().evaluationsComplete).toBe(true);
     expect(await nextStage(fence)).toBeNull();
+  });
+
+  it('refuses to pass Fire Safety until the BFP clearance is accepted, and says which document', async () => {
+    const building = await file('Building Permit', 'New', { accepted: false });
+    await db.query(
+      `update documents set review_status = 'Accepted', reviewed_at = now(), reviewed_by = $2
+        where application_id = $1 and requirement_code <> 'bpnc-fire-safety-clearance'`,
+      [building, evaluatorAccount]);
+    expect((await decide(building, 'Initial')).statusCode).toBe(201);
+    expect((await decide(building, 'Zoning')).statusCode).toBe(201);
+
+    const refused = await decide(building, 'Fire Safety');
+    expect(refused.statusCode).toBe(422);
+    expect(refused.json<{ detail: string }>().detail).toMatch(/Fire Safety Evaluation Clearance.*\(not yet reviewed\)/);
+
+    await db.query(
+      `update documents set review_status = 'Accepted', reviewed_at = now(), reviewed_by = $2
+        where application_id = $1 and requirement_code = 'bpnc-fire-safety-clearance'`,
+      [building, evaluatorAccount]);
+    expect((await decide(building, 'Fire Safety')).statusCode).toBe(201);
   });
 
   it('shows the queue the stages and the next one', async () => {
