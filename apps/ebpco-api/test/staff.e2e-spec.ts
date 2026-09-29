@@ -632,15 +632,15 @@ describe('opening one application', () => {
     ]);
   });
 
-  it('answers 404, not 403, for one the officer may not read', async () => {
-    // Telling a releasing officer that this reference exists but is not theirs
-    // to open confirms a neighbour has applied for a permit. (A cashier was the
-    // example until the cashier was given the whole pipeline to read.)
+  it('lets any officer open any application, to read (owner request, 2026-09-29)', async () => {
+    // Every officer sees every application; working on one is the step
+    // guard's question (teams-and-archive.e2e-spec.ts). This used to answer a
+    // releasing officer 404 for an application still at Receiving.
     const id = await file('BP-1', 'Submitted');
 
     const response = await get(`/staff/applications/${id}`, await staffToken('releasing-officer'));
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(200);
   });
 
   it('answers 404 for an id that is not a UUID, without touching the database', async () => {
@@ -786,14 +786,14 @@ describe('moving an application', () => {
     expect(Number(keys.rows[0]!.n)).toBe(0);
   });
 
-  it('refuses to move one the officer may not even read', async () => {
+  it('refuses to move one at another team’s step, though the officer can read it', async () => {
     const id = await file('BP-1', 'Submitted');
 
     const response = await post(`/staff/applications/${id}/transitions`, await staffToken('releasing-officer'), {
       to: 'Received',
     });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(403);
   });
 });
 

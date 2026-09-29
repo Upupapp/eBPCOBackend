@@ -293,7 +293,7 @@ describe('deleting a reusable copy', () => {
     expect((await service().deleteMine(result.documentId, owner)).ok).toBe(true);
   });
 
-  it('deletes the object and marks the row, the same way retention does', async () => {
+  it('archives an unattached copy rather than deleting it: the bytes stay, and it comes back (2026-09-29)', async () => {
     const result = await uploadUnattached();
     if (!result.ok) return;
     const key = (await db.query<{ storage_key: string }>(
@@ -302,21 +302,28 @@ describe('deleting a reusable copy', () => {
 
     await service().deleteMine(result.documentId, owner);
 
-    expect(await store.get(key)).toBeNull();
-    const row = await db.query<{ deleted_at: Date | null }>(
-      'select deleted_at from documents where id = $1', [result.documentId],
+    expect(await store.get(key)).not.toBeNull();
+    const row = await db.query<{ deleted_at: Date | null; removed_from_library_at: Date | null }>(
+      'select deleted_at, removed_from_library_at from documents where id = $1', [result.documentId],
     );
-    expect(row.rows[0]?.deleted_at).not.toBeNull();
+    expect(row.rows[0]?.deleted_at).toBeNull();
+    expect(row.rows[0]?.removed_from_library_at).not.toBeNull();
+    const archived = (await service().historyFor(OWNER_ACCOUNT, true)).map((d) => (d as { id: string }).id);
+    expect(archived).toEqual([result.documentId]);
+
+    expect((await service().restoreMine(result.documentId, owner)).ok).toBe(true);
+    const back = (await service().historyFor(OWNER_ACCOUNT)).map((d) => (d as { id: string }).id);
+    expect(back).toEqual([result.documentId]);
   });
 
-  it('records an audit event naming the citizen who deleted it', async () => {
+  it('records an audit event naming the citizen who archived it', async () => {
     const result = await uploadUnattached();
     if (!result.ok) return;
 
     await service().deleteMine(result.documentId, owner);
 
     const audit = await db.query<{ subject_id: string; actor_account_id: string }>(
-      "select subject_id, actor_account_id from audit_events where action = 'document.deleted-by-citizen'",
+      "select subject_id, actor_account_id from audit_events where action = 'document.archived-by-citizen'",
     );
     expect(audit.rows).toEqual([{ subject_id: result.documentId, actor_account_id: OWNER_ACCOUNT }]);
   });
@@ -354,14 +361,14 @@ describe('deleting a reusable copy', () => {
     expect(ids).toContain(unattached.documentId);
   });
 
-  it('records a distinct audit action for hiding an attached document, not the deletion one', async () => {
+  it('never records a deletion: archiving an attached document is an archive too', async () => {
     const result = await upload(makePdf(), 'tct.pdf');
     if (!result.ok) return;
 
     await service().deleteMine(result.documentId, owner);
 
     const audit = await db.query<{ subject_id: string }>(
-      "select subject_id from audit_events where action = 'document.removed-from-library'",
+      "select subject_id from audit_events where action = 'document.archived-by-citizen'",
     );
     expect(audit.rows).toEqual([{ subject_id: result.documentId }]);
     const deleted = await db.query<{ count: number }>(

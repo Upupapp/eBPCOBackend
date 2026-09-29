@@ -51,6 +51,9 @@ async function staff(role: StaffRole): Promise<{ id: string; token: string }> {
     [id, `${role}-${id.slice(0, 8)}@lgu.gov.ph`],
   );
   await db.query('insert into account_roles (account_id, role) values ($1,$2)', [id, role]);
+  // The access row migration 032 gives every real officer. Without it the step
+  // guard (2026-09-29) reads the officer as view-only, holding no work.
+  await db.query("insert into staff_access (account_id, level, assigned_by) values ($1,'view-edit',$1)", [id]);
   const issued = await tokens.issueAccessToken({
     sub: id, sid: randomUUID(), kind: 'staff',
     scopes: [...scopesFor({ kind: 'staff', roles: [role] })],

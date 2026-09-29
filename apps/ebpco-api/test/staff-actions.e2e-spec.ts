@@ -43,7 +43,7 @@ let tokens: TokenService;
 let applicantId: string;
 const APPLICANT_ACCOUNT = randomUUID();
 
-async function staffToken(role: StaffRole): Promise<string> {
+async function staffToken(role: StaffRole, teamRole: 'lead' | 'member' = 'member'): Promise<string> {
   const id = randomUUID();
   await db.query(
     `insert into accounts (id, kind, email, email_normalised, password_hash)
@@ -56,8 +56,8 @@ async function staffToken(role: StaffRole): Promise<string> {
   // `forms:<permit type>` — correct behaviour, and a fixture that skips it is
   // testing an officer no deployment produces.
   await db.query(
-    'insert into staff_access (account_id, level, assigned_by) values ($1,$2,$1)',
-    [id, 'view-edit']);
+    'insert into staff_access (account_id, level, assigned_by, team_role) values ($1,$2,$1,$3)',
+    [id, 'view-edit', teamRole]);
   await db.query(
     `insert into staff_permit_access (account_id, permit_type, granted_by)
      select $1, permit_type, $1 from permit_types`, [id]);
@@ -275,13 +275,15 @@ describe('recording an evaluation', () => {
     expect(response.statusCode).toBe(400);
   });
 
-  it('answers 404 for an application the evaluator may not read', async () => {
+  it('refuses an evaluation on an application at another team’s step (2026-09-29)', async () => {
+    // Every officer reads every application now; this one is with Releasing.
     const id = await file('BP-1', 'Ready for Release');
 
     const response = await post(`/staff/applications/${id}/evaluations`,
       await staffToken('evaluator'), { stage: 'Initial', result: 'Passed' });
 
-    expect(response.statusCode).toBe(404);
+    expect(response.statusCode).toBe(403);
+    expect(response.json<{ detail: string }>().detail).toMatch(/Releasing team/);
   });
 
   it('lets a corrected stage reach Assessed — a real application got stuck exactly here', async () => {
@@ -341,9 +343,12 @@ describe('recording an evaluation', () => {
 
     const response = await post(`/staff/applications/${id}/transitions`, assessor, { to: 'Assessed' });
 
-    expect(response.statusCode).toBe(422);
+    // Since 2026-09-29 the first answer is whose step it is: it is still being
+    // evaluated, so the Assessor cannot move it at all yet.
+    expect(response.statusCode).toBe(403);
     const detail = response.json<{ detail: string }>().detail;
-    expect(detail).toContain('Not every evaluation stage has been completed');
+    expect(detail).toContain('Initial Evaluation team');
+    expect(detail).not.toContain('nothing to pay');
     expect(detail).not.toContain('Order of Payment');
   });
 });
@@ -372,8 +377,9 @@ describe('the permit precondition that was missing', () => {
     // application there rather than leaving a status click owed.
     expect(permit.statusCode).toBe(201);
     expect(permit.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Permit Generated');
+    // Already there, and now at Releasing's step: not the official's to move.
     const repeated = await post(`/staff/applications/${id}/transitions`, token, { to: 'Permit Generated' });
-    expect(repeated.statusCode).toBe(409);
+    expect(repeated.statusCode).toBe(403);
   });
 });
 
@@ -837,7 +843,11 @@ describe('the whole path, five officers, one application', () => {
     const evaluator = await staffToken('evaluator');
     const assessor = await staffToken('assessor');
     const cashier = await staffToken('cashier');
-    const official = await staffToken('building-official');
+    // The evaluator here holds every stage, Final Approval included, so it
+    // takes the Building Official team's application when it decides that
+    // stage; the official leads the team, as the Building Official does, and
+    // so still approves it (2026-09-29).
+    const official = await staffToken('building-official', 'lead');
     const releasing = await staffToken('releasing-officer');
 
     await post(`/staff/applications/${id}/transitions`, evaluator, { to: 'Under Evaluation' });

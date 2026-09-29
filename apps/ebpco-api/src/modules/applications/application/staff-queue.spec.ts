@@ -188,7 +188,7 @@ afterEach(async () => {
   await db.close();
 });
 
-describe('an officer sees only what their role needs', () => {
+describe('what an officer sees', () => {
   it('refuses an applicant entirely, whatever scopes they hold', async () => {
     // Not a filter on their own applications: this is the staff surface, and
     // an applicant reaching it at all is a routing mistake, not a query.
@@ -202,25 +202,17 @@ describe('an officer sees only what their role needs', () => {
     expect(page.rows).toHaveLength(0);
   });
 
-  it('shows an assessor assessment-stage applications and NOT freshly filed ones', async () => {
-    // An assessor has no business reading the address and owner of an
-    // application that has not reached evaluation. (A cashier used to be the
-    // example here; the cashier now reads everything -- see below.)
+  it('shows every officer every application, to read (owner request, 2026-09-29)', async () => {
+    // "It can see all the applications, but of course they can just view it":
+    // working on one is StepGuard's question, not this list's. An assessor
+    // used to see only the assessment stages, a releasing officer only the
+    // approved end of the pipeline.
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Assessed' });
 
-    const page = await queue.page(await officer('assessor'));
-
-    expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-2']);
-  });
-
-  it('shows a releasing officer nothing until a permit is approved', async () => {
-    await file({ reference: 'BP-1', status: 'Under Evaluation' });
-    await file({ reference: 'BP-2', status: 'Ready for Release' });
-
-    const page = await queue.page(await officer('releasing-officer'));
-
-    expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-2']);
+    expect((await queue.page(await officer('assessor'))).rows.map((r) => r.referenceNumber).sort())
+      .toEqual(['BP-1', 'BP-2']);
+    expect((await queue.page(await officer('releasing-officer'))).rows).toHaveLength(2);
   });
 
   it('shows a building official the whole pipeline', async () => {
@@ -241,18 +233,15 @@ describe('an officer sees only what their role needs', () => {
     expect((await queue.metrics(noRead)).total).toBe(0);
   });
 
-  it('never lets a requested filter widen what a role may see', async () => {
-    // The obvious injection: ask for a status outside your visibility and get
-    // it because the filter replaced the visibility clause instead of narrowing
-    // within it.
+  it('narrows by a requested status', async () => {
+    // Every officer reads every status now (2026-09-29), so a status filter
+    // can only narrow; there is no narrower visibility left for it to widen.
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Payment Submitted' });
 
-    // An assessor: a role that reads only its own stages (a cashier now reads
-    // every status, so it no longer demonstrates a narrowed view).
     const page = await queue.page(await officer('assessor'), { statuses: ['Submitted'] });
 
-    expect(page.rows).toHaveLength(0);
+    expect(page.rows.map((r) => r.referenceNumber)).toEqual(['BP-1']);
   });
 
   it('lets a cashier read every application, approved and rejected included', async () => {
@@ -532,11 +521,11 @@ describe('the dashboard is counted by the database, not the browser', () => {
     expect(summed).toBe(metrics.total);
   });
 
-  it('counts only what the caller may see', async () => {
+  it('counts what the caller sees: every application, since 2026-09-29', async () => {
     await file({ reference: 'BP-1', status: 'Submitted' });
     await file({ reference: 'BP-2', status: 'Assessed' });
 
-    expect((await queue.metrics(await officer('assessor'))).total).toBe(1);
+    expect((await queue.metrics(await officer('assessor'))).total).toBe(2);
   });
 
   it('excludes Revision Required from the officer backlog', async () => {
