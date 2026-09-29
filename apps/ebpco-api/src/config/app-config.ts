@@ -318,6 +318,21 @@ const schema = z
      * page. See `AccountRecoveryMailer`, which is the only reader.
      */
     USER_PORTAL_BASE_URL: z.string().optional().transform((v) => v ?? 'http://localhost:4201'),
+
+    // A second address for the same citizen portal during a domain migration.
+    // Exact HTTPS origin only; never accept wildcard hosts or URL paths.
+    // Password-reset links continue to use USER_PORTAL_BASE_URL.
+    USER_PORTAL_ALIAS_URL: z.preprocess(
+      blankToUndefined,
+      z.string().url().refine((value) => {
+        try {
+          const url = new URL(value);
+          return url.protocol === 'https:' && url.origin === value && !url.hostname.includes('*');
+        } catch {
+          return false;
+        }
+      }, 'must be an exact HTTPS origin without credentials, path, query or fragment').optional(),
+    ),
   })
   .superRefine((config, ctx) => {
     // An invariant, not a preference. Serving the contract as live documentation

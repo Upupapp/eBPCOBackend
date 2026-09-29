@@ -120,6 +120,14 @@ A staff login through it crosses the internet unencrypted. Point those two confi
 
 ## The real domain
 
+During citizen-portal DNS recovery, keep `USER_PORTAL_BASE_URL` at the working
+Netlify URL and set `USER_PORTAL_ALIAS_URL=https://citizen.castilla-ebpco.online`
+in `server.env`. Rebuild the API with alias support and recreate only that service.
+Both exact origins then work; unrelated origins remain blocked and bearer-token
+authentication is unchanged. The alias must be an HTTPS origin without a trailing
+slash, path, query, fragment, credentials, or wildcard. Once DNS is stable, the
+base URL can move to the custom domain so password-reset links use it too.
+
 `castilla-ebpco.online` is registered but its DNS points at a parking address
 (`198.54.117.242`, Namecheap). The Caddyfile already has the `api.castilla-ebpco.online` site
 block; Caddy retries certificate issuance for it in the background and will start serving the

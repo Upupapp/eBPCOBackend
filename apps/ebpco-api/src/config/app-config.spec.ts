@@ -14,6 +14,22 @@ const validEnv = (): NodeJS.ProcessEnv => ({
 });
 
 describe('configuration', () => {
+  it('allows an optional exact HTTPS citizen portal alias', () => {
+    expect(loadConfig(validEnv()).USER_PORTAL_ALIAS_URL).toBeUndefined();
+    expect(loadConfig({ ...validEnv(), USER_PORTAL_ALIAS_URL: '' }).USER_PORTAL_ALIAS_URL).toBeUndefined();
+    expect(loadConfig({ ...validEnv(), USER_PORTAL_ALIAS_URL: 'https://citizen.example' })
+      .USER_PORTAL_ALIAS_URL).toBe('https://citizen.example');
+  });
+
+  it.each([
+    '*', 'https://*.example', 'http://citizen.example',
+    'https://citizen.example/path', 'https://citizen.example?query=1',
+    'https://citizen.example#fragment', 'https://user:password@citizen.example',
+  ])('rejects unsafe or non-origin citizen alias %s', (alias) => {
+    expect(() => loadConfig({ ...validEnv(), USER_PORTAL_ALIAS_URL: alias }))
+      .toThrow(/USER_PORTAL_ALIAS_URL/);
+  });
+
   it('accepts a complete environment and freezes the result', () => {
     const config = loadConfig(validEnv());
 
