@@ -235,7 +235,7 @@ describe('what a row carries', () => {
     ]);
   });
 
-  it('never leaks the owner account id or password hash through the join', async () => {
+  it('never leaks the password hash through the join', async () => {
     const response = await app.inject({
       method: 'GET', url: '/staff/businesses',
       headers: { authorization: `Bearer ${officerToken}` },
@@ -243,7 +243,23 @@ describe('what a row carries', () => {
 
     expect(response.body).not.toContain('password');
     expect(response.body).not.toContain('scrypt');
-    expect(response.body).not.toContain(mariaAccount);
+  });
+
+  it('names the owner by exactly these fields, the account id included on purpose', async () => {
+    // The account id was kept out until cd6eda5 (2026-09-24): the owner's
+    // photo is served by account id (GET /staff/citizens/:id/photo), the id the
+    // Citizens module already shows staff as citizenId. It is a label, not a
+    // credential. Anything else from the accounts row stays out.
+    const response = await app.inject({
+      method: 'GET', url: '/staff/businesses',
+      headers: { authorization: `Bearer ${officerToken}` },
+    });
+
+    const maria = response.json<{ data: { owner: Record<string, unknown> }[] }>().data
+      .find((business) => business.owner['accountId'] === mariaAccount);
+    expect(Object.keys(maria!.owner).sort()).toEqual([
+      'accountId', 'applicantId', 'email', 'hasPhoto', 'mobileNumber', 'name',
+    ]);
   });
 
   it('links the applications that genuinely name this business', async () => {
