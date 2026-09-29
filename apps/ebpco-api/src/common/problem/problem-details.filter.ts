@@ -110,6 +110,7 @@ export class ProblemDetailsFilter implements ExceptionFilter {
 
     if (exception instanceof ProblemException) {
       return {
+        ...(exception.extensions ?? {}),
         type: exception.problemType,
         title: exception.title,
         status,

@@ -48,6 +48,13 @@ const uploadShape = z.object({
    * `YYYY-MM-DD`, never instants.
    */
   issuingOffice: z.string().min(1).max(200).nullable().optional(),
+  /**
+   * The citizen's own document this upload copies — reusing a document from
+   * My Documents on another application. Without it, a file the citizen
+   * already has is refused 409 with `existingDocument`, so the client can
+   * offer that copy instead of storing a second one.
+   */
+  reuseOf: z.string().uuid().nullable().optional(),
   issuedOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').nullable().optional(),
   expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').nullable().optional(),
   // The cap is on decoded bytes; this bound only stops an absurd body reaching
@@ -184,6 +191,7 @@ export class DocumentsController {
       issuingOffice: input.issuingOffice ?? null,
       issuedOn: input.issuedOn ?? null,
       expiresOn: input.expiresOn ?? null,
+      reuseOf: input.reuseOf ?? null,
       caller,
     });
 
@@ -198,6 +206,16 @@ export class DocumentsController {
         status: outcome.status,
         removedMetadata: outcome.removedMetadata,
       };
+    }
+
+    if (outcome.failure.reason === 'duplicate') {
+      // 409 with the copy they already have, so a client can offer it (or,
+      // in a wizard, attach it) instead of a dead end.
+      throw new ProblemException(
+        ProblemType.conflict, 'You already have this file', HttpStatus.CONFLICT,
+        outcome.failure.detail, undefined,
+        { reason: 'duplicate-document', existingDocument: outcome.failure.existing },
+      );
     }
 
     if (outcome.failure.reason === 'infected') {

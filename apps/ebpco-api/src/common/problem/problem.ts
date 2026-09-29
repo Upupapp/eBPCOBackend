@@ -83,6 +83,11 @@ export class ProblemException extends HttpException {
     status: number,
     readonly detail?: string,
     readonly fieldErrors?: readonly FieldError[],
+    /**
+     * RFC 7807 extension members: facts a client acts on, beyond the prose in
+     * `detail`. Rendered alongside the standard members, never over them.
+     */
+    readonly extensions?: Readonly<Record<string, unknown>>,
   ) {
     super(title, status);
   }

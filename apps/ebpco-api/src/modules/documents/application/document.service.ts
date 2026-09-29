@@ -28,7 +28,17 @@ export interface SecurityEvent {
 export type UploadOutcome =
   | { readonly ok: true; readonly documentId: string; readonly status: DocumentStatus; readonly removedMetadata: readonly string[] }
   | { readonly ok: false; readonly failure: InspectionFailure }
-  | { readonly ok: false; readonly failure: { reason: 'infected'; detail: string } };
+  | { readonly ok: false; readonly failure: { reason: 'infected'; detail: string } }
+  | { readonly ok: false; readonly failure: { reason: 'duplicate'; detail: string; existing: ExistingCopy } };
+
+/** The copy of a file a citizen already has, named so a client can offer it for reuse instead. */
+export interface ExistingCopy {
+  readonly id: string;
+  readonly fileName: string;
+  readonly label: string;
+  /** The application it is attached to, or null when it sits unattached in My Documents. */
+  readonly applicationReference: string | null;
+}
 
 export type DocumentStatus = 'Pending' | 'Approved' | 'Rejected' | 'Missing';
 
@@ -104,6 +114,13 @@ export class DocumentService {
     expiresOn?: string | null;
     /** Which checklist entry this answers (C-6). Null means not attributed. */
     requirementCode?: string | null;
+    /**
+     * The citizen's own document this upload is a copy of: a document reused
+     * from My Documents on another application. A document belongs to one
+     * application, so reusing one is uploading its bytes again; saying so is
+     * what lets the same file through the duplicate check below.
+     */
+    reuseOf?: string | null;
   }): Promise<UploadOutcome> {
     const { bytes, fileName, label, applicationId, caller } = options;
     const supersedes = options.supersedes ?? null;
@@ -116,6 +133,28 @@ export class DocumentService {
     // kept, and what is kept must not carry the applicant's GPS coordinates.
     const scrubbed = scrub(bytes, inspection.inspection.format);
     const digest = sha256(scrubbed.bytes);
+
+    // The same file again (owner request, 2026-09-29). A citizen who already
+    // has it in My Documents is told to reuse it, rather than filling the
+    // library with copies. Checked before anything is stored. Not for staff
+    // (a walk-in intake uploads on the citizen's behalf, with no library of
+    // its own) nor for a resubmission (replacing a returned document is its
+    // own decision, made on the application).
+    if (caller.kind === 'applicant' && supersedes === null) {
+      const existing = await this.copyOf(caller.accountId, digest);
+      if (existing !== null && !(await this.isReuseOf(options.reuseOf ?? null, caller.accountId, digest))) {
+        return {
+          ok: false,
+          failure: {
+            reason: 'duplicate',
+            detail: `You already uploaded this file ("${existing.fileName}"). Reuse it from My Documents instead of `
+              + 'uploading it again.',
+            existing,
+          },
+        };
+      }
+    }
+
     const key = newObjectKey();
 
     await this.store.put(key, scrubbed.bytes, inspection.inspection.format);
@@ -249,6 +288,14 @@ export class DocumentService {
    * for a new filing, in one list.
    */
   async historyFor(accountId: string): Promise<ReadonlyArray<Record<string, unknown>>> {
+    // One entry per FILE, not per copy (owner request, 2026-09-29). Reusing a
+    // document on another application uploads a copy of it (a document
+    // belongs to one application), and every copy used to be its own card in
+    // My Documents: the same valid ID five times over. Copies are grouped by
+    // fingerprint; the entry shown is the unattached copy when there is one
+    // (free to attach as it is), otherwise the newest, and `applications`
+    // names every application a copy is on. The copies themselves are
+    // untouched: each application keeps its own, with its own review.
     const result = await this.db.query<{
       id: string; label: string; file_name: string; content_type: string;
       byte_size: string; uploaded_at: Date; requirement_code: string | null;
@@ -256,8 +303,11 @@ export class DocumentService {
       scan_cleared: boolean; quarantined: boolean;
       application_id: string | null; application_reference: string | null;
       review_status: string | null;
+      applications: { id: string; referenceNumber: string | null }[] | null;
+      copies: string;
     }>(
-      `select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size,
+      `with library as (
+       select d.id, d.label, d.file_name, d.content_type, d.byte_size::text as byte_size, d.sha256,
               d.uploaded_at, d.requirement_code, d.scan_cleared,
               -- The document's OWN validity, which is the thing that matters
               -- most here and was missing. This list is what a citizen reuses a
@@ -271,11 +321,22 @@ export class DocumentService {
               (d.status = 'Rejected' and not d.scan_cleared) as quarantined,
               d.application_id,
               a.reference_number as application_reference,
-              d.review_status
+              d.review_status,
+              row_number() over (partition by d.sha256
+                                 order by (d.application_id is null) desc, d.uploaded_at desc, d.id) as rank
          from documents d
          left join applications a on a.id = d.application_id
         where d.uploaded_by = $1 and d.deleted_at is null and d.removed_from_library_at is null
-        order by d.uploaded_at desc, d.id`,
+       ), used as (
+       select sha256, count(*)::text as copies,
+              jsonb_agg(distinct jsonb_build_object('id', application_id, 'referenceNumber', application_reference))
+                filter (where application_id is not null) as applications
+         from library group by sha256
+       )
+       select library.*, used.copies, used.applications
+         from library join used using (sha256)
+        where library.rank = 1
+        order by library.uploaded_at desc, library.id`,
       [accountId],
     );
 
@@ -308,7 +369,48 @@ export class DocumentService {
       // there is no application to review it against. Set once attached,
       // same vocabulary `GET /applications/:id/documents` already reports.
       reviewStatus: row.review_status,
+      // Every application a copy of this file is on, the shown copy's own
+      // included. Empty when no copy is attached anywhere.
+      applications: (row.applications ?? [])
+        .sort((a, b) => (a.referenceNumber ?? '').localeCompare(b.referenceNumber ?? '')),
+      // How many copies stand behind this one entry (1 = only this one).
+      copies: Number(row.copies),
     }));
+  }
+
+  /**
+   * The citizen's own copy of a file, if they already have one in My
+   * Documents: not deleted, not removed from the library, not quarantined.
+   * The unattached copy first, as the one that can be used as it is.
+   */
+  private async copyOf(accountId: string, digest: string): Promise<ExistingCopy | null> {
+    const result = await this.db.query<{
+      id: string; file_name: string; label: string; application_reference: string | null;
+    }>(
+      `select d.id, d.file_name, d.label, a.reference_number as application_reference
+         from documents d
+         left join applications a on a.id = d.application_id
+        where d.uploaded_by = $1 and d.sha256 = $2
+          and d.deleted_at is null and d.removed_from_library_at is null
+          and not (d.status = 'Rejected' and not d.scan_cleared)
+        order by (d.application_id is null) desc, d.uploaded_at desc, d.id
+        limit 1`,
+      [accountId, digest],
+    );
+    const row = result.rows[0];
+    return row === undefined ? null : {
+      id: row.id, fileName: row.file_name, label: row.label, applicationReference: row.application_reference,
+    };
+  }
+
+  /** Whether `reuseOf` names this citizen's own copy of exactly these bytes — a declared reuse, not a second upload. */
+  private async isReuseOf(reuseOf: string | null, accountId: string, digest: string): Promise<boolean> {
+    if (reuseOf === null || !/^[0-9a-fA-F-]{36}$/.test(reuseOf)) return false;
+    const result = await this.db.query(
+      'select 1 from documents where id = $1 and uploaded_by = $2 and sha256 = $3 and deleted_at is null',
+      [reuseOf, accountId, digest],
+    );
+    return result.rows.length > 0;
   }
 
   /**
@@ -602,6 +704,11 @@ export class DocumentService {
    * Both branches always succeed once ownership is confirmed — there used
    * to be a third, 'attached', refusal here; an attached document is no
    * longer refused, it takes the softer path instead.
+   *
+   * Every copy of the file goes (2026-09-29): My Documents shows a file once
+   * however many copies stand behind it (see `historyFor`), so removing one
+   * copy would only bring the next one into view. Each copy takes its own
+   * branch above; copies on applications stay exactly as filed.
    */
   async deleteMine(documentId: string, caller: Caller): Promise<
     { readonly ok: true } | { readonly ok: false; readonly reason: 'not-found' }
@@ -614,6 +721,22 @@ export class DocumentService {
       return { ok: false, reason: 'not-found' };
     }
 
+    const copies = await this.db.query<{ id: string }>(
+      `select id from documents
+        where uploaded_by = $1 and sha256 = $2 and id <> $3
+          and deleted_at is null and removed_from_library_at is null`,
+      [caller.accountId, document.sha256, document.id],
+    );
+    for (const copy of copies.rows) {
+      const loaded = await this.load(copy.id);
+      if (loaded !== null) await this.removeOne(loaded, caller);
+    }
+    await this.removeOne(document, caller);
+    return { ok: true };
+  }
+
+  /** One copy out of My Documents: deleted when unattached, only hidden when it is on an application. */
+  private async removeOne(document: DocumentRow, caller: Caller): Promise<void> {
     if (document.application_id === null) {
       await this.store.delete(document.storage_key);
       await this.db.query('update documents set deleted_at = $1 where id = $2', [this.clock(), document.id]);
@@ -625,7 +748,7 @@ export class DocumentService {
         actorAccountId: caller.accountId,
         actorRole: caller.kind,
       });
-      return { ok: true };
+      return;
     }
 
     await this.db.query(
@@ -639,7 +762,6 @@ export class DocumentService {
       actorAccountId: caller.accountId,
       actorRole: caller.kind,
     });
-    return { ok: true };
   }
 
   /**
