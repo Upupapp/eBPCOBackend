@@ -597,6 +597,24 @@ describe('the cashier’s queue', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it('after a rejection the applicant is asked to pay again, not told to wait for the Cashier', async () => {
+    // Found in a live pass (2026-09-30): the rejected payment still counted as
+    // submitted, so the applicant read "waiting for the Cashier" and had no Pay Now.
+    const { paymentId, applicationId } = await paymentAwaitingVerification();
+    const citizen = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+    const paymentStatus = async (): Promise<string> =>
+      (await get(`/applications/${applicationId}`, citizen)).json<{ payment: { status: string } }>().payment.status;
+    expect(await paymentStatus()).toBe('Pending Verification');
+
+    const rejected = await post(`/staff/payments/${paymentId}/reject`, await staffToken('cashier'),
+      { reason: 'The reference number does not match any deposit.' });
+    expect(rejected.statusCode).toBeLessThan(300);
+
+    expect(await paymentStatus()).toBe('Not Yet Available');
+  });
+
   it('refuses a second verification', async () => {
     const { paymentId } = await paymentAwaitingVerification();
     const token = await staffToken('cashier');

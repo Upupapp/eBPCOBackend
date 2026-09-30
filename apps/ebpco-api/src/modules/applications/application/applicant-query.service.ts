@@ -59,7 +59,11 @@ const RECORD_SQL = `
     (select max(t.occurred_at) from application_transitions t
       where t.application_id = a.id
         and t.to_status in ('Released', 'Completed', 'Rejected')) as completed_at,
-    (select min(p.submitted_at) from payments p where p.application_id = a.id) as payment_submitted_at,
+    -- A payment the Cashier rejected is not one waiting on them: counting it
+    -- told the applicant "waiting for the Cashier" forever and hid Pay Now, so
+    -- they could never pay again (live pass, 2026-09-30).
+    (select min(p.submitted_at) from payments p
+      where p.application_id = a.id and p.rejected_at is null) as payment_submitted_at,
     (select min(p.verified_at) from payments p
       where p.application_id = a.id and p.verified_at is not null) as payment_verified_at,
     o.number as oop_number, o.assessed_at as oop_assessed_at,
