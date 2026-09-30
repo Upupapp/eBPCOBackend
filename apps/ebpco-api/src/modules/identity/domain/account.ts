@@ -140,10 +140,21 @@ export const APPLICANT_SCOPES: readonly Scope[] = [
  * nine roles holds — and an object literal cannot reference its own sibling
  * keys while it is still being built.
  */
+/**
+ * What every staff position may SEE: every application, its documents and its
+ * payments (owner ruling, 2026-09-30: every account views every application;
+ * they differ only in what they may change). Read scopes confer no authority
+ * (`grantsAuthority`), so this widens sight and nothing else: a Cashier could
+ * not open the documents of the application they took payment for, and an
+ * Administrator could not open an application at all.
+ */
+const STAFF_SIGHT: readonly Scope[] = ['applications:read', 'documents:read', 'payments:read'];
+const withSight = (scopes: readonly Scope[]): readonly Scope[] => [...new Set([...STAFF_SIGHT, ...scopes])];
+
 const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, readonly Scope[]>> = {
-  'receiving-officer': [
+  'receiving-officer': withSight([
     'applications:read', 'documents:read', 'staff:receive', 'staff:annotate', 'citizens:read',
-  ],
+  ]),
   // `applications:write` because withdrawing an application on the applicant's
   // behalf, or expiring one after inaction, is maintenance of the record --
   // which is what this role exists to do. Its absence made three staff
@@ -156,18 +167,18 @@ const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, rea
   // performed intake in practice, and the transitions must stay reachable by a
   // second role -- an office with one receiving officer on leave still has to
   // receive applications.
-  'records-officer': [
+  'records-officer': withSight([
     'applications:read', 'applications:write', 'documents:read', 'documents:write',
     'staff:receive', 'staff:annotate', 'citizens:read',
-  ],
-  evaluator: ['applications:read', 'documents:read', 'staff:evaluate', 'staff:annotate'],
-  assessor: ['applications:read', 'payments:read', 'staff:assess', 'staff:annotate'],
-  cashier: ['applications:read', 'payments:read', 'staff:verify-payment', 'staff:annotate'],
-  'building-official': [
+  ]),
+  evaluator: withSight(['applications:read', 'documents:read', 'staff:evaluate', 'staff:annotate']),
+  assessor: withSight(['applications:read', 'payments:read', 'staff:assess', 'staff:annotate']),
+  cashier: withSight(['applications:read', 'payments:read', 'staff:verify-payment', 'staff:annotate']),
+  'building-official': withSight([
     'applications:read', 'documents:read', 'payments:read', 'staff:approve', 'staff:annotate',
-  ],
-  'releasing-officer': ['applications:read', 'staff:release', 'staff:annotate'],
-  administrator: ['staff:administer', 'citizens:read'],
+  ]),
+  'releasing-officer': withSight(['applications:read', 'staff:release', 'staff:annotate']),
+  administrator: withSight(['staff:administer', 'citizens:read']),
 
   // ── added by the web-portal reconciliation (WP-01) ───────────────────
   //
@@ -176,7 +187,7 @@ const ACTING_ROLE_SCOPES: Readonly<Record<Exclude<StaffRole, 'super-admin'>, rea
   // giving them authority — which is the whole point of the position. The
   // absence of a write scope here is the definition of the role, not an
   // omission to be filled in later.
-  auditor: ['applications:read', 'documents:read', 'payments:read', 'audit:read'],
+  auditor: withSight(['applications:read', 'documents:read', 'payments:read', 'audit:read']),
 };
 
 /**
