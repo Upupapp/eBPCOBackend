@@ -222,9 +222,28 @@ export class StaffActionsController {
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
+
+    // A stage returned for revision goes back to the applicant, with the
+    // evaluator's remarks: recording the verdict alone left the application
+    // Under Evaluation, so the applicant was never told and had nothing to
+    // answer (found walking an application through every office, 2026-09-30).
+    // Logged, not thrown, if refused: the verdict itself stands.
+    let status: string | null = null;
+    if (input.result === 'Revision Required') {
+      const moved = await this.lifecycle.transition({
+        applicationId, caller, to: 'Revision Required', ...(input.remarks === undefined ? {} : { remarks: input.remarks }),
+      });
+      if (moved.ok) status = moved.status;
+      else this.logger.warn('evaluation returned for revision but the application did not move', {
+        applicationId, refusal: 'refusal' in moved ? moved.refusal : 'reused',
+      });
+    }
     // `complete` is returned so the portal knows whether the application can now
     // be assessed, without a second request that would race the first.
-    return { evaluationId: result.evaluationId, evaluationsComplete: result.complete };
+    return {
+      evaluationId: result.evaluationId, evaluationsComplete: result.complete,
+      ...(status === null ? {} : { status }),
+    };
   }
 
   /**

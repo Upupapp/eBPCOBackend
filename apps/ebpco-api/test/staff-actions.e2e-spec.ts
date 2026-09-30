@@ -299,6 +299,14 @@ describe('recording an evaluation', () => {
     const adverse = await post(`/staff/applications/${id}/evaluations`, evaluator,
       { stage: 'Initial', result: 'Revision Required', remarks: 'Missing the engineer\'s signature.' });
     expect(adverse.statusCode).toBe(201);
+    // The verdict sends the application back to the applicant, with the remarks
+    // (2026-09-30: it used to stay Under Evaluation, and nobody told them).
+    expect(adverse.json<{ status: string }>().status).toBe('Revision Required');
+    const told = await db.query<{ body: string }>(
+      `select body from notifications where application_id = $1 and type = 'revision-required'`, [id]);
+    expect(told.rows.length).toBe(1);
+    // The applicant fixes it and sends it back to the office.
+    await db.query(`update applications set lifecycle_status = 'Under Evaluation' where id = $1`, [id]);
 
     // Skipping straight to the next stage while Initial is uncorrected must
     // still be refused — the fix corrects the SAME row, it does not let
