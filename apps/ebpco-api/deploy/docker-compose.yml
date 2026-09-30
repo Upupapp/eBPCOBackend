@@ -106,14 +106,12 @@ services:
     restart: unless-stopped
     env_file: server.env
     ports:
-      # PLAIN HTTP, OPEN TO THE INTERNET. Kept from the first deploy as a
-      # fallback while the real domain's registration was on hold. Since
-      # 2026-09-19 HTTPS works via 139-162-51-165.sslip.io and both Netlify
-      # portals use it; the only remaining users of :3000 are developers'
-      # local proxy configs (proxy.conf.json / proxy.conf.js). Once those
-      # point at the HTTPS name, change this to "127.0.0.1:3000:3000" — a
-      # staff login over this port crosses the internet unencrypted.
-      - "0.0.0.0:3000:3000"
+      # Loopback only, like postgres and minio: the internet reaches the API
+      # through Caddy's HTTPS (139-162-51-165.sslip.io). Plain HTTP on :3000
+      # was open until 2026-09-30, a fallback from before HTTPS; both portals'
+      # dev proxies moved to the HTTPS name on 2026-09-19, and a staff login
+      # over :3000 crossed the internet unencrypted.
+      - "127.0.0.1:3000:3000"
     depends_on:
       postgres:
         condition: service_healthy

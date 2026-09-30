@@ -8,7 +8,7 @@ deploy to it. Stood up by hand on 2026-09-17; brought under version control on 2
 | | |
 |---|---|
 | API (HTTPS) | `https://139-162-51-165.sslip.io` — `/health`, `/ready`, `/version` |
-| API (plain HTTP, legacy) | `http://139.162.51.165:3000` — see [Port 3000](#port-3000) |
+| API (plain HTTP) | closed to the internet since 2026-09-30 — see [Port 3000](#port-3000) |
 | Admin portal | `https://ebpcowebadmin.netlify.app` |
 | Citizen portal | `https://fastidious-chimera-7a7a18.netlify.app` |
 | Real domain | `api.castilla-ebpco.online` — registered, **not yet pointed here** |
@@ -106,17 +106,11 @@ docker compose run --rm -e EBPCO_SUPERADMIN_PASSWORD='≥ 12 characters' \
 
 ## Port 3000
 
-`ebpco-api` publishes `0.0.0.0:3000` — plain HTTP, open to the internet. It predates HTTPS
-(the first deploy had no name to get a certificate for) and still exists because both
-portals' *local dev servers* proxy to it:
-
-- admin: `E-BPCO-Software-main/proxy.conf.json`
-- citizen: `ebpco-user-portal/proxy.conf.js`
-
-A staff login through it crosses the internet unencrypted. Point those two configs at
-`https://139-162-51-165.sslip.io`, then change the compose line to `"127.0.0.1:3000:3000"` and
-`push-source.sh`. Nothing else uses it: the Netlify portals have been on the HTTPS name since
-2026-09-19.
+`ebpco-api` publishes `127.0.0.1:3000` — the server itself only, for `curl` from the host.
+Everything else reaches the API through Caddy's HTTPS at `https://139-162-51-165.sslip.io`.
+Until 2026-09-30 it was `0.0.0.0:3000`, plain HTTP open to the internet, a fallback from
+before HTTPS; both portals' local dev proxies (`proxy.conf.json`, `proxy.conf.js`) have used
+the HTTPS name since 2026-09-19.
 
 ## The real domain
 
