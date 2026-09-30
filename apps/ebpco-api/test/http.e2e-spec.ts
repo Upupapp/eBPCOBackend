@@ -335,6 +335,33 @@ describe('security headers', () => {
 });
 
 describe('CORS', () => {
+  it('allows both citizen addresses while rejecting unrelated origins and keeping authentication', async () => {
+    const primary = 'https://fastidious-chimera-7a7a18.netlify.app';
+    const alias = 'https://citizen.castilla-ebpco.online';
+    const { app } = await build(baseEnv({ USER_PORTAL_BASE_URL: primary, USER_PORTAL_ALIAS_URL: alias }));
+    try {
+      for (const origin of [primary, alias, 'http://localhost:4200']) {
+        const response = await app.inject({
+          method: 'OPTIONS', url: '/auth/token',
+          headers: { origin, 'access-control-request-method': 'POST',
+            'access-control-request-headers': 'authorization,content-type' },
+        });
+        expect(response.statusCode).toBe(204);
+        expect(response.headers['access-control-allow-origin']).toBe(origin);
+        expect(response.headers['access-control-allow-credentials']).toBeUndefined();
+      }
+      for (const origin of ['https://attacker.example', `${alias}.attacker.example`]) {
+        const response = await app.inject({ method: 'GET', url: '/health', headers: { origin } });
+        expect(response.headers['access-control-allow-origin']).toBeUndefined();
+      }
+      const response = await app.inject({ method: 'GET', url: '/me', headers: { origin: alias } });
+      expect(response.statusCode).toBe(401);
+      expect(response.headers['access-control-allow-origin']).toBe(alias);
+    } finally {
+      await app.close();
+    }
+  });
+
   // PORTAL_BASE_URL/USER_PORTAL_BASE_URL default to localhost:4200/4201 (see
   // baseEnv) — the two real browser clients this API serves, reused as the
   // CORS allowlist itself (see security.ts's own doc comment on why there is
