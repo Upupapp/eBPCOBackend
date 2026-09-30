@@ -271,6 +271,10 @@ export class StaffActionsController {
     await this.mayWork(caller, applicationId, 'edit');
     const input = parse(documentReviewShape, body);
     await this.visible(caller, applicationId);
+    if (input.status === 'Accepted') {
+      const refused = await this.steps.acceptRefusal(caller, applicationId, documentId);
+      if (refused !== null) throw refusal('not-your-stage', refused);
+    }
 
     const result = await this.documents.review({
       applicationId,

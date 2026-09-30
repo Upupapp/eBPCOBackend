@@ -221,6 +221,48 @@ export class StepGuard {
     return { ok: true };
   }
 
+  /**
+   * Why `caller` may not ACCEPT this document now, or null when they may.
+   *
+   * A document is accepted at the stage that checks it: the Fire Safety
+   * Evaluation Clearance by Fire Safety, the zoning clearance by Zoning. The
+   * team at the step could otherwise accept every document, and a later stage
+   * then had nothing left to check -- found in a live pass on 2026-09-30, the
+   * Initial Evaluator accepted all 22 and Zoning, Fire Safety and OBO passed
+   * on documents they never looked at. Sending a document back is not limited:
+   * any team at the step may ask for a revision. A super admin and the Records
+   * Officer (record-keeping) are not limited either.
+   */
+  async acceptRefusal(caller: Caller, applicationId: string, documentId: string): Promise<string | null> {
+    if (caller.kind !== 'staff' || caller.scopes.includes('applications:write')) return null;
+    const officer = await officerOf(this.db, caller.accountId);
+    if (officer === null || officer.superAdmin) return null;
+    const place = await placementOf(this.db, applicationId);
+    if (place === null) return null;
+    const stages = await this.db.query<{ required_documents: unknown; requirement_code: string | null; label: string }>(
+      `select a.required_documents, d.requirement_code, d.label
+         from documents d join applications a on a.id = d.application_id
+        where d.id = $1 and d.application_id = $2`,
+      [documentId, applicationId],
+    );
+    const row = stages.rows[0];
+    if (row === undefined) return null;
+    const entry = (Array.isArray(row.required_documents) ? row.required_documents : []).find(
+      (e): e is { stage: string } => typeof e === 'object' && e !== null
+        && typeof (e as Record<string, unknown>)['stage'] === 'string'
+        && isEvaluationStage((e as Record<string, unknown>)['stage'] as string)
+        && ((e as Record<string, unknown>)['code'] === row.requirement_code
+          || (row.requirement_code === null && (e as Record<string, unknown>)['label'] === row.label)),
+    );
+    if (entry === undefined) return null;
+    const current = place.status === 'Under Evaluation' ? place.nextStage
+      : place.status === 'Document Verification' ? (stagesForChecklist(row.required_documents)[0] ?? null)
+        : null;
+    if (current === null || entry.stage === current) return null;
+    return `"${row.label}" is checked at the ${entry.stage} stage, so its evaluator accepts it when ${place.referenceNumber} `
+      + `gets there. You can still request a revision of it now.`;
+  }
+
   /** The first member to work on an unassigned application has taken it. */
   private async take(applicationId: string, team: TeamKey, officer: Officer): Promise<void> {
     const inserted = await this.db.query(

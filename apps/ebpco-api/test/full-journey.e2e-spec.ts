@@ -230,19 +230,33 @@ describe('a citizen files a permit, and it really reflects in the admin queue an
     const verified = await post(`/staff/applications/${applicationId}/transitions`, evaluator, { to: 'Under Evaluation' });
     expect(verified.statusCode).toBe(200);
 
-    // The evaluator checks each document and accepts it: no stage passes before.
+    // Each stage accepts its own documents, then passes: no stage passes before,
+    // and a document is accepted only at the stage that checks it (the Initial
+    // Evaluator could once accept the fire clearance, and Fire Safety then had
+    // nothing to check -- live pass 2026-09-30).
     const underReview = await get(`/staff/applications/${applicationId}`, evaluator);
-    for (const document of underReview.json<{ documents: { id: string }[] }>().documents) {
-      const accepted = await post(
-        `/staff/applications/${applicationId}/documents/${document.id}/review`, evaluator, { status: 'Accepted' });
-      expect(accepted.statusCode).toBeLessThan(300);
-    }
-
+    const reviewIds = underReview.json<{ documents: { id: string }[] }>().documents.map((d) => d.id);
+    const acceptedAt: Record<string, number> = {};
+    const refusedAt: Record<string, number> = {};
     for (const stage of STAGES) {
       const by = stage === 'Final Approval' ? official : evaluator;
+      if (stage !== 'Final Approval') {
+        for (const id of reviewIds) {
+          const reviewed = await post(
+            `/staff/applications/${applicationId}/documents/${id}/review`, evaluator, { status: 'Accepted' });
+          expect([200, 201, 403]).toContain(reviewed.statusCode);
+          const tally = reviewed.statusCode === 403 ? refusedAt : acceptedAt;
+          tally[stage] = (tally[stage] ?? 0) + 1;
+        }
+      }
       const result = await post(`/staff/applications/${applicationId}/evaluations`, by, { stage, result: 'Passed' });
       expect(result.statusCode).toBe(201);
     }
+    // At the Initial stage the later stages' documents were refused, and each
+    // stage accepted some of its own.
+    expect(refusedAt['Initial'] ?? 0).toBeGreaterThan(0);
+    expect(acceptedAt['Initial'] ?? 0).toBeGreaterThan(0);
+
     const fireSafety = await post(`/staff/applications/${applicationId}/evaluations`, evaluator, { stage: 'Fire Safety', result: 'Passed' });
     // Refused: the application has moved on from Fire Safety, so that stage is
     // no longer the step anyone works on (StepGuard answers before the
