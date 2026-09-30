@@ -87,9 +87,13 @@ export class StaffPaymentsController {
    * at all — a default that silently filtered to that one status made such a
    * payment look missing rather than merely elsewhere. Pass `status` to get
    * the cashier's narrower worklist or an archive view.
+   *
+   * Reading it takes `payments:read`, which every staff position holds: all
+   * staff see every application and its payments, and only the cashier acts
+   * on them (the routes below).
    */
   @Get()
-  @RequireScopes('staff:verify-payment')
+  @RequireScopes('payments:read')
   async queue(@Query() query: unknown): Promise<Record<string, unknown>> {
     const input = parse(queueShape, query ?? {});
     const status = input.status ?? null;

@@ -554,8 +554,14 @@ describe('the cashier’s queue', () => {
     expect(item['businessName']).toBeNull();
   });
 
-  it('is closed to an evaluator', async () => {
-    expect((await get('/staff/payments', await staffToken('evaluator'))).statusCode).toBe(403);
+  it('can be read by every staff position, and acted on only by the cashier', async () => {
+    const { paymentId } = await paymentAwaitingVerification();
+    const evaluator = await staffToken('evaluator');
+
+    expect((await get('/staff/payments', evaluator)).statusCode).toBe(200);
+    expect((await get('/staff/payments', await staffToken('assessor'))).statusCode).toBe(200);
+    expect((await post(`/staff/payments/${paymentId}/verify`, evaluator,
+      { officialReceiptNumber: 'OR-2026-000001' })).statusCode).toBe(403);
   });
 
   it('verifies against an Official Receipt number', async () => {
