@@ -92,6 +92,8 @@ export async function applySecurity(
       // Keep the existing citizen address working while custom-domain DNS
       // propagates. This alias is validated as one exact HTTPS origin.
       ...(config.USER_PORTAL_ALIAS_URL ? [config.USER_PORTAL_ALIAS_URL] : []),
+      // The admin portal's second address, validated the same way.
+      ...(config.PORTAL_ALIAS_URL ? [config.PORTAL_ALIAS_URL] : []),
     ])],
     methods: ['GET', 'HEAD', 'POST', 'PUT', 'PATCH', 'DELETE'],
     credentials: false,

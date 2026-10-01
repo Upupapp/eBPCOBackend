@@ -322,17 +322,14 @@ const schema = z
     // A second address for the same citizen portal during a domain migration.
     // Exact HTTPS origin only; never accept wildcard hosts or URL paths.
     // Password-reset links continue to use USER_PORTAL_BASE_URL.
-    USER_PORTAL_ALIAS_URL: z.preprocess(
-      blankToUndefined,
-      z.string().url().refine((value) => {
-        try {
-          const url = new URL(value);
-          return url.protocol === 'https:' && url.origin === value && !url.hostname.includes('*');
-        } catch {
-          return false;
-        }
-      }, 'must be an exact HTTPS origin without credentials, path, query or fragment').optional(),
-    ),
+    USER_PORTAL_ALIAS_URL: exactHttpsOrigin(),
+
+    // The same, for the admin portal (https://admin.castilla-ebpco.online,
+    // 1 Oct 2026). Without it the browser refused every sign-in from the new
+    // domain: the API answered the preflight without allowing the origin, so
+    // officers saw the request fail although their passwords were right.
+    // Links the API builds for officers continue to use PORTAL_BASE_URL.
+    PORTAL_ALIAS_URL: exactHttpsOrigin(),
   })
   .superRefine((config, ctx) => {
     // An invariant, not a preference. Serving the contract as live documentation
@@ -472,6 +469,25 @@ export class ConfigurationError extends Error {
  * a new environment should learn everything that is missing in one run, not
  * discover it one restart at a time.
  */
+/**
+ * One extra browser origin the API accepts during a domain move: an exact
+ * HTTPS origin (scheme and host, nothing after it), never a wildcard. Blank
+ * means none.
+ */
+function exactHttpsOrigin() {
+  return z.preprocess(
+    blankToUndefined,
+    z.string().url().refine((value) => {
+      try {
+        const url = new URL(value);
+        return url.protocol === 'https:' && url.origin === value && !url.hostname.includes('*');
+      } catch {
+        return false;
+      }
+    }, 'must be an exact HTTPS origin without credentials, path, query or fragment').optional(),
+  );
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const result = schema.safeParse(env);
   if (!result.success) {

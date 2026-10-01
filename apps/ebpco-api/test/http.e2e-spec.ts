@@ -369,6 +369,32 @@ describe('CORS', () => {
     }
   });
 
+  it("allows the admin portal's second address, once it is configured", async () => {
+    const { app } = await build(baseEnv({ PORTAL_ALIAS_URL: 'https://admin.castilla-ebpco.online' }));
+    try {
+      const response = await app.inject({
+        method: 'OPTIONS',
+        url: '/auth/token',
+        headers: {
+          origin: 'https://admin.castilla-ebpco.online',
+          'access-control-request-method': 'POST',
+          'access-control-request-headers': 'content-type',
+        },
+      });
+
+      expect(response.statusCode).toBeLessThan(300);
+      expect(response.headers['access-control-allow-origin']).toBe('https://admin.castilla-ebpco.online');
+    } finally {
+      await app.close();
+    }
+  });
+
+  it("refuses an admin portal alias that is not one exact HTTPS origin", () => {
+    for (const bad of ['http://admin.castilla-ebpco.online', 'https://admin.castilla-ebpco.online/login', 'https://*.castilla-ebpco.online']) {
+      expect(() => loadConfig(baseEnv({ PORTAL_ALIAS_URL: bad }))).toThrow();
+    }
+  });
+
   it('does not allow an origin nobody configured', async () => {
     const { app } = await build();
     try {
