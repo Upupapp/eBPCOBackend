@@ -187,7 +187,8 @@
       "Expired"
     ],
     "Payment Submitted": [
-      "Payment Under Verification"
+      "Payment Under Verification",
+      "Assessed"
     ],
     "Payment Under Verification": [
       "Payment Verified",

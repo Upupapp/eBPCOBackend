@@ -491,8 +491,10 @@ describe('staff resubmitting a document for a walk-in citizen', () => {
 });
 
 describe('the cashier’s queue', () => {
-  async function paymentAwaitingVerification(): Promise<{ paymentId: string; applicationId: string }> {
-    const applicationId = await file('BP-1', 'Assessed');
+  async function paymentAwaitingVerification(
+    status: LifecycleStatus = 'Assessed',
+  ): Promise<{ paymentId: string; applicationId: string }> {
+    const applicationId = await file('BP-1', status);
     const orderId = randomUUID();
     await db.query(
       `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
@@ -613,6 +615,51 @@ describe('the cashier’s queue', () => {
     expect(rejected.statusCode).toBeLessThan(300);
 
     expect(await paymentStatus()).toBe('Not Yet Available');
+  });
+
+  const lifecycleOf = async (applicationId: string): Promise<string> =>
+    (await db.query<{ lifecycle_status: string }>(
+      'select lifecycle_status from applications where id = $1', [applicationId],
+    )).rows[0]!.lifecycle_status;
+
+  it('a rejected payment puts the application back to awaiting payment (2026-10-01)', async () => {
+    // Found with the payments demo: the rejection reset the payment, and the
+    // application went on reading "Payment Submitted, awaiting verification".
+    const { paymentId, applicationId } = await paymentAwaitingVerification('Payment Submitted');
+
+    const rejected = await post(`/staff/payments/${paymentId}/reject`, await staffToken('cashier'),
+      { reason: 'The reference number does not match any deposit.' });
+
+    expect(rejected.statusCode).toBeLessThan(300);
+    expect(rejected.json<{ lifecycleStatus: string }>().lifecycleStatus).toBe('Assessed');
+    expect(await lifecycleOf(applicationId)).toBe('Assessed');
+  });
+
+  it('takes it back through Payment Submitted when the cashier had already started verifying', async () => {
+    const { paymentId, applicationId } = await paymentAwaitingVerification('Payment Under Verification');
+
+    await post(`/staff/payments/${paymentId}/reject`, await staffToken('cashier'),
+      { reason: 'The amount is less than the Order of Payment total.' });
+
+    expect(await lifecycleOf(applicationId)).toBe('Assessed');
+  });
+
+  it('leaves the application where it is while another payment on it is still being checked', async () => {
+    const { paymentId, applicationId } = await paymentAwaitingVerification('Payment Submitted');
+    const { rows: [order] } = await db.query<{ order_of_payment_id: string }>(
+      'select order_of_payment_id from payments where id = $1', [paymentId],
+    );
+    await db.query(
+      `insert into payments (id, order_of_payment_id, application_id, reference_number, amount_centavos,
+                             method, status, submitted_by)
+       values ($1,$2,$3,'BT-2',682000,'Bank Transfer','Pending Verification',$4)`,
+      [randomUUID(), order!.order_of_payment_id, applicationId, APPLICANT_ACCOUNT],
+    );
+
+    await post(`/staff/payments/${paymentId}/reject`, await staffToken('cashier'),
+      { reason: 'This one was sent twice; the other copy is being checked.' });
+
+    expect(await lifecycleOf(applicationId)).toBe('Payment Submitted');
   });
 
   it('refuses a second verification', async () => {

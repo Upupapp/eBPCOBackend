@@ -63,9 +63,11 @@ export interface TransitionRule {
 }
 
 /**
- * Eleven transitions carry no notification, and that is a recorded gap rather
+ * Twelve transitions carry no notification, and that is a recorded gap rather
  * than an omission: evaluation-started, instruction-resolved,
- * payment-under-verification, payment-rejected, for-approval, completed,
+ * payment-under-verification, the two payment-rejected moves (Payment Under
+ * Verification -> Payment Submitted, Payment Submitted -> Assessed),
+ * for-approval, completed,
  * expired, cancelled, and the three Cancelled/Rejected/Expired -> Submitted
  * "restore" moves (added 2026-09-25 for the Archive screen's "Restore to
  * Active Queue") have no counterpart in the client's catalog. Mapping
@@ -213,6 +215,18 @@ export const TRANSITIONS: readonly TransitionRule[] = [
   { from: 'Rejected', to: 'Submitted', actors: ['staff'], requires: 'staff:approve',
     preconditions: [] },
   { from: 'Expired', to: 'Submitted', actors: ['staff'], requires: 'staff:approve',
+    preconditions: [] },
+
+  // A payment the cashier rejects puts the application back where it stood
+  // before the payment was sent (2026-10-01). Until then a rejection reset
+  // only the payment row, and the application went on reading "Payment
+  // Submitted -- awaiting verification" while the Payments page asked for
+  // the money again; the applicant's next payment could not even move it,
+  // since Payment Submitted -> Payment Submitted is no move. Made by
+  // StaffPaymentsController.reject, under the cashier's own scope, and only
+  // when no other payment on the application is still being checked or
+  // already settled.
+  { from: 'Payment Submitted', to: 'Assessed', actors: ['staff'], requires: 'staff:verify-payment',
     preconditions: [] },
 ];
 

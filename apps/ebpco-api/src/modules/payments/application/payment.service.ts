@@ -55,14 +55,24 @@ export type VerifyResult =
 
 /**
  * Same shape as `VerifyResult`, plus the one field the lifecycle follow-on
- * needs. A separate type rather than widening `VerifyResult` itself: `undo`,
- * `reject` and `correctReceipt` share that type and have no application to
- * move — only `verify` does, since it is the one call that can advance
- * `Payment Submitted -> Payment Under Verification -> Payment Verified`.
+ * needs. A separate type rather than widening `VerifyResult` itself: `undo`
+ * and `correctReceipt` share that type and have no application to move.
+ * `verify` advances `Payment Submitted -> Payment Under Verification ->
+ * Payment Verified`; `reject` has its own `RejectOutcome`, below, since it
+ * moves the application back.
  */
 export type VerifyOutcome =
   | { readonly ok: true; readonly paymentId: string; readonly applicationId: string }
   | { readonly ok: false; readonly reason: 'not-found' | 'self-verification' | 'already-verified' | 'invalid' | 'not-permitted'; readonly detail: string };
+
+/**
+ * A rejection, and whether the application should go back to awaiting
+ * payment: not while another payment on it is still being checked or has
+ * already been confirmed.
+ */
+export type RejectOutcome =
+  | { readonly ok: true; readonly paymentId: string; readonly applicationId: string; readonly anotherPaymentOpen: boolean }
+  | { readonly ok: false; readonly reason: 'not-found'; readonly detail: string };
 
 export class PaymentService {
   private readonly audit: AuditService;
@@ -555,18 +565,27 @@ export class PaymentService {
     });
   }
 
-  async reject(options: { paymentId: string; officer: Caller; reason: string }): Promise<VerifyResult> {
+  async reject(options: { paymentId: string; officer: Caller; reason: string }): Promise<RejectOutcome> {
     const { paymentId, officer, reason } = options;
     if (reason.trim().length < 10) {
       return { ok: false, reason: 'not-found', detail: 'a rejection must state a reason the applicant can act on' };
     }
 
-    const updated = await this.db.query(
+    const updated = await this.db.query<{ application_id: string }>(
       `update payments set status = 'Not Yet Available', rejection_reason = $2, rejected_at = $3
-        where id = $1 and verified_at is null`,
+        where id = $1 and verified_at is null
+        returning application_id`,
       [paymentId, reason, this.clock()],
     );
-    if (updated.rowCount === 0) return { ok: false, reason: 'not-found', detail: 'no unverified payment with that id' };
+    const applicationId = updated.rows[0]?.application_id;
+    if (applicationId === undefined) return { ok: false, reason: 'not-found', detail: 'no unverified payment with that id' };
+
+    const open = await this.db.query(
+      `select 1 from payments
+        where application_id = $1 and id <> $2 and status in ('Pending Verification', 'Paid')
+        limit 1`,
+      [applicationId, paymentId],
+    );
 
     await this.audit.append({
       action: 'payment.rejected',
@@ -580,6 +599,6 @@ export class PaymentService {
       afterState: { reason },
     });
 
-    return { ok: true, paymentId };
+    return { ok: true, paymentId, applicationId, anotherPaymentOpen: open.rows.length > 0 };
   }
 }

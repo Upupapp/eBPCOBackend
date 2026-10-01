@@ -296,11 +296,33 @@ export class StaffPaymentsController {
     // explanation leaves them unable to fix it, and the money may genuinely
     // have left their account.
     const input = parse(rejectShape, body);
-    const result = await this.payments.reject({
-      paymentId, officer: callerOf(request), reason: input.reason,
-    });
+    const officer = callerOf(request);
+    const result = await this.payments.reject({ paymentId, officer, reason: input.reason });
+    if (!result.ok) throw ProblemException.notFound(result.detail);
 
-    if (result.ok) return { paymentId: result.paymentId, rejected: true };
-    throw ProblemException.notFound(result.detail);
+    // Back to awaiting payment, where it stood before this payment was sent,
+    // so the applicant's own page, the cashier's queue and the next payment
+    // all agree with the rejection (2026-10-01). Through Payment Submitted
+    // when an officer had already taken the payment into verification. Not
+    // while another payment on it is still being checked or is settled: the
+    // application is not waiting on the applicant then. Best-effort and
+    // logged, the same as verify's own moves: the rejection is committed.
+    if (result.anotherPaymentOpen) {
+      return { paymentId: result.paymentId, rejected: true };
+    }
+    const chain = await this.lifecycle.followOn({
+      applicationId: result.applicationId,
+      hops: [
+        { caller: officer, to: 'Payment Submitted' },
+        { caller: officer, to: 'Assessed' },
+      ],
+    });
+    if (chain.stoppedAt !== null) {
+      this.logger.warn(`payment rejected but the application did not return to ${chain.stoppedAt.to}`, {
+        applicationId: result.applicationId, paymentId: result.paymentId,
+        status: chain.status, refusal: chain.stoppedAt.refusal,
+      });
+    }
+    return { paymentId: result.paymentId, rejected: true, lifecycleStatus: chain.status };
   }
 }
