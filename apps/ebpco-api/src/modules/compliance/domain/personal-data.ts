@@ -713,6 +713,10 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     scope: none('statutory'),
     conditions: none('statutory'),
     generated_by: linkable('statutory', ACCOUNTABILITY),
+    expires_on: none('statutory'),
+    // A public official signing in office: printed on every permit by design.
+    approving_official: none('statutory'),
+    approving_office: none('statutory'),
   },
 
   permit_releases: {
@@ -721,6 +725,9 @@ export const REGISTER: Readonly<Record<string, TableRegister>> = {
     method: none('statutory'),
     // Proof of who took the document. The whole point of recording it.
     claimant_name: direct('statutory', PERMIT_RECORD),
+    // The ID and authorization the claimant showed: identity documents.
+    id_presented: direct('statutory', PERMIT_RECORD),
+    authorization_reference: direct('statutory', PERMIT_RECORD),
     releasing_officer: linkable('statutory', ACCOUNTABILITY),
     released_at: none('statutory'),
     claim_location: none('statutory'),

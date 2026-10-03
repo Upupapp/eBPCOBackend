@@ -9,6 +9,7 @@ import type { AuthenticatedRequest } from '../identity/transport/guards/authenti
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 import { CASTILLA_BARANGAYS } from './castilla-barangays';
 import { BUSINESS_CATEGORIES } from './business-categories';
+import { filedUnder, registrationDateField, registrationNumberField } from './registration-number';
 
 /**
  * The businesses an applicant has registered with the LGU.
@@ -36,19 +37,23 @@ const businessShape = z.object({
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
-  registrationNumber: z.string().min(1).max(80),
-  dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+  registrationNumber: registrationNumberField,
+  dateRegistered: registrationDateField,
 }).strict();
 
 /**
  * What an owner may correct about a business already on file.
  *
- * Deliberately a SUBSET of `businessShape`, not `businessShape.partial()`:
- * `registrationNumber` and `dateRegistered` are the government's own record
- * of when and under what number this business was registered, not the
- * owner's to rewrite, and `status` is not a free-text field here at all —
- * see `deactivate`/`reactivate` below for why that is its own action rather
- * than a value this endpoint accepts.
+ * `status` is not a free-text field here at all — see `deactivate`/
+ * `reactivate` below for why that is its own action rather than a value this
+ * endpoint accepts.
+ *
+ * `registrationNumber` and `dateRegistered` are the government's record of
+ * the business, but they are what the OWNER typed, and a typo used to be
+ * permanent (QA finding TC-24, 2026-10-03). The owner may correct them until
+ * an application under the business reaches the office; after that the
+ * office relies on them, and the office corrects them
+ * (`staff-businesses.controller.ts`, with a reason on the record).
  */
 const businessUpdateShape = z.object({
   name: z.string().min(1).max(200),
@@ -57,6 +62,8 @@ const businessUpdateShape = z.object({
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
+  registrationNumber: registrationNumberField.optional(),
+  dateRegistered: registrationDateField.optional(),
 }).strict();
 
 function parse<T>(schema: z.ZodType<T>, value: unknown): T {
@@ -170,14 +177,35 @@ export class BusinessesController {
     );
     if (owned.rows[0] === undefined) throw ProblemException.notFound('No such business.');
 
+    const correctsRegistration = input.registrationNumber !== undefined || input.dateRegistered !== undefined;
+    if (correctsRegistration) {
+      const current = await this.db.query<{ registration_number: string; date_registered: string }>(
+        `select registration_number, to_char(date_registered, 'YYYY-MM-DD') as date_registered
+           from businesses where id = $1`, [businessId],
+      );
+      const changes = (input.registrationNumber !== undefined
+          && input.registrationNumber !== current.rows[0]?.registration_number)
+        || (input.dateRegistered !== undefined && input.dateRegistered !== current.rows[0]?.date_registered);
+      if (changes && await filedUnder(this.db, businessId)) {
+        throw new ProblemException(
+          ProblemType.conflict, 'The resource is not in a state that permits this', HttpStatus.CONFLICT,
+          'An application under this business has already been filed, so the Municipality now relies on its '
+            + 'registration number and date. Ask the Office of the Building Official to correct them.',
+        );
+      }
+    }
+
     const updated = await this.db.query<Record<string, never>>(
       `update businesses
           set name = $2, category = $3, street = $4, barangay = $5, city = $6, province = $7,
+              registration_number = coalesce($8, registration_number),
+              date_registered = coalesce($9::date, date_registered),
               updated_at = now()
         where id = $1
         returning id, name, category, street, barangay, city, province,
                   registration_number, to_char(date_registered, 'YYYY-MM-DD') as date_registered, status`,
-      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province],
+      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province,
+       input.registrationNumber ?? null, input.dateRegistered ?? null],
     );
 
     return onTheWire((updated.rows as unknown as Record<string, unknown>[])[0] ?? {});

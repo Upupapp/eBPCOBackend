@@ -37,10 +37,11 @@ export class PublicPermitsController {
     const found = await this.db.query<{
       permit_number: string; issued_date: Date; permit_type: string;
       business_name: string | null; release_status: string | null; released_at: Date | null;
-      archived_at: Date | null;
+      archived_at: Date | null; expires_on: string | null; approving_office: string | null;
     }>(
       `select g.permit_number, g.issued_date, a.permit_type, b.name as business_name,
-              r.status as release_status, r.released_at, a.archived_at
+              r.status as release_status, r.released_at, a.archived_at,
+              to_char(g.expires_on, 'YYYY-MM-DD') as expires_on, g.approving_office
          from generated_permits g
          join applications a on a.id = g.application_id
          left join businesses b on b.id = a.business_id
@@ -59,6 +60,9 @@ export class PublicPermitsController {
       issuedDate: row.issued_date.toISOString(),
       released: row.release_status === 'Released',
       releasedAt: row.released_at === null ? null : row.released_at.toISOString(),
+      // So a scanned permit can be checked for still being in force (TC-04).
+      expiresOn: row.expires_on,
+      approvingOffice: row.approving_office,
     };
   }
 }

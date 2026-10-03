@@ -665,7 +665,7 @@ describe('registering a business', () => {
 
   it('lists only the caller’s businesses', async () => {
     await post('/businesses', maria, business);
-    await post('/businesses', jose, { ...business, name: 'Jose Hardware', registrationNumber: 'DTI-2' });
+    await post('/businesses', jose, { ...business, name: 'Jose Hardware', registrationNumber: 'DTI-2024-000002' });
 
     const body = (await get('/businesses', maria)).json<{ data: { name: string }[] }>();
 
@@ -726,14 +726,28 @@ describe('editing a business already on file', () => {
     });
   });
 
-  it('never lets the government-assigned facts be rewritten', async () => {
-    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
-
-    const response = await patch(`/businesses/${businessId}`, maria, {
-      ...business, registrationNumber: 'FORGED-0001',
-    });
+  it('refuses a registration number that cannot be one (TC-24)', async () => {
+    const response = await post('/businesses', maria, { ...business, registrationNumber: 'x' });
 
     expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('registration number');
+  });
+
+  it('lets the owner correct the registration facts until an application is filed (TC-24)', async () => {
+    const businessId = (await post('/businesses', maria, business)).json<{ id: string }>().id;
+
+    const corrected = await patch(`/businesses/${businessId}`, maria, {
+      ...business, registrationNumber: 'DTI-2024-004471', dateRegistered: '2024-01-16',
+    });
+    expect(corrected.statusCode).toBe(200);
+    expect(corrected.json<{ registrationNumber: string; dateRegistered: string }>())
+      .toMatchObject({ registrationNumber: 'DTI-2024-004471', dateRegistered: '2024-01-16' });
+
+    await post('/applications', maria, submission({ businessId }));
+    const afterFiling = await patch(`/businesses/${businessId}`, maria, {
+      ...business, registrationNumber: 'DTI-2024-009999',
+    });
+    expect(afterFiling.statusCode).toBe(409);
   });
 
   it('answers 404, not 403, for someone else’s business', async () => {

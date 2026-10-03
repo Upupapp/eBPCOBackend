@@ -496,14 +496,20 @@ describe('the applicant’s own answers', () => {
 });
 
 describe('saving a draft', () => {
-  it('files at Draft, with a real reference number and no submitted_at yet', async () => {
+  it('files at Draft, with a temporary DRAFT label and no submitted_at yet', async () => {
+    // TC-37 (2026-10-03): a draft no longer takes an official number, so an
+    // abandoned draft leaves no gap in the series. It is numbered when filed.
     const result = await submissions.submit({
       caller: maria, submission: submission({ saveAsDraft: true }), idempotencyKey: randomUUID(),
     });
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
-    expect(result.referenceNumber).toMatch(/^E-BPCO-2026-\d{6}$/);
+    expect(result.referenceNumber).toMatch(/^DRAFT-[0-9A-F]{10}$/);
+    const issued = await db.query<{ n: string }>(
+      `select count(*) as n from document_number_sequences where series = 'APP'`,
+    );
+    expect(Number(issued.rows[0]?.n)).toBe(0);
     const row = await db.query<{ lifecycle_status: string; submitted_at: Date | null; created_by: string }>(
       'select lifecycle_status, submitted_at, created_by from applications where id = $1', [result.applicationId],
     );

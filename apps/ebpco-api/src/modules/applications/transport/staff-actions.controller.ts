@@ -11,6 +11,7 @@ import { EVALUATION_RESULTS, EVALUATION_STAGES, EvaluationService } from '../app
 import { AssessmentService } from '../../payments/application/assessment.service';
 import { PermitService } from '../../permits/application/permit.service';
 import { PaymentService } from '../../payments/application/payment.service';
+import { officialReceiptProblem } from '../../payments/domain/official-receipt';
 import { DocumentService } from '../../documents/application/document.service';
 import { requestDigest } from '../../../persistence/idempotency';
 import { StructuredLogger } from '../../../common/logging/logger';
@@ -47,6 +48,9 @@ const orderOfPaymentShape = z.object({
 const permitShape = z.object({
   scope: z.string().min(1).max(2000),
   conditions: z.array(z.string().max(1000)).max(50).optional(),
+  expiresOn: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD').optional(),
+  approvingOfficial: z.string().max(200).optional(),
+  approvingOffice: z.string().max(200).optional(),
 });
 
 /**
@@ -58,7 +62,10 @@ const permitShape = z.object({
  * from the application, because that is who paid.
  */
 const onsiteShape = z.object({
-  officialReceiptNumber: z.string().min(1).max(60),
+  officialReceiptNumber: z.string().superRefine((value, ctx) => {
+    const problem = officialReceiptProblem(value);
+    if (problem !== null) ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem });
+  }),
   // Required, and must equal the Order of Payment exactly (ADR 0010). Defaulting
   // it to the assessed total would mean a mistyped receipt still recorded a
   // settled payment.
@@ -74,6 +81,8 @@ const preparationShape = z.object({
 const releaseShape = z.object({
   claimantName: z.string().min(1).max(200),
   method: z.enum(['Physical Claim', 'Authorized Representative']),
+  idPresented: z.string().max(200).optional(),
+  authorization: z.string().max(500).optional(),
 });
 
 const documentReviewShape = z.object({
@@ -522,6 +531,9 @@ export class StaffActionsController {
 
     const result = await this.permits.generate({
       applicationId, officer: caller, scope: input.scope, conditions: input.conditions ?? [],
+      expiresOn: input.expiresOn ?? null,
+      approvingOfficial: input.approvingOfficial ?? null,
+      approvingOffice: input.approvingOffice ?? null,
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);
@@ -580,6 +592,7 @@ export class StaffActionsController {
 
     const result = await this.permits.release({
       applicationId, officer: caller, claimantName: input.claimantName, method: input.method,
+      idPresented: input.idPresented ?? null, authorization: input.authorization ?? null,
     });
 
     if (!result.ok) throw refusal(result.reason, result.detail);

@@ -492,16 +492,16 @@ describe('staff resubmitting a document for a walk-in citizen', () => {
 
 describe('the cashier’s queue', () => {
   async function paymentAwaitingVerification(
-    status: LifecycleStatus = 'Assessed',
+    status: LifecycleStatus = 'Assessed', reference = 'BP-1',
   ): Promise<{ paymentId: string; applicationId: string }> {
-    const applicationId = await file('BP-1', status);
+    const applicationId = await file(reference, status);
     const orderId = randomUUID();
     await db.query(
       `insert into orders_of_payment (id, application_id, number, filing_centavos, processing_centavos,
                                       architectural_centavos, structural_centavos, electrical_centavos,
                                       others_centavos, total_centavos, fee_schedule_version, assessed_by)
-       values ($1,$2,'OP-1',50000,120000,0,512000,0,0,682000,'2026.1',$3)`,
-      [orderId, applicationId, APPLICANT_ACCOUNT],
+       values ($1,$2,$4,50000,120000,0,512000,0,0,682000,'2026.1',$3)`,
+      [orderId, applicationId, APPLICANT_ACCOUNT, `OP-${reference}`],
     );
     const paymentId = randomUUID();
     await db.query(
@@ -589,6 +589,43 @@ describe('the cashier’s queue', () => {
     expect(response.statusCode).toBe(400);
   });
 
+  it('refuses "abc" as an Official Receipt number, and says what one looks like (TC-03)', async () => {
+    const { paymentId } = await paymentAwaitingVerification();
+
+    const response = await post(`/staff/payments/${paymentId}/verify`, await staffToken('cashier'),
+      { officialReceiptNumber: 'abc' });
+
+    expect(response.statusCode).toBe(400);
+    expect(response.body).toContain('at least 4 digits');
+    const row = await db.query<{ status: string }>('select status from payments where id = $1', [paymentId]);
+    expect(row.rows[0]!.status).toBe('Pending Verification');
+  });
+
+  it('refuses an Official Receipt number already recorded on another payment (TC-03)', async () => {
+    const first = await paymentAwaitingVerification('Assessed', 'BP-OR-1');
+    const second = await paymentAwaitingVerification('Assessed', 'BP-OR-2');
+    const cashier = await staffToken('cashier');
+    expect((await post(`/staff/payments/${first.paymentId}/verify`, cashier,
+      { officialReceiptNumber: 'OR-2026-000500' })).statusCode).toBe(200);
+
+    const response = await post(`/staff/payments/${second.paymentId}/verify`, cashier,
+      { officialReceiptNumber: ' or-2026-000500 ' });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.body).toContain('BP-OR-1');
+  });
+
+  it('names the cashier who verified each payment, for the receipt (TC-09)', async () => {
+    const { paymentId } = await paymentAwaitingVerification();
+    const cashier = await staffToken('cashier');
+    await post(`/staff/payments/${paymentId}/verify`, cashier, { officialReceiptNumber: 'OR-2026-000777' });
+
+    const item = (await get('/staff/payments', cashier))
+      .json<{ items: Record<string, unknown>[] }>().items.find((row) => row['id'] === paymentId)!;
+    expect(item['verifiedByName']).toMatch(/^cashier-/);
+    expect(item['verifiedAt']).not.toBeNull();
+  });
+
   it('refuses a rejection with no reason the applicant can act on', async () => {
     // The money may genuinely have left their account.
     const { paymentId } = await paymentAwaitingVerification();
@@ -665,9 +702,9 @@ describe('the cashier’s queue', () => {
   it('refuses a second verification', async () => {
     const { paymentId } = await paymentAwaitingVerification();
     const token = await staffToken('cashier');
-    await post(`/staff/payments/${paymentId}/verify`, token, { officialReceiptNumber: 'OR-1' });
+    await post(`/staff/payments/${paymentId}/verify`, token, { officialReceiptNumber: 'OR-2026-000101' });
 
-    const again = await post(`/staff/payments/${paymentId}/verify`, token, { officialReceiptNumber: 'OR-2' });
+    const again = await post(`/staff/payments/${paymentId}/verify`, token, { officialReceiptNumber: 'OR-2026-000102' });
 
     expect(again.statusCode).toBe(409);
   });
@@ -719,7 +756,7 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
 
     await post(`/staff/applications/${applicationId}/onsite-payment`,
-      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total });
 
     const row = await db.query<{ submitted_by: string; verified_by: string }>(
       'select submitted_by, verified_by from payments where application_id = $1', [applicationId],
@@ -732,7 +769,7 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
 
     await post(`/staff/applications/${applicationId}/onsite-payment`,
-      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total });
 
     const audit = await db.query<{ n: string }>(
       `select count(*) as n from audit_events where action = 'payment.recorded-onsite'`,
@@ -776,7 +813,7 @@ describe('cash across a counter', () => {
     })).token;
 
     const response = await post(`/staff/applications/${own}/onsite-payment`, token,
-      { officialReceiptNumber: 'OR-SELF', amountCentavos: total });
+      { officialReceiptNumber: 'OR-2026-000201', amountCentavos: total });
 
     expect(response.statusCode).toBe(403);
     expect(response.json().detail).toMatch(/your own application/i);
@@ -788,7 +825,7 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
 
     const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
-      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: total - 1 });
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total - 1 });
 
     expect(response.statusCode).toBe(422);
     expect(response.json().detail).toMatch(/partial payments are not accepted/i);
@@ -798,7 +835,7 @@ describe('cash across a counter', () => {
     const applicationId = await file('BP-NOOP', 'Under Evaluation');
 
     const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
-      await staffToken('cashier'), { officialReceiptNumber: 'OR-1', amountCentavos: 1000 });
+      await staffToken('cashier'), { officialReceiptNumber: 'OR-2026-000101', amountCentavos: 1000 });
 
     expect(response.statusCode).toBe(422);
     expect(response.json().detail).toMatch(/no order of payment/i);
@@ -808,10 +845,10 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
     const cashier = await staffToken('cashier');
     await post(`/staff/applications/${applicationId}/onsite-payment`, cashier,
-      { officialReceiptNumber: 'OR-1', amountCentavos: total });
+      { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total });
 
     const again = await post(`/staff/applications/${applicationId}/onsite-payment`, cashier,
-      { officialReceiptNumber: 'OR-2', amountCentavos: total });
+      { officialReceiptNumber: 'OR-2026-000102', amountCentavos: total });
 
     expect(again.statusCode).toBe(409);
   });
@@ -820,7 +857,7 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
     const cashier = await staffToken('cashier');
     const key = randomUUID();
-    const receipt = { officialReceiptNumber: 'OR-1', amountCentavos: total };
+    const receipt = { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total };
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await post(`/staff/applications/${applicationId}/onsite-payment`, cashier, receipt, key);
@@ -836,7 +873,7 @@ describe('cash across a counter', () => {
     const { applicationId, total } = await assessed();
 
     const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
-      await staffToken('evaluator'), { officialReceiptNumber: 'OR-1', amountCentavos: total });
+      await staffToken('evaluator'), { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total });
 
     expect(response.statusCode).toBe(403);
   });
@@ -849,7 +886,7 @@ describe('cash across a counter', () => {
 
     const response = await post(`/staff/applications/${applicationId}/onsite-payment`,
       await staffToken('cashier'),
-      { officialReceiptNumber: 'OR-1', amountCentavos: total, method: 'Bank Transfer' });
+      { officialReceiptNumber: 'OR-2026-000101', amountCentavos: total, method: 'Bank Transfer' });
 
     expect(response.statusCode).toBe(400);
   });
@@ -892,6 +929,91 @@ describe('release', () => {
       .json<{ release: { claimantName: string; bringWithYou: string[] } }>();
     expect(detail.release.claimantName).toBe('Maria Santos');
     expect(detail.release.bringWithYou).toHaveLength(2);
+  });
+
+  it('records the ID presented and a representative\'s authorization (TC-14)', async () => {
+    const id = await readyForRelease();
+    const token = await staffToken('releasing-officer');
+    await post(`/staff/applications/${id}/release-preparation`, token, {
+      claimLocation: 'Office of the Building Official', officeHours: 'Monday to Friday, 8:00am - 5:00pm',
+    });
+
+    const response = await post(`/staff/applications/${id}/release`, token, {
+      claimantName: 'Jose Santos', method: 'Authorized Representative',
+      idPresented: "Driver's licence N01-23-456789", authorization: 'Letter of authorization from Maria Santos',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const detail = (await get(`/staff/applications/${id}`, await staffToken('building-official')))
+      .json<{ release: Record<string, unknown> }>();
+    expect(detail.release).toMatchObject({
+      idPresented: "Driver's licence N01-23-456789",
+      authorizationReference: 'Letter of authorization from Maria Santos',
+    });
+  });
+});
+
+describe('what an issued permit says about itself (TC-04, 2026-10-03)', () => {
+  it('keeps its validity, approving official and office, and shows them to the office and the applicant', async () => {
+    const id = await file('BP-VALID-1', 'Approved');
+    const nextYear = `${new Date().getUTCFullYear() + 1}-06-30`;
+
+    const response = await post(`/staff/applications/${id}/permit`, await staffToken('building-official'), {
+      scope: SCOPE, expiresOn: nextYear,
+      approvingOfficial: 'Engr. Antonio Salvador', approvingOffice: 'Office of the Building Official',
+    });
+
+    expect(response.statusCode).toBe(201);
+    const detail = (await get(`/staff/applications/${id}`, await staffToken('building-official')))
+      .json<{ permit: Record<string, unknown> }>();
+    expect(detail.permit).toMatchObject({
+      expiresOn: nextYear, approvingOfficial: 'Engr. Antonio Salvador', approvingOffice: 'Office of the Building Official',
+    });
+    const citizen = (await tokens.issueAccessToken({
+      sub: APPLICANT_ACCOUNT, sid: randomUUID(), kind: 'applicant', scopes: [...APPLICANT_SCOPES],
+    })).token;
+    expect((await get(`/applications/${id}/permit`, citizen)).json<Record<string, unknown>>()).toMatchObject({
+      expiresOn: nextYear, approvingOfficial: 'Engr. Antonio Salvador',
+    });
+  });
+
+  it('refuses a validity that has already ended', async () => {
+    const id = await file('BP-VALID-2', 'Approved');
+
+    const response = await post(`/staff/applications/${id}/permit`, await staffToken('building-official'),
+      { scope: SCOPE, expiresOn: '2020-01-01' });
+
+    expect(response.statusCode).toBe(422);
+  });
+});
+
+describe('the record an officer reads (TC-01, TC-02, 2026-10-03)', () => {
+  it('carries the checklist the application is judged against, each document with its stage', async () => {
+    const id = await file('BP-CHECK-1', 'Document Verification');
+    await db.query(`update applications set required_documents = $2 where id = $1`, [id, JSON.stringify([
+      { code: 'bpnc-oct-tct', label: 'Certified True Copy of OCT/TCT', required: true, stage: 'Initial' },
+      { code: 'bpnc-unified-form', label: 'Unified Building Permit Form', required: true, stage: 'Initial' },
+      { code: 'bpnc-survey-plan', label: 'Survey Plan', required: true, stage: 'OBO' },
+    ])]);
+
+    const detail = (await get(`/staff/applications/${id}`, await staffToken('evaluator')))
+      .json<{ checklist: { code: string; stage: string | null }[] }>();
+
+    expect(detail.checklist.map((entry) => [entry.code, entry.stage])).toEqual([
+      ['bpnc-oct-tct', 'Initial'], ['bpnc-unified-form', 'Initial'], ['bpnc-survey-plan', 'OBO'],
+    ]);
+  });
+
+  it('names the position of whoever moved the application on its timeline', async () => {
+    const id = await file('BP-TIME-1', 'Submitted');
+    const receiver = await staffToken('receiving-officer');
+    await post(`/staff/applications/${id}/transitions`, receiver, { to: 'Received' });
+
+    const detail = (await get(`/staff/applications/${id}`, receiver))
+      .json<{ timeline: { toStatus: string; actorName: string | null; actorPosition: string | null }[] }>();
+    const received = detail.timeline.find((entry) => entry.toStatus === 'Received')!;
+    expect(received.actorName).toMatch(/^receiving-officer-/);
+    expect(received.actorPosition).toBe('Receiving Officer');
   });
 });
 

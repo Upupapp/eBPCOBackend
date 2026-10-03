@@ -3,6 +3,37 @@ import {
   currentCorrelationId, currentSourceAddress, normaliseSourceAddress,
 } from '../../../common/correlation/correlation';
 import { ChainVerdict, ChainableEvent, GENESIS, hashEntry, verifyChain } from '../domain/audit-chain';
+import { positionOf } from '../../applications/domain/teams';
+
+/**
+ * Who an entry's actor is, for a reader (QA finding TC-02, 2026-10-03): the
+ * System Logs said "staff" on every row, and an auditor could not tell which
+ * officer received, assessed or approved anything. Joined at read time, never
+ * written into the chain: the hashed entry keeps the account id, and a name
+ * corrected later is the name shown.
+ */
+const ACTOR_COLUMNS = `
+  coalesce(nullif(trim(acc.full_name), ''), nullif(trim(ap.first_name || ' ' || ap.last_name), ''), acc.email) as actor_name,
+  acc.kind as actor_kind,
+  array(select r.role from account_roles r where r.account_id = acc.id) as actor_roles,
+  array(select s.stage from staff_evaluation_stages s where s.account_id = acc.id) as actor_stages`;
+const ACTOR_JOINS = `
+  left join accounts acc on acc.id = e.actor_account_id
+  left join applicants ap on ap.account_id = acc.id`;
+
+interface ActorRow {
+  actor_name: string | null;
+  actor_kind: string | null;
+  actor_roles: string[] | null;
+  actor_stages: string[] | null;
+}
+
+function actorOf(row: ActorRow): { actorName: string | null; actorPosition: string | null } {
+  return {
+    actorName: row.actor_name,
+    actorPosition: positionOf(row.actor_kind, row.actor_roles ?? [], row.actor_stages ?? []),
+  };
+}
 
 /**
  * The append-only record of what this system did, and who to.
@@ -285,6 +316,7 @@ export class AuditService {
       sequence: number; occurredAt: Date; action: string; outcome: AuditOutcome;
       subjectType: string; subjectId: string | null;
       actorAccountId: string | null; actorRole: string | null;
+      actorName: string | null; actorPosition: string | null;
       // Where the act came from. Null on everything written before D-6, and on
       // anything that reached the service outside a request context.
       sourceAddress: string | null;
@@ -299,32 +331,32 @@ export class AuditService {
     };
 
     const where: string[] = [];
-    if (filters.action !== undefined) where.push(`action = ${bind(filters.action)}`);
+    if (filters.action !== undefined) where.push(`e.action = ${bind(filters.action)}`);
     if (filters.actions !== undefined) {
       // An empty set must select NOTHING, not everything. `action = any('{}')`
       // is false for every row, which is the answer wanted; the guard is here
       // so a future caller passing [] cannot accidentally widen the query.
-      where.push(`action = any(${bind([...filters.actions])})`);
+      where.push(`e.action = any(${bind([...filters.actions])})`);
     }
     if (filters.excludeActions !== undefined) {
-      where.push(`action <> all(${bind([...filters.excludeActions])})`);
+      where.push(`e.action <> all(${bind([...filters.excludeActions])})`);
     }
-    if (filters.subjectType !== undefined) where.push(`subject_type = ${bind(filters.subjectType)}`);
+    if (filters.subjectType !== undefined) where.push(`e.subject_type = ${bind(filters.subjectType)}`);
     if (filters.actorAccountId !== undefined) {
-      where.push(`actor_account_id = ${bind(filters.actorAccountId)}`);
+      where.push(`e.actor_account_id = ${bind(filters.actorAccountId)}`);
     }
-    if (filters.from !== undefined) where.push(`occurred_at >= ${bind(filters.from)}`);
-    if (filters.to !== undefined) where.push(`occurred_at < ${bind(filters.to)}`);
-    if (filters.before !== undefined) where.push(`sequence < ${bind(filters.before)}`);
+    if (filters.from !== undefined) where.push(`e.occurred_at >= ${bind(filters.from)}`);
+    if (filters.to !== undefined) where.push(`e.occurred_at < ${bind(filters.to)}`);
+    if (filters.before !== undefined) where.push(`e.sequence < ${bind(filters.before)}`);
 
     const rows = await this.db.query<
-      AuditRow & { subject_type: string; subject_id: string | null; source_address: string | null }
+      AuditRow & ActorRow & { subject_type: string; subject_id: string | null; source_address: string | null }
     >(
-      `select sequence, occurred_at, action, outcome, subject_type, subject_id,
-              actor_account_id, actor_role, host(source_address) as source_address
-         from audit_events
+      `select e.sequence, e.occurred_at, e.action, e.outcome, e.subject_type, e.subject_id,
+              e.actor_account_id, e.actor_role, host(e.source_address) as source_address, ${ACTOR_COLUMNS}
+         from audit_events e ${ACTOR_JOINS}
         ${where.length > 0 ? `where ${where.join(' and ')}` : ''}
-        order by sequence desc
+        order by e.sequence desc
         limit ${bind(limit + 1)}`,
       values,
     );
@@ -341,6 +373,7 @@ export class AuditService {
         subjectId: row.subject_id,
         actorAccountId: row.actor_account_id,
         actorRole: row.actor_role,
+        ...actorOf(row),
         sourceAddress: row.source_address,
       })),
       nextCursor: rows.rows.length > limit && last !== undefined ? Number(last.sequence) : null,
@@ -350,12 +383,13 @@ export class AuditService {
   async historyOf(subjectType: string, subjectId: string): Promise<ReadonlyArray<{
     sequence: number; occurredAt: Date; action: string; outcome: AuditOutcome;
     actorAccountId: string | null; actorRole: string | null;
+    actorName: string | null; actorPosition: string | null;
   }>> {
-    const rows = await this.db.query<AuditRow>(
-      `select sequence, occurred_at, action, outcome, actor_account_id, actor_role
-         from audit_events
-        where subject_type = $1 and subject_id = $2
-        order by sequence`,
+    const rows = await this.db.query<AuditRow & ActorRow>(
+      `select e.sequence, e.occurred_at, e.action, e.outcome, e.actor_account_id, e.actor_role, ${ACTOR_COLUMNS}
+         from audit_events e ${ACTOR_JOINS}
+        where e.subject_type = $1 and e.subject_id = $2
+        order by e.sequence`,
       [subjectType, subjectId],
     );
     return rows.rows.map((row) => ({
@@ -365,6 +399,7 @@ export class AuditService {
       outcome: row.outcome,
       actorAccountId: row.actor_account_id,
       actorRole: row.actor_role,
+      ...actorOf(row),
     }));
   }
 }

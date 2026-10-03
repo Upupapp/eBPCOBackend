@@ -451,6 +451,28 @@ describe('leaving Draft', () => {
     expect(row.rows[0]?.submitted_at).not.toBeNull();
   });
 
+  it('numbers a draft as it is filed, and never a withdrawn one (TC-37)', async () => {
+    const referenceOf = async (id: string): Promise<string> =>
+      (await db.query<{ reference_number: string }>(
+        'select reference_number from applications where id = $1', [id])).rows[0]!.reference_number;
+    await db.query(`update applications set reference_number = 'DRAFT-0123456789' where id = $1`, [DRAFT_APPLICATION]);
+    const other = randomUUID();
+    await db.query(
+      `insert into applications (id, reference_number, applicant_id, permit_type, application_action,
+                                 lifecycle_status, submitted_at, created_by)
+       values ($1, 'DRAFT-ABCDEF0123', $2, 'Fencing Permit', 'New', 'Draft', null, $3)`,
+      [other, APPLICANT, APPLICANT_ACCOUNT],
+    );
+    await markIdentityVerified(DRAFT_APPLICATION);
+
+    expect((await service.transition({ applicationId: other, caller: applicant, to: 'Cancelled' })).ok).toBe(true);
+    expect(await referenceOf(other)).toBe('DRAFT-ABCDEF0123');
+
+    expect((await service.transition({ applicationId: DRAFT_APPLICATION, caller: applicant, to: 'Submitted' })).ok)
+      .toBe(true);
+    expect(await referenceOf(DRAFT_APPLICATION)).toMatch(/^E-BPCO-\d{4}-000001$/);
+  });
+
   it('lets an officer finalize a Draft too, not only the applicant who owns it', async () => {
     // actors: ['applicant', 'staff'] -- widened for the walk-in case, where a
     // colleague other than the one who started the draft needs to finish or

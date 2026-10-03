@@ -5,6 +5,7 @@ import { centavos, parseCentavos } from '../domain/money';
 import { SettlementCheck, checkSettles } from '../domain/order-of-payment';
 import { requestDigest } from './assessment.service';
 import { lookup, remember } from '../../../persistence/idempotency';
+import { receiptAlreadyUsed, receiptInUseDetail } from '../domain/official-receipt';
 
 /**
  * Submitting proof of payment, and verifying it.
@@ -252,6 +253,10 @@ export class PaymentService {
         [applicationId],
       );
       const row = context.rows[0];
+      const inUse = await receiptAlreadyUsed(tx, officialReceiptNumber, null);
+      if (inUse !== null) {
+        return { ok: false, reason: 'conflict', detail: receiptInUseDetail(officialReceiptNumber, inUse) };
+      }
       if (row === undefined) {
         // No Order of Payment means nothing to receipt. Saying that
         // specifically is the difference between the cashier waiting and the
@@ -352,11 +357,16 @@ export class PaymentService {
       };
     }
 
+    const inUse = await receiptAlreadyUsed(this.db, officialReceiptNumber, paymentId);
+    if (inUse !== null) {
+      return { ok: false, reason: 'invalid', detail: receiptInUseDetail(officialReceiptNumber, inUse) };
+    }
+
     await this.db.query(
       `update payments
           set status = 'Paid', verified_at = $1, verified_by = $2, official_receipt_number = $3
         where id = $4`,
-      [this.clock(), officer.accountId, officialReceiptNumber, paymentId],
+      [this.clock(), officer.accountId, officialReceiptNumber.trim(), paymentId],
     );
 
     return { ok: true, paymentId, applicationId: row.application_id };
@@ -545,6 +555,10 @@ export class PaymentService {
       }
       if (payment.official_receipt_number === officialReceiptNumber.trim()) {
         return { ok: true, paymentId };
+      }
+      const inUse = await receiptAlreadyUsed(tx, officialReceiptNumber, paymentId);
+      if (inUse !== null) {
+        return { ok: false, reason: 'invalid', detail: receiptInUseDetail(officialReceiptNumber, inUse) };
       }
 
       await tx.query(

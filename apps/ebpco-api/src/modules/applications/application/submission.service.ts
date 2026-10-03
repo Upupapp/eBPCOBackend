@@ -9,6 +9,7 @@ import { unusablePasswordHash } from '../../identity/application/staff-directory
 import { RequirementDocument, RequirementsService } from './requirements.service';
 import { RegistrationVerificationService } from '../../identity/application/registration-verification.service';
 import { RenewalRefusal, resolveRenewal } from './resolve-renewal';
+import { draftReference } from '../domain/references';
 
 /**
  * Filing an application, exactly once.
@@ -847,13 +848,15 @@ export class SubmissionService {
     // actually judged against — not whatever the catalogue says today.
     const requirements = await this.requirements.forPermitType(submission.permitType, submission.applicationAction, tx);
 
-    const referenceNumber = await this.nextReference(tx, now);
-    // A Draft is a real row from the moment it exists — same reference
-    // sequence, same charter/requirements snapshot behaviour — it simply
-    // has not been filed yet: `submitted_at` stays null (the CHECK
-    // constraint `submitted_at_matches_status`, migration 003, requires
-    // exactly that pairing) until `POST /applications/:id/submit` moves it
-    // to Submitted for real.
+    // A Draft is a real row from the moment it exists -- same charter and
+    // requirements snapshot behaviour -- it simply has not been filed yet:
+    // `submitted_at` stays null (the CHECK constraint
+    // `submitted_at_matches_status`, migration 003, requires exactly that
+    // pairing) until `POST /applications/:id/submit` moves it to Submitted
+    // for real. It is numbered then, too (TC-37, references.ts): until then
+    // it carries a temporary DRAFT-… label, so a draft never abandoned or
+    // withdrawn leaves a gap in the official series.
+    const referenceNumber = options.saveAsDraft ? draftReference() : await this.nextReference(tx, now);
     const inserted = await tx.query<{ id: string }>(
       `insert into applications
          (reference_number, applicant_id, business_id, permit_type, application_action,
@@ -875,16 +878,11 @@ export class SubmissionService {
       requiredDocuments: requirements };
   }
 
+  /** The next official number, from the one function every filing shares (migration 064). */
   private async nextReference(tx: SqlClient, now: Date): Promise<string> {
-    const year = now.getUTCFullYear();
-    const sequence = await tx.query<{ last_issued: number }>(
-      `insert into document_number_sequences (series, year, last_issued)
-       values ('APP', $1, 1)
-       on conflict (series, year)
-         do update set last_issued = document_number_sequences.last_issued + 1
-       returning last_issued`,
-      [year],
+    const issued = await tx.query<{ reference: string }>(
+      'select next_application_reference($1) as reference', [now],
     );
-    return `E-BPCO-${year}-${String(Number(sequence.rows[0]?.last_issued ?? 1)).padStart(6, '0')}`;
+    return issued.rows[0]?.reference ?? '';
   }
 }

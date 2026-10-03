@@ -89,6 +89,26 @@ describe('a request never becomes an account by itself', () => {
   });
 });
 
+describe('a request reaches whoever decides it (TC-13, 2026-10-03)', () => {
+  it('tells every Super Admin, and nobody else', async () => {
+    const paul = await superAdmin();
+    const [administrator] = await query<{ id: string }>(
+      `insert into accounts (kind, email, email_normalised, password_hash)
+       values ('staff','ramon@castilla.test','ramon@castilla.test','scrypt$1$1$1$a$b') returning id`);
+    await query('insert into account_roles (account_id, role) values ($1,$2)', [administrator!.id, 'administrator']);
+
+    await raise();
+
+    const notices = await query<{ account_id: string; type: string; body: string; deep_link: string }>(
+      'select account_id, type, body, deep_link from staff_notifications');
+    expect(notices).toEqual([{
+      account_id: paul, type: 'access-requested',
+      body: 'Ana Cruz asked for a staff account. Approve or decline it under Access Requests.',
+      deep_link: '/access-requests',
+    }]);
+  });
+});
+
 describe('the answer is the same whoever asks', () => {
   it('absorbs a second request for the same address without complaint', async () => {
     await raise();

@@ -20,6 +20,7 @@ import { NotesService } from '../application/notes.service';
 import { ProfilePhotoService } from '../../identity/application/profile-photo.service';
 import { StepGuard } from '../application/step-guard';
 import { stepRefused } from './staff-teams.controller';
+import { registrationDateField, registrationNumberField } from '../../businesses/registration-number';
 
 /**
  * The officer's surface.
@@ -123,8 +124,8 @@ const onBehalfShape = z.object({
     barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),
     province: z.string().min(1).max(120),
-    registrationNumber: z.string().min(1).max(60),
-    dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+    registrationNumber: registrationNumberField,
+    dateRegistered: registrationDateField,
   }).strict().optional(),
   businessId: z.string().uuid().optional(),
   permitType: z.string().min(1).max(80),

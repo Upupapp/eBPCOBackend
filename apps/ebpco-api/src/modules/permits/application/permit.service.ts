@@ -67,6 +67,16 @@ export class PermitService {
     officer: Caller;
     scope: string;
     conditions: readonly string[];
+    /**
+     * What the permit prints about itself (QA findings TC-04 and TC-18,
+     * 2026-10-03): until migration 064 there was nowhere to keep them, and
+     * every permit read "Not recorded by the office" on all three. The
+     * approving official defaults to the officer generating it -- the
+     * Building Official who approved it -- and is recorded by name.
+     */
+    expiresOn?: string | null;
+    approvingOfficial?: string | null;
+    approvingOffice?: string | null;
   }): Promise<GenerateResult> {
     const { applicationId, officer, scope, conditions } = options;
 
@@ -103,6 +113,21 @@ export class PermitService {
       }
 
       const issuedDate = this.clock();
+      const expiresOn = options.expiresOn?.trim() || null;
+      if (expiresOn !== null && expiresOn <= issuedDate.toISOString().slice(0, 10)) {
+        return {
+          ok: false, reason: 'invalid',
+          detail: 'The permit must be valid until a date after today, the day it is issued.',
+        };
+      }
+      let approvingOfficial = options.approvingOfficial?.trim() || null;
+      if (approvingOfficial === null) {
+        const self = await tx.query<{ name: string | null }>(
+          `select nullif(trim(full_name), '') as name from accounts where id = $1`, [officer.accountId],
+        );
+        approvingOfficial = self.rows[0]?.name ?? null;
+      }
+      const approvingOffice = options.approvingOffice?.trim() || null;
       const year = issuedDate.getUTCFullYear();
       const prefix = PERMIT_NUMBER_PREFIXES[row.permit_type] ?? FALLBACK_PREFIX;
 
@@ -127,10 +152,12 @@ export class PermitService {
       const permitNumber = `${prefix}-${year}-${String(next).padStart(6, '0')}`;
 
       await tx.query(
-        `insert into generated_permits (application_id, permit_number, issued_date, scope, conditions, generated_by)
-         values ($1,$2,$3,$4,$5,$6)`,
+        `insert into generated_permits (application_id, permit_number, issued_date, scope, conditions, generated_by,
+                                        expires_on, approving_official, approving_office)
+         values ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
         [applicationId, permitNumber, issuedDate, scope.trim(),
-         conditions.map((c) => c.trim()).filter((c) => c.length > 0), officer.accountId],
+         conditions.map((c) => c.trim()).filter((c) => c.length > 0), officer.accountId,
+         expiresOn, approvingOfficial, approvingOffice],
       );
 
       await this.audit.append({
@@ -139,7 +166,7 @@ export class PermitService {
         subjectId: applicationId,
         outcome: 'allowed',
         actorAccountId: officer.accountId,
-        afterState: { permitNumber, scope: scope.trim(), conditions },
+        afterState: { permitNumber, scope: scope.trim(), conditions, expiresOn, approvingOfficial, approvingOffice },
       }, tx);
 
       return { ok: true, permitNumber, issuedDate: issuedDate.toISOString() };
@@ -214,8 +241,17 @@ export class PermitService {
     officer: Caller;
     claimantName: string;
     method: ReleaseMethod;
+    /**
+     * The proof the claimant showed (QA finding TC-14, 2026-10-03): the ID
+     * presented, and for a representative the authorization they carried.
+     * A name alone does not say the permit went to the right person.
+     */
+    idPresented?: string | null;
+    authorization?: string | null;
   }): Promise<ReleaseResult> {
     const { applicationId, officer, claimantName, method } = options;
+    const idPresented = options.idPresented?.trim() || null;
+    const authorization = options.authorization?.trim() || null;
 
     if (claimantName.trim().length < 2) {
       return {
@@ -255,9 +291,10 @@ export class PermitService {
       await tx.query(
         `update permit_releases
             set status = 'Released', method = $1, claimant_name = $2,
-                releasing_officer = $3, released_at = $4
+                releasing_officer = $3, released_at = $4,
+                id_presented = $6, authorization_reference = $7
           where application_id = $5`,
-        [method, claimantName.trim(), officer.accountId, releasedAt, applicationId],
+        [method, claimantName.trim(), officer.accountId, releasedAt, applicationId, idPresented, authorization],
       );
 
       await this.audit.append({
@@ -266,7 +303,7 @@ export class PermitService {
         subjectId: applicationId,
         outcome: 'allowed',
         actorAccountId: officer.accountId,
-        afterState: { claimantName: claimantName.trim(), method },
+        afterState: { claimantName: claimantName.trim(), method, idPresented, authorization },
       }, tx);
 
       return { ok: true, releasedAt: releasedAt.toISOString() };

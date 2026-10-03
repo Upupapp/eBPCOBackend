@@ -9,6 +9,7 @@ import { Refusal } from '../domain/lifecycle-errors';
 import { loadTransitions } from '../domain/transition-repository';
 import { StaffNotificationService } from '../../notifications/application/staff-notification.service';
 import { evaluationStagesOf, holdsStage, nextStageOf } from '../domain/evaluation-stages';
+import { DRAFT_REFERENCE_PREFIX } from '../domain/references';
 
 /**
  * Moves an application, and records everything that follows, atomically.
@@ -337,12 +338,19 @@ export class LifecycleService {
       // "to <> 'Draft'"/"from = 'Draft'" so this is a no-op for every OTHER
       // transition, where it is already set and must stay the original
       // filing date, not move.
+      // A draft takes its official number as it is filed (TC-37,
+      // references.ts), in this same statement, so the number is issued only
+      // by a move that actually happens: a refused or stale move issues none.
       const updated = await tx.query(
         `update applications
             set lifecycle_status = $1,
                 updated_by = $2,
                 pledge_suspended_since = case when $3 then now() else null end,
-                submitted_at = case when submitted_at is null then $6 else submitted_at end
+                submitted_at = case when submitted_at is null then $6 else submitted_at end,
+                reference_number = case
+                  when $1 = 'Submitted' and reference_number like '${DRAFT_REFERENCE_PREFIX}%'
+                    then next_application_reference($6)
+                  else reference_number end
           where id = $4 and version = $5`,
         [to, caller.accountId, decision.outcome.pledgeSuspended, applicationId, snapshot.version, this.clock()],
       );

@@ -432,6 +432,7 @@ export class ApplicantQueryService {
   async permit(accountId: string, applicationId: string): Promise<{
     permitNumber: string; issuedDate: string; scope: string | null;
     conditions: readonly string[];
+    expiresOn: string | null; approvingOfficial: string | null; approvingOffice: string | null;
     release: {
       status: string; method: string | null; releasedAt: string | null;
       claimLocation: string | null; officeHours: string | null; bringWithYou: readonly string[];
@@ -441,10 +442,12 @@ export class ApplicantQueryService {
 
     const result = await this.db.query<{
       permit_number: string; issued_date: Date; scope: string | null; conditions: string[];
+      expires_on: string | null; approving_official: string | null; approving_office: string | null;
       release_status: string | null; release_method: string | null; released_at: Date | null;
       claim_location: string | null; office_hours: string | null; bring_with_you: string[] | null;
     }>(
       `select g.permit_number, g.issued_date, g.scope, g.conditions,
+              to_char(g.expires_on, 'YYYY-MM-DD') as expires_on, g.approving_official, g.approving_office,
               r.status as release_status, r.method as release_method, r.released_at,
               r.claim_location, r.office_hours, r.bring_with_you
          from generated_permits g
@@ -461,6 +464,11 @@ export class ApplicantQueryService {
       issuedDate: row.issued_date.toISOString(),
       scope: row.scope,
       conditions: row.conditions,
+      // What the permit prints about itself (TC-04, TC-18): null on a permit
+      // issued before migration 064, which recorded none of them.
+      expiresOn: row.expires_on,
+      approvingOfficial: row.approving_official,
+      approvingOffice: row.approving_office,
       // Whether it can be collected yet, and how. Null before an officer has
       // set it: "not ready" is a fact the applicant should read rather than
       // infer from an absent field.

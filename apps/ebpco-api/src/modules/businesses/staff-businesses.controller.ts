@@ -14,6 +14,7 @@ import { StaffBusinessRegistrationService } from './staff-business-registration.
 import { IN_PROGRESS_STATUSES } from './in-progress-statuses';
 import { CASTILLA_BARANGAYS } from './castilla-barangays';
 import { BUSINESS_CATEGORIES } from './business-categories';
+import { registrationDateField, registrationNumberField } from './registration-number';
 
 /**
  * The LGU's business directory, as an officer sees it.
@@ -152,6 +153,11 @@ const businessUpdateShape = z.object({
   barangay: z.enum(CASTILLA_BARANGAYS),
   city: z.string().min(1).max(120),
   province: z.string().min(1).max(120),
+  // The office may correct the registration facts at any time (TC-24): it
+  // is who an owner asks once an application has been filed. Recorded with
+  // the before and after, like any other correction to the record.
+  registrationNumber: registrationNumberField.optional(),
+  dateRegistered: registrationDateField.optional(),
 }).strict();
 
 /**
@@ -184,8 +190,8 @@ const registrationShape = z.object({
     barangay: z.enum(CASTILLA_BARANGAYS),
     city: z.string().min(1).max(120),
     province: z.string().min(1).max(120),
-    registrationNumber: z.string().min(1).max(60),
-    dateRegistered: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'must be YYYY-MM-DD'),
+    registrationNumber: registrationNumberField,
+    dateRegistered: registrationDateField,
   }).strict(),
 }).strict();
 
@@ -458,17 +464,40 @@ export class StaffBusinessesController {
     }
     const input = result.data;
 
-    const existing = await this.db.query<{ id: string }>('select id from businesses where id = $1', [businessId]);
-    if (existing.rows[0] === undefined) throw ProblemException.notFound('No such business.');
+    const existing = await this.db.query<{ id: string; registration_number: string; date_registered: string }>(
+      `select id, registration_number, to_char(date_registered, 'YYYY-MM-DD') as date_registered
+         from businesses where id = $1`, [businessId],
+    );
+    const before = existing.rows[0];
+    if (before === undefined) throw ProblemException.notFound('No such business.');
 
     const updated = await this.db.query<BusinessRow>(
       `update businesses
           set name = $2, category = $3, street = $4, barangay = $5, city = $6, province = $7,
+              registration_number = coalesce($8, registration_number),
+              date_registered = coalesce($9::date, date_registered),
               updated_at = now()
         where id = $1
         returning id`,
-      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province],
+      [businessId, input.name, input.category, input.street, input.barangay, input.city, input.province,
+       input.registrationNumber ?? null, input.dateRegistered ?? null],
     );
+    const numberChanged = input.registrationNumber !== undefined && input.registrationNumber !== before.registration_number;
+    const dateChanged = input.dateRegistered !== undefined && input.dateRegistered !== before.date_registered;
+    if (numberChanged || dateChanged) {
+      await this.audit.append({
+        action: 'business.registration-corrected',
+        subjectType: 'business',
+        subjectId: businessId,
+        outcome: 'allowed',
+        actorAccountId: callerOf(request).accountId,
+        beforeState: { registrationNumber: before.registration_number, dateRegistered: before.date_registered },
+        afterState: {
+          registrationNumber: input.registrationNumber ?? before.registration_number,
+          dateRegistered: input.dateRegistered ?? before.date_registered,
+        },
+      });
+    }
     const savedId = updated.rows[0]?.id;
     // The columns this endpoint needs to answer with (owner name/email, application
     // count) live only in SELECT's own join, not in a plain `update ... returning`.

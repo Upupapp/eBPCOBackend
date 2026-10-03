@@ -145,6 +145,20 @@ export class AccessRequestService {
         officePosition: input.officePosition.trim(),
       },
     });
+
+    // Told to whoever decides it (QA finding TC-13, 2026-10-03): only a Super
+    // Admin can approve or decline a request, and nothing told them one had
+    // arrived. The requester's name only -- the details are on the request.
+    await this.db.query(
+      `insert into staff_notifications (account_id, type, application_id, routed_to_role, title, body, deep_link)
+       select a.id, 'access-requested', null, 'super-admin', 'New account request',
+              $1 || ' asked for a staff account. Approve or decline it under Access Requests.',
+              '/access-requests'
+         from accounts a
+         join account_roles r on r.account_id = a.id
+        where r.role = 'super-admin' and a.kind = 'staff' and a.disabled_at is null`,
+      [input.fullName.trim()],
+    );
   }
 
   private async overLimit(normalised: string, sourceAddress: string): Promise<boolean> {

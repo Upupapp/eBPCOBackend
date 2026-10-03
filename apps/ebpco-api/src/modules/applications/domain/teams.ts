@@ -104,3 +104,20 @@ export function teamsOf(roles: readonly string[], stages: readonly string[]): re
   }
   return TEAMS.map((team) => team.key).filter((key) => teams.has(key));
 }
+
+/**
+ * The capacity someone acted in, as the System Logs and a timeline print it
+ * beside their name (QA finding TC-02, 2026-10-03): "Applicant", "Super
+ * Admin", or the positions of the teams an officer belongs to ("Cashier",
+ * "Initial Evaluator, Zoning Officer"). Null for no account (a system act) or
+ * a staff account with no team yet.
+ */
+export function positionOf(
+  kind: string | null, roles: readonly string[], stages: readonly string[],
+): string | null {
+  if (kind === null) return null;
+  if (kind === 'applicant') return 'Applicant';
+  if (roles.includes('super-admin')) return 'Super Admin';
+  const positions = teamsOf(roles, stages).map((key) => teamByKey(key)?.position).filter((p): p is string => !!p);
+  return positions.length > 0 ? positions.join(', ') : null;
+}

@@ -303,12 +303,13 @@ export class DataExportService {
       ),
       permits: await forApplications(
         `select application_id, permit_number, to_char(issued_date, 'YYYY-MM-DD') as issued_date,
-                scope, conditions
+                scope, conditions, to_char(expires_on, 'YYYY-MM-DD') as expires_on,
+                approving_official, approving_office
            from generated_permits where application_id = any($1)`,
       ),
       permitReleases: await forApplications(
-        `select application_id, status, method, claimant_name, released_at,
-                claim_location, office_hours, bring_with_you
+        `select application_id, status, method, claimant_name, id_presented, authorization_reference,
+                released_at, claim_location, office_hours, bring_with_you
            from permit_releases where application_id = any($1)`,
       ),
       // What happened, and when. Never the raw before/after state — see the

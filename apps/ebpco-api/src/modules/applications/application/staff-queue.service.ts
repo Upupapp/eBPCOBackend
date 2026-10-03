@@ -8,6 +8,7 @@ import { Caller } from '../domain/application';
 import { readableStatusesFor, visibleStatusesFor } from '../domain/visibility';
 import { FormFilter, formFilterFor, formFilterSql } from '../domain/form-access';
 import { EvaluationStage, isEvaluationStage } from '../domain/evaluation-stages';
+import { positionOf } from '../domain/teams';
 import {
   ASSIGNMENTS_COLUMN, Assignments, Responsibility, RosterEntry, responsibilityFor, rosterOf,
 } from './responsibility';
@@ -462,7 +463,7 @@ export class StaffQueueService {
     if (row === undefined) return null;
 
     const calendar = await this.calendars.load();
-    const [account, business, documents, evaluations, payments, oop, permit, release, instructions, timeline] =
+    const [account, business, documents, evaluations, payments, oop, permit, release, instructions, timeline, checklist] =
       await Promise.all([
         this.db.query<{
           email: string; mobile_number: string | null; email_verified_at: Date | null;
@@ -510,10 +511,15 @@ export class StaffQueueService {
         // evaluations module, and this view asking the same question a second
         // way is how the two answers start disagreeing.
         this.evaluations.of(applicationId),
+        // `verified_by_name`: the Official Receipt names its collecting
+        // officer (TC-09), and the cashier who verified it is that officer.
         this.db.query(
-          `select id, reference_number, amount_centavos, method, status, submitted_at,
-                  verified_at, official_receipt_number, proof_document_id
-             from payments where application_id = $1 order by submitted_at`, [applicationId]),
+          `select p.id, p.reference_number, p.amount_centavos, p.method, p.status, p.submitted_at,
+                  p.verified_at, p.official_receipt_number, p.proof_document_id,
+                  coalesce(nullif(trim(v.full_name), ''), v.email) as verified_by_name
+             from payments p
+             left join accounts v on v.id = p.verified_by
+            where p.application_id = $1 order by p.submitted_at`, [applicationId]),
         this.db.query(
           `select id, number, total_centavos, filing_centavos, processing_centavos,
                   architectural_centavos, structural_centavos, electrical_centavos,
@@ -523,10 +529,12 @@ export class StaffQueueService {
             where application_id = $1 and superseded_at is null
             order by assessed_at desc limit 1`, [applicationId]),
         this.db.query(
-          `select permit_number, to_char(issued_date, 'YYYY-MM-DD') as issued_date, scope, conditions
+          `select permit_number, to_char(issued_date, 'YYYY-MM-DD') as issued_date, scope, conditions,
+                  to_char(expires_on, 'YYYY-MM-DD') as expires_on, approving_official, approving_office
              from generated_permits where application_id = $1`, [applicationId]),
         this.db.query(
-          `select status, method, claimant_name, released_at, claim_location, office_hours, bring_with_you
+          `select status, method, claimant_name, id_presented, authorization_reference, released_at,
+                  claim_location, office_hours, bring_with_you
              from permit_releases where application_id = $1`, [applicationId]),
         this.db.query(
           `select ii.id, ii.subject, ii.remark, l.issued_at
@@ -547,13 +555,26 @@ export class StaffQueueService {
         // acting on their own application (a self-cancel, say) has none there,
         // so this falls through to their name on `applicants`, and only to
         // their email if even that is missing.
+        //
+        // `actor_kind`/`actor_roles`/`actor_stages` give the position beside
+        // the name (TC-02): an auditor asks who did it AND in what capacity.
         this.db.query(
           `select t.from_status, t.to_status, t.occurred_at, t.office, t.remarks,
-                  coalesce(acc.full_name, ap2.first_name || ' ' || ap2.last_name, acc.email) as actor_name
+                  coalesce(nullif(trim(acc.full_name), ''), ap2.first_name || ' ' || ap2.last_name, acc.email) as actor_name,
+                  acc.kind as actor_kind,
+                  array(select r.role from account_roles r where r.account_id = acc.id) as actor_roles,
+                  array(select s.stage from staff_evaluation_stages s where s.account_id = acc.id) as actor_stages
              from application_transitions t
              left join accounts acc on acc.id = t.actor_account_id
              left join applicants ap2 on ap2.account_id = acc.id
             where t.application_id = $1 order by t.occurred_at`, [applicationId]),
+        // The checklist this application is judged against, snapshotted at
+        // filing, with the stage that checks each document (TC-01). The
+        // portal used to guess the stage from the document's code and guessed
+        // wrong for the Building Permit's title and Unified Form, so the
+        // Initial Evaluator was never offered Accept on them.
+        this.db.query<{ required_documents: unknown }>(
+          'select required_documents from applications where id = $1', [applicationId]),
       ]);
 
     const one = (r: { rows: unknown[] }): Readonly<Record<string, unknown>> | null => {
@@ -600,7 +621,16 @@ export class StaffQueueService {
       permit: one(permit),
       release: one(release),
       openInstructions: many(instructions),
-      timeline: many(timeline),
+      timeline: (timeline.rows as Record<string, unknown>[]).map((entry) => {
+        const { actor_kind: kind, actor_roles: roles, actor_stages: stages, ...rest } = entry;
+        return {
+          ...camelKeys(rest),
+          actorPosition: positionOf(
+            kind as string | null, (roles as string[] | null) ?? [], (stages as string[] | null) ?? [],
+          ),
+        };
+      }),
+      checklist: checklistOf(checklist.rows[0]?.required_documents),
     };
   }
 
@@ -996,6 +1026,32 @@ export interface StaffApplicationDetail {
   readonly release: Readonly<Record<string, unknown>> | null;
   readonly openInstructions: ReadonlyArray<Record<string, unknown>>;
   readonly timeline: ReadonlyArray<Record<string, unknown>>;
+  /** The checklist snapshotted at filing, each document with the stage that checks it (TC-01). */
+  readonly checklist: ReadonlyArray<ChecklistEntry>;
+}
+
+export interface ChecklistEntry {
+  readonly code: string;
+  readonly label: string;
+  readonly required: boolean;
+  /** Null on a snapshot taken before stages existed (migration 060): the portal falls back to its own reading. */
+  readonly stage: string | null;
+}
+
+/** The snapshot as the portal reads it; anything malformed in it is skipped rather than guessed at. */
+export function checklistOf(snapshot: unknown): ChecklistEntry[] {
+  if (!Array.isArray(snapshot)) return [];
+  return snapshot.flatMap((entry): ChecklistEntry[] => {
+    if (typeof entry !== 'object' || entry === null) return [];
+    const record = entry as Record<string, unknown>;
+    if (typeof record['code'] !== 'string') return [];
+    return [{
+      code: record['code'],
+      label: typeof record['label'] === 'string' ? record['label'] : record['code'],
+      required: record['required'] === true,
+      stage: typeof record['stage'] === 'string' ? record['stage'] : null,
+    }];
+  });
 }
 
 // Re-exported where it used to live. The rule moved to the domain (see

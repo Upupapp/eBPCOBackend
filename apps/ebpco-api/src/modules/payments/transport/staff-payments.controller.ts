@@ -9,6 +9,7 @@ import { RequireScopes } from '../../identity/transport/guards/public.decorator'
 import type { AuthenticatedRequest } from '../../identity/transport/guards/authentication.guard';
 import { Caller } from '../../applications/domain/application';
 import { PaymentService } from '../application/payment.service';
+import { officialReceiptProblem } from '../domain/official-receipt';
 import { LifecycleService } from '../../applications/application/lifecycle.service';
 import { StructuredLogger } from '../../../common/logging/logger';
 
@@ -22,8 +23,15 @@ import { StructuredLogger } from '../../../common/logging/logger';
  * around it.
  */
 
+// Checked here, so the cashier hears what is wrong with the number they typed
+// (TC-03, TC-08) instead of a generic refusal.
+const receiptNumber = z.string().superRefine((value, ctx) => {
+  const problem = officialReceiptProblem(value);
+  if (problem !== null) ctx.addIssue({ code: z.ZodIssueCode.custom, message: problem });
+});
+
 const verifyShape = z.object({
-  officialReceiptNumber: z.string().min(1).max(60),
+  officialReceiptNumber: receiptNumber,
 });
 
 const undoShape = z.object({
@@ -31,7 +39,7 @@ const undoShape = z.object({
 }).strict();
 
 const receiptShape = z.object({
-  officialReceiptNumber: z.string().min(1).max(60),
+  officialReceiptNumber: receiptNumber,
   reason: z.string().min(10, 'state why the number is being corrected').max(2000),
 }).strict();
 
@@ -104,17 +112,20 @@ export class StaffPaymentsController {
       amount_centavos: string; method: string; status: string; submitted_at: Date;
       applicant_name: string; official_receipt_number: string | null; proof_document_id: string | null;
       business_name: string | null; applicant_has_photo: boolean;
+      verified_at: Date | null; verified_by_name: string | null;
     }>(
       `select p.id, p.application_id, p.reference_number, a.reference_number as application_reference,
               p.amount_centavos, p.method, p.status, p.submitted_at,
               ap.first_name || ' ' || ap.last_name as applicant_name, p.official_receipt_number,
               p.proof_document_id, b.name as business_name,
-              (acc.photo_key is not null) as applicant_has_photo
+              (acc.photo_key is not null) as applicant_has_photo,
+              p.verified_at, coalesce(nullif(trim(v.full_name), ''), v.email) as verified_by_name
          from payments p
          join applications a on a.id = p.application_id
          join applicants ap on ap.id = a.applicant_id
          join accounts acc on acc.id = ap.account_id
          left join businesses b on b.id = a.business_id
+         left join accounts v on v.id = p.verified_by
         where $1::text is null or p.status = $1
         order by p.submitted_at
         limit $2`,
@@ -140,6 +151,9 @@ export class StaffPaymentsController {
         submittedAt: new Date(row.submitted_at).toISOString(),
         officialReceiptNumber: row.official_receipt_number,
         proofDocumentId: row.proof_document_id,
+        // The collecting officer the Official Receipt names (TC-09).
+        verifiedAt: row.verified_at === null ? null : new Date(row.verified_at).toISOString(),
+        verifiedByName: row.verified_by_name,
       })),
     };
   }

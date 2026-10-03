@@ -22,6 +22,9 @@ export const STAFF_NOTICE_TYPES: readonly StaffNoticeType[] = [
   // Migration 059: an applicant sent a new or replacement document on a
   // filed application -- the Records Officer's worklist, not a progress report.
   { type: 'document-resubmitted', requiresAct: true },
+  // Migration 064: someone asked for a staff account -- the Super Admin's to
+  // approve or decline (AccessRequestService.raise).
+  { type: 'access-requested', requiresAct: true },
 ];
 
 export interface StaffNotice {
